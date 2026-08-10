@@ -713,20 +713,26 @@ export function App() {
     }
     if (!selectedProject) return { unavailableReason: "请先选择项目" };
 
-    const directCodexProject = hostContext?.projects?.some(
+    const directCodexProject = hostContext?.projects?.find(
       (project) => project.id === selectedProject.id,
     );
-    const workspacePath = deviceWorkspacePaths[selectedProject.id]
+    const workspacePath = (
+      directCodexProject?.projectKind === "remote"
+        ? directCodexProject.workspacePath
+        : undefined
+    )
+      ?? deviceWorkspacePaths[selectedProject.id]
       ?? selectedProject.workspacePath
+      ?? directCodexProject?.workspacePath
       ?? (
         directCodexProject && hostContext?.projectId === selectedProject.id
           ? hostContext.workspacePath
           : undefined
       );
     const codexProjectId = directCodexProject
-      ? selectedProject.id
+      ? directCodexProject.id
       : hostContext?.projects?.find(
-        (project) => deviceWorkspacePaths[project.id] === workspacePath,
+        (project) => (deviceWorkspacePaths[project.id] ?? project.workspacePath) === workspacePath,
       )?.id;
 
     if (!workspacePath || !codexProjectId) {
@@ -735,7 +741,14 @@ export function App() {
     if (!manageTaskboardSkillPath) {
       return { unavailableReason: "任务面板还没有读取到 Skill 路径" };
     }
-    return { workspacePath, codexProjectId, unavailableReason: null };
+    const codexProject = hostContext?.projects?.find((project) => project.id === codexProjectId);
+    return {
+      workspacePath,
+      codexProjectId,
+      codexProjectKind: codexProject?.projectKind ?? "local",
+      codexHostId: codexProject?.hostId ?? "local",
+      unavailableReason: null,
+    };
   }, [
     deviceWorkspacePaths,
     embedded,
@@ -897,6 +910,8 @@ export function App() {
         operation,
         taskboardProjectId: selectedProjectId,
         codexProjectId: automationProjectContext.codexProjectId,
+        codexProjectKind: automationProjectContext.codexProjectKind,
+        codexHostId: automationProjectContext.codexHostId,
         projectName: selectedProject.name,
         workspacePath: automationProjectContext.workspacePath,
         skillPath: manageTaskboardSkillPath,
@@ -2086,6 +2101,8 @@ export function App() {
         codexProjectId: codexProject?.id ?? (
           selectedProject?.id === GLOBAL_PROJECT_ID ? hostContext?.projectId : selectedProject?.id
         ),
+        codexProjectKind: codexProject?.projectKind ?? "local",
+        codexHostId: codexProject?.hostId ?? "local",
         projectName: selectedProject?.name,
         workspacePath,
         workspaceLabel: worktreePath ? workspaceName(worktreePath) : undefined,

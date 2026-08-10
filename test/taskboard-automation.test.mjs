@@ -22,6 +22,8 @@ const baseRequest = {
   operation: "ensure-active",
   taskboardProjectId: "ppt-skill",
   codexProjectId: "codex-project-123",
+  codexProjectKind: "local",
+  codexHostId: "local",
   projectName: "PPT Skill",
   workspacePath: "/Users/example/Documents/ppt-skill",
   skillPath: "/Users/example/taskboard/skills/manage-taskboard/SKILL.md",
@@ -30,6 +32,15 @@ const baseRequest = {
   intervalMinutes: 5,
   model: "gpt-5.5",
   reasoningEffort: "high",
+};
+
+const remoteRequest = {
+  ...baseRequest,
+  codexProjectId: "remote-project-123",
+  codexProjectKind: "remote",
+  codexHostId: "remote-ssh-discovered:merlin-agent",
+  projectName: "Playground",
+  workspacePath: "/mlx_devbox/users/example/playground",
 };
 
 test("the automation model catalog matches Codex and normalizes unsupported efforts", () => {
@@ -158,6 +169,15 @@ test("the automation host request accepts only whitelisted project automation op
     parseTaskboardAutomationHostRequest({ ...baseRequest, workspacePath: "relative/path" }),
     null,
   );
+  assert.deepEqual(parseTaskboardAutomationHostRequest(remoteRequest), remoteRequest);
+  assert.equal(
+    parseTaskboardAutomationHostRequest({ ...remoteRequest, codexHostId: "local" }),
+    null,
+  );
+  assert.equal(
+    parseTaskboardAutomationHostRequest({ ...baseRequest, codexHostId: "remote-host" }),
+    null,
+  );
 });
 
 test("the stable name and generated prompt are project-scoped and encode the claim protocol", () => {
@@ -187,6 +207,18 @@ test("the stable name and generated prompt are project-scoped and encode the cla
   assert.match(prompt, /已绑定.*branch.*worktree/);
 });
 
+test("the remote automation prompt keeps taskctl local and delegates work to the SSH project", () => {
+  const prompt = buildTaskboardAutomationPrompt(remoteRequest);
+  assert.match(prompt, /仅在本机作为任务面板控制器运行/);
+  assert.match(prompt, /remote-ssh-discovered:merlin-agent/);
+  assert.match(prompt, /\/mlx_devbox\/users\/example\/playground/);
+  assert.match(prompt, /Codex create_thread/);
+  assert.match(prompt, /projectId:"remote-project-123"/);
+  assert.match(prompt, /Codex wait_threads/);
+  assert.match(prompt, /远程会话不运行 taskctl/);
+  assert.match(prompt, /移动到 in_review/);
+});
+
 test("the generated cron spec uses the selected whitelisted local Codex options", () => {
   assert.deepEqual(buildTaskboardAutomationSpec(baseRequest), {
     kind: "cron",
@@ -210,6 +242,17 @@ test("the generated cron spec uses the selected whitelisted local Codex options"
     model: "gpt-5.4",
     reasoningEffort: "medium",
     rrule: "RRULE:FREQ=MINUTELY;INTERVAL=30",
+  });
+  assert.deepEqual(buildTaskboardAutomationSpec(remoteRequest), {
+    kind: "cron",
+    name: "Taskboard 自动认领 · ppt-skill",
+    prompt: buildTaskboardAutomationPrompt(remoteRequest),
+    projectId: null,
+    executionEnvironment: "local",
+    localEnvironmentConfigPath: null,
+    model: "gpt-5.5",
+    reasoningEffort: "high",
+    rrule: "RRULE:FREQ=MINUTELY;INTERVAL=5",
   });
 });
 

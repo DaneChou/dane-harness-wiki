@@ -401,8 +401,50 @@
     return typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "";
   }
 
+  function readCodexProjectMetadata() {
+    const bootstrap = window.electronBridge?.getInitialSidebarBootstrap?.();
+    const entries = new Map(
+      (Array.isArray(bootstrap?.globalStateEntries) ? bootstrap.globalStateEntries : [])
+        .map((entry) => [entry?.key, entry?.value]),
+    );
+    const metadata = new Map();
+    const localProjects = entries.get("local-projects");
+    if (localProjects && typeof localProjects === "object" && !Array.isArray(localProjects)) {
+      Object.values(localProjects).forEach((project) => {
+        const id = typeof project?.id === "string" ? project.id.trim() : "";
+        const workspacePath = Array.isArray(project?.rootPaths)
+          ? project.rootPaths.find((root) => typeof root === "string" && root.trim())?.trim()
+          : "";
+        if (!id) return;
+        metadata.set(id, {
+          projectKind: "local",
+          hostId: "local",
+          ...(workspacePath ? { workspacePath } : {}),
+        });
+      });
+    }
+    const remoteProjects = entries.get("remote-projects");
+    if (Array.isArray(remoteProjects)) {
+      remoteProjects.forEach((project) => {
+        const id = typeof project?.id === "string" ? project.id.trim() : "";
+        const workspacePath = typeof project?.remotePath === "string"
+          ? project.remotePath.trim()
+          : "";
+        const hostId = typeof project?.hostId === "string" ? project.hostId.trim() : "";
+        if (!id || !workspacePath || !hostId) return;
+        metadata.set(id, {
+          projectKind: "remote",
+          workspacePath,
+          hostId,
+        });
+      });
+    }
+    return metadata;
+  }
+
   function readCodexProjects() {
     const seen = new Set();
+    const metadata = readCodexProjectMetadata();
     return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
       .flatMap((row) => {
         const id = row.getAttribute("data-app-action-sidebar-project-id")?.trim();
@@ -413,7 +455,7 @@
         ).trim();
         if (!id || !name || seen.has(id)) return [];
         seen.add(id);
-        return [{ id, name }];
+        return [{ id, name, ...metadata.get(id) }];
       });
   }
 
@@ -629,7 +671,9 @@
       lastNativeThreadId = currentThreadId;
     }
     const threadId = currentThreadId || lastNativeThreadId || normalizeThreadId(threadIdFromLocation());
-    const workspacePath = workspaceFromLocation();
+    const workspacePath = workspaceFromLocation()
+      || projects.find((project) => project.id === projectId)?.workspacePath
+      || "";
     const threadRunning = nativeThreadRunning(threadId);
     const payload = {
       theme: currentTheme(),
@@ -759,6 +803,7 @@
     const workspacePath = typeof payload?.workspacePath === "string"
       ? payload.workspacePath.trim()
       : "";
+    const codexProjectKind = payload?.codexProjectKind === "remote" ? "remote" : "local";
     if (
       !taskId
       || !identifier
@@ -772,7 +817,7 @@
         throw new Error("当前 Codex 版本没有提供原生对话导航能力");
       }
 
-      if (workspacePath) {
+      if (workspacePath && codexProjectKind !== "remote") {
         await bridge.sendMessageFromView({
           type: "electron-set-active-workspace-root",
           root: workspacePath,
@@ -792,6 +837,9 @@
           await new Promise((resolve) => window.setTimeout(resolve, 120));
         }
         const selectProject = row?.querySelector("[data-app-action-sidebar-select-project]");
+        if (codexProjectKind === "remote" && !selectProject) {
+          throw new Error("Codex 中找不到对应的 SSH 远程项目");
+        }
         selectProject?.click?.();
         if (selectProject) await new Promise((resolve) => window.setTimeout(resolve, 120));
       }
@@ -823,6 +871,8 @@
       operation: payload.operation,
       taskboardProjectId: payload.taskboardProjectId,
       codexProjectId: payload.codexProjectId,
+      codexProjectKind: payload.codexProjectKind,
+      codexHostId: payload.codexHostId,
       projectName: payload.projectName,
       workspacePath: payload.workspacePath,
       skillPath: payload.skillPath,
