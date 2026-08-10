@@ -77,6 +77,7 @@
   let hostContextTimer = null;
   let lastFocusedElement = null;
   let hostContextSnapshot = null;
+  let codexProjectMetadata = new Map();
   let mutedNativeSelections = new Map();
   let openGeneration = 0;
   let pendingThreadCreation = null;
@@ -401,8 +402,8 @@
     return typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "";
   }
 
-  function readCodexProjectMetadata() {
-    const bootstrap = window.electronBridge?.getInitialSidebarBootstrap?.();
+  async function readCodexProjectMetadata() {
+    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
     const entries = new Map(
       (Array.isArray(bootstrap?.globalStateEntries) ? bootstrap.globalStateEntries : [])
         .map((entry) => [entry?.key, entry?.value]),
@@ -442,9 +443,8 @@
     return metadata;
   }
 
-  function readCodexProjects() {
+  function readCodexProjects(metadata = codexProjectMetadata) {
     const seen = new Set();
-    const metadata = readCodexProjectMetadata();
     return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
       .flatMap((row) => {
         const id = row.getAttribute("data-app-action-sidebar-project-id")?.trim();
@@ -480,9 +480,13 @@
 
   async function captureHostContext() {
     const todoProgress = nativeTodoProgress();
-    const selectedProjectId = await selectedNativeProjectId();
+    const [selectedProjectId, projectMetadata] = await Promise.all([
+      selectedNativeProjectId(),
+      readCodexProjectMetadata(),
+    ]);
+    codexProjectMetadata = projectMetadata;
     if (selectedProjectId) lastNativeProjectId = selectedProjectId;
-    let projects = readCodexProjects();
+    let projects = readCodexProjects(projectMetadata);
     let section = findProjectsSection();
     const sectionDeadline = Date.now() + 1_200;
     while (!section && Date.now() < sectionDeadline) {
@@ -500,7 +504,7 @@
       const deadline = Date.now() + 1_200;
       do {
         await new Promise((resolve) => window.setTimeout(resolve, 40));
-        projects = readCodexProjects();
+        projects = readCodexProjects(projectMetadata);
       } while ((projects.length === 0 || !activeThreadRow()) && Date.now() < deadline);
     }
     const context = readHostContext(projects, lastNativeProjectId);
