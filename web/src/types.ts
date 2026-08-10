@@ -297,7 +297,13 @@ export interface HostContext {
   threadId?: string;
   theme?: "light" | "dark";
   projectId?: string;
-  projects?: Array<{ id: string; name: string }>;
+  projects?: Array<{
+    id: string;
+    name: string;
+    projectKind?: "local" | "remote";
+    workspacePath?: string;
+    hostId?: string;
+  }>;
   titlebarLeftInset?: number;
   sidebarCollapsed?: boolean;
   threadRunning?: boolean;

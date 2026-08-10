@@ -10,6 +10,8 @@ const HOST_REQUEST_FIELDS = new Set([
   "operation",
   "taskboardProjectId",
   "codexProjectId",
+  "codexProjectKind",
+  "codexHostId",
   "projectName",
   "workspacePath",
   "skillPath",
@@ -29,6 +31,12 @@ export function parseTaskboardAutomationHostRequest(value) {
   if (!AUTOMATION_OPERATIONS.has(value.operation)) return null;
   if (!validProjectId(value.taskboardProjectId)) return null;
   if (!validText(value.codexProjectId, 256) || !validText(value.projectName, 200)) return null;
+  const codexProjectKind = value.codexProjectKind ?? "local";
+  const codexHostId = value.codexHostId ?? "local";
+  if (codexProjectKind !== "local" && codexProjectKind !== "remote") return null;
+  if (!validText(codexHostId, 256)) return null;
+  if (codexProjectKind === "local" && codexHostId !== "local") return null;
+  if (codexProjectKind === "remote" && codexHostId === "local") return null;
   if (!validAbsolutePath(value.workspacePath) || !validAbsolutePath(value.skillPath)) return null;
   if (!INTERVAL_MINUTES.has(value.intervalMinutes)) return null;
   if (!isSupportedModelEffort(value.model, value.reasoningEffort)) return null;
@@ -42,6 +50,8 @@ export function parseTaskboardAutomationHostRequest(value) {
     operation: value.operation,
     taskboardProjectId: value.taskboardProjectId,
     codexProjectId: value.codexProjectId,
+    codexProjectKind,
+    codexHostId,
     projectName: value.projectName,
     workspacePath: value.workspacePath,
     skillPath: value.skillPath,
@@ -61,15 +71,28 @@ export function buildTaskboardAutomationName(request) {
 export function buildTaskboardAutomationPrompt(request) {
   const automationName = buildTaskboardAutomationName(request);
   const taskctlCommand = buildTaskctlCommand(request);
+  const remoteProject = request.codexProjectKind === "remote";
+  const executionInstructions = remoteProject
+    ? [
+        `本自动化仅在本机作为任务面板控制器运行；实际开发必须派发到 Codex SSH 远程项目 ${JSON.stringify(request.codexProjectId)}，主机 ID ${JSON.stringify(request.codexHostId)}，远程目录 ${JSON.stringify(request.workspacePath)}。不要在当前本地自动化会话修改项目文件。`,
+        "每次仅处理一个 todo：选定后用 issue get 读取最新议题内容，并用 comment list 读取全部评论，确认是否包含已完成后被打回的返工要求。",
+        "认领时使用最新 version 将议题移动到 in_progress；若议题已有 threadId，认领写入时继续传入该 threadId 以保留绑定。若发生版本冲突或最新状态已变化，立即跳过，避免多个 Agent 抢同一任务。",
+        `若议题已有 threadId，使用 Codex send_message_to_thread 并显式传入 hostId=${JSON.stringify(request.codexHostId)}，要求原远程会话继续处理该议题；若该主机上找不到此 threadId，则按无绑定处理。若没有可用 threadId，使用 Codex create_thread 创建远程任务，target 必须是 {type:"project",projectId:${JSON.stringify(request.codexProjectId)},environment:{type:"local"}}。发送给远程会话的指令必须包含议题编号、标题、完整描述、全部评论和开发上下文，并说明远程会话不运行 taskctl，只需完成实现、验证并返回改动、结果和剩余风险。`,
+        "新建远程任务成功后，重新 issue get，并使用最新 version 再次移动到 in_progress，同时把 --thread-id 设为 create_thread 返回的 threadId，以保存远程绑定。",
+        `使用 Codex wait_threads 等待该远程会话完成或需要处理；目标必须同时传入远程 threadId 和 hostId=${JSON.stringify(request.codexHostId)}。远程会话完成后，由当前本地控制器使用 comment add 写入其改动、验证结果、执行结果和剩余风险，再用最新 version 和远程 threadId 将议题移动到 in_review。若远程会话明确需要用户输入或无法继续，则记录原因并移动到 blocked；不要把未完成工作标记为 in_review。`,
+      ]
+    : [
+        "每次仅处理一个 todo：选定后用 issue get 读取最新议题内容，并用 comment list 读取全部评论，确认是否包含已完成后被打回的返工要求。",
+        "认领时使用最新 version 将议题移动到 in_progress；若发生版本冲突或最新状态已变化，立即跳过，避免多个 Agent 抢同一任务。",
+        "若 issue get 返回 threadId，认领时将 --thread-id 设为该值以保留绑定，再使用 Codex send_message_to_thread 向原会话发送继续处理此议题的指令；当前自动化会话不要重复处理。若没有 threadId，则在当前自动化会话处理。",
+        "若议题已绑定 branch 或 worktree，必须在该议题绑定的开发上下文执行，避免并行 Agent 修改同一工作目录。",
+        "执行完成并验证后，先用 comment add 记录关键改动、验证结果、执行结果和剩余风险，再使用最新 version 将议题移动到 in_review；不要直接标记为 done。",
+      ];
   return [
     `[$manage-taskboard](${request.skillPath}) e-taskboard 每 ${request.intervalMinutes} 分钟检查任务面板中的「${request.projectName}」项目（项目 ID：${request.taskboardProjectId}，项目目录：${request.workspacePath}）。`,
     `本轮所有 taskctl 操作都使用完整命令前缀 ${taskctlCommand}，不要使用 PATH 中的 taskctl。`,
     `开始时先运行 ${taskctlCommand} issue list --project ${request.taskboardProjectId} --status todo --json。若没有 todo，使用 Codex automation_update 将名为「${automationName}」的当前自动化设为 PAUSED，保留其他字段，然后结束；不要创建或打开新的任务会话。`,
-    "每次仅处理一个 todo：选定后用 issue get 读取最新议题内容，并用 comment list 读取全部评论，确认是否包含已完成后被打回的返工要求。",
-    "认领时使用最新 version 将议题移动到 in_progress；若发生版本冲突或最新状态已变化，立即跳过，避免多个 Agent 抢同一任务。",
-    "若 issue get 返回 threadId，认领时将 --thread-id 设为该值以保留绑定，再使用 Codex send_message_to_thread 向原会话发送继续处理此议题的指令；当前自动化会话不要重复处理。若没有 threadId，则在当前自动化会话处理。",
-    "若议题已绑定 branch 或 worktree，必须在该议题绑定的开发上下文执行，避免并行 Agent 修改同一工作目录。",
-    "执行完成并验证后，先用 comment add 记录关键改动、验证结果、执行结果和剩余风险，再使用最新 version 将议题移动到 in_review；不要直接标记为 done。",
+    ...executionInstructions,
     `本次处理或交接后，再次运行 ${taskctlCommand} issue list --project ${request.taskboardProjectId} --status todo --json。若没有 todo，使用 Codex automation_update 将名为「${automationName}」的当前自动化设为 PAUSED，保留其他字段，避免后续创建空会话。`,
   ].join("\n");
 }
@@ -92,7 +115,7 @@ export function buildTaskboardAutomationSpec(request) {
     kind: "cron",
     name: buildTaskboardAutomationName(request),
     prompt: buildTaskboardAutomationPrompt(request),
-    projectId: request.codexProjectId,
+    projectId: request.codexProjectKind === "remote" ? null : request.codexProjectId,
     executionEnvironment: "local",
     localEnvironmentConfigPath: null,
     model: request.model,
@@ -189,7 +212,7 @@ function automationMatchesSpec(item, spec, status) {
   return item?.status === status
     && Object.entries(spec).every(([field, value]) => (
       field === "projectId"
-        ? (item.projectId ?? item.target?.projectId) === value
+        ? (item.projectId ?? item.target?.projectId ?? null) === value
         : item[field] === value
     ));
 }

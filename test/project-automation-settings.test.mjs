@@ -38,6 +38,8 @@ test("automation requests use the exact Codex host message contract", () => {
   assert.match(appSource, /operation: "ensure-active" \| "pause" \| "list"/);
   assert.match(appSource, /taskboardProjectId: selectedProjectId/);
   assert.match(appSource, /codexProjectId/);
+  assert.match(appSource, /codexProjectKind/);
+  assert.match(appSource, /codexHostId/);
   assert.match(appSource, /projectName: selectedProject\.name/);
   assert.match(appSource, /workspacePath/);
   assert.match(appSource, /skillPath: manageTaskboardSkillPath/);
@@ -51,8 +53,9 @@ test("automation requests use the exact Codex host message contract", () => {
 });
 
 test("project mapping is based on exact ids and workspace paths, never project names", () => {
-  assert.match(appSource, /hostContext\?\.projects\?\.some\([\s\S]*?project\.id === selectedProject\.id/);
-  assert.match(appSource, /deviceWorkspacePaths\[project\.id\] === workspacePath/);
+  assert.match(appSource, /hostContext\?\.projects\?\.find\([\s\S]*?project\.id === selectedProject\.id/);
+  assert.match(appSource, /directCodexProject\?\.workspacePath/);
+  assert.match(appSource, /\(deviceWorkspacePaths\[project\.id\] \?\? project\.workspacePath\) === workspacePath/);
   assert.match(appSource, /请先在 Codex 中添加并映射该项目目录/);
   assert.doesNotMatch(appSource, /project\.name === selectedProject\.name/);
 });

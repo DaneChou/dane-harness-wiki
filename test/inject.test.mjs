@@ -186,6 +186,8 @@ test("the iframe automation contract is forwarded through the fixed host binding
   assert.match(source, /operation: payload\.operation/);
   assert.match(source, /taskboardProjectId: payload\.taskboardProjectId/);
   assert.match(source, /codexProjectId: payload\.codexProjectId/);
+  assert.match(source, /codexProjectKind: payload\.codexProjectKind/);
+  assert.match(source, /codexHostId: payload\.codexHostId/);
   assert.match(source, /workspacePath: payload\.workspacePath/);
   assert.match(source, /skillPath: payload\.skillPath/);
   assert.match(source, /model: payload\.model/);
@@ -211,6 +213,8 @@ test("complete App automation payloads cross the injected forwarder into the cur
     requestId: "request-1",
     taskboardProjectId: "local",
     codexProjectId: "codex-project",
+    codexProjectKind: "local",
+    codexHostId: "local",
     projectName: "Local",
     workspacePath: "/tmp/local-project",
     skillPath: "/tmp/manage-taskboard/SKILL.md",
@@ -253,6 +257,8 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.match(source, /data-codex-composer/);
   assert.match(source, /type: "electron-set-active-workspace-root"/);
   assert.match(source, /root: workspacePath/);
+  assert.match(source, /workspacePath && codexProjectKind !== "remote"/);
+  assert.match(source, /codexProjectKind === "remote" && !selectProject/);
   assert.doesNotMatch(source, /prefillPrompt: prompt/);
   assert.match(source, /requestHostTaskComposerPrefill\(\{/);
   assert.match(source, /requestHost\("prefill-task-composer"/);
@@ -305,6 +311,11 @@ test("the standalone web page opens unlinked issues as prefilled empty Codex tas
 });
 
 test("host context captures all Codex projects even when the sidebar section is collapsed", () => {
+  assert.match(source, /function readCodexProjectMetadata\(\)/);
+  assert.match(source, /entries\.get\("local-projects"\)/);
+  assert.match(source, /entries\.get\("remote-projects"\)/);
+  assert.match(source, /projectKind: "remote"/);
+  assert.match(source, /workspacePath,[\s\S]*?hostId/);
   assert.match(source, /function readCodexProjects\(\)/);
   assert.match(source, /\[data-app-action-sidebar-project-row\]/);
   assert.match(source, /data-app-action-sidebar-project-id/);
@@ -319,6 +330,52 @@ test("host context captures all Codex projects even when the sidebar section is 
   assert.match(source, /const threadId = currentThreadId \|\| lastNativeThreadId \|\| normalizeThreadId\(threadIdFromLocation\(\)\)/);
   assert.match(source, /replace\(\/\^\(\?:local\|cloud\):\/i, ""\)/);
   assert.match(source, /function findTasksSection\(\)/);
+});
+
+test("Codex bootstrap metadata resolves local roots and SSH remote roots", () => {
+  const functionSource = source.slice(
+    source.indexOf("function readCodexProjectMetadata"),
+    source.indexOf("\n\n  function readCodexProjects"),
+  );
+  const readCodexProjectMetadata = vm.runInNewContext(`(${functionSource})`, {
+    window: {
+      electronBridge: {
+        getInitialSidebarBootstrap: () => ({
+          globalStateEntries: [
+            {
+              key: "local-projects",
+              value: {
+                local: { id: "local", rootPaths: ["/Users/example/project"] },
+              },
+            },
+            {
+              key: "remote-projects",
+              value: [{
+                id: "remote-project",
+                hostId: "remote-ssh-discovered:example",
+                remotePath: "/srv/example/project",
+              }],
+            },
+          ],
+        }),
+      },
+    },
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify([...readCodexProjectMetadata().entries()])),
+    [
+      ["local", {
+        projectKind: "local",
+        hostId: "local",
+        workspacePath: "/Users/example/project",
+      }],
+      ["remote-project", {
+        projectKind: "remote",
+        workspacePath: "/srv/example/project",
+        hostId: "remote-ssh-discovered:example",
+      }],
+    ],
+  );
 });
 
 test("cleanup removes observers, listeners, timers and owned DOM", () => {
