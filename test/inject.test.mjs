@@ -311,12 +311,13 @@ test("the standalone web page opens unlinked issues as prefilled empty Codex tas
 });
 
 test("host context captures all Codex projects even when the sidebar section is collapsed", () => {
-  assert.match(source, /function readCodexProjectMetadata\(\)/);
+  assert.match(source, /async function readCodexProjectMetadata\(\)/);
+  assert.match(source, /await window\.electronBridge\?\.getInitialSidebarBootstrap\?\.\(\)/);
   assert.match(source, /entries\.get\("local-projects"\)/);
   assert.match(source, /entries\.get\("remote-projects"\)/);
   assert.match(source, /projectKind: "remote"/);
   assert.match(source, /workspacePath,[\s\S]*?hostId/);
-  assert.match(source, /function readCodexProjects\(\)/);
+  assert.match(source, /function readCodexProjects\(metadata = codexProjectMetadata\)/);
   assert.match(source, /\[data-app-action-sidebar-project-row\]/);
   assert.match(source, /data-app-action-sidebar-project-id/);
   assert.match(source, /function findProjectsSection\(\)/);
@@ -332,15 +333,15 @@ test("host context captures all Codex projects even when the sidebar section is 
   assert.match(source, /function findTasksSection\(\)/);
 });
 
-test("Codex bootstrap metadata resolves local roots and SSH remote roots", () => {
+test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchronously", async () => {
   const functionSource = source.slice(
-    source.indexOf("function readCodexProjectMetadata"),
+    source.indexOf("async function readCodexProjectMetadata"),
     source.indexOf("\n\n  function readCodexProjects"),
   );
   const readCodexProjectMetadata = vm.runInNewContext(`(${functionSource})`, {
     window: {
       electronBridge: {
-        getInitialSidebarBootstrap: () => ({
+        getInitialSidebarBootstrap: async () => ({
           globalStateEntries: [
             {
               key: "local-projects",
@@ -362,7 +363,7 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots", () =>
     },
   });
   assert.deepEqual(
-    JSON.parse(JSON.stringify([...readCodexProjectMetadata().entries()])),
+    JSON.parse(JSON.stringify([...(await readCodexProjectMetadata()).entries()])),
     [
       ["local", {
         projectKind: "local",
