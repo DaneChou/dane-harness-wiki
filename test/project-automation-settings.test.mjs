@@ -60,6 +60,22 @@ test("project mapping is based on exact ids and workspace paths, never project n
   assert.doesNotMatch(appSource, /project\.name === selectedProject\.name/);
 });
 
+test("global tasks resolve thread metadata from the active Codex project", () => {
+  const openTaskSource = appSource.slice(
+    appSource.indexOf("function openTaskInThread"),
+    appSource.indexOf("function changeProject"),
+  );
+  assert.match(
+    openTaskSource,
+    /const codexProjectId = selectedProject\?\.id === GLOBAL_PROJECT_ID\s*\? hostContext\?\.projectId\s*: selectedProject\?\.id/,
+  );
+  assert.match(
+    openTaskSource,
+    /hostContext\?\.projects\?\.find\(\(project\) => project\.id === codexProjectId\)/,
+  );
+  assert.match(openTaskSource, /codexProjectId,\s*codexProjectKind: codexProject\?\.projectKind/);
+});
+
 test("the project navigation automation menu owns the icon, fields, and accessible popover", () => {
   assert.match(menuSource, /status === "ACTIVE" \? "automationPause" : "automationPlay"/);
   assert.doesNotMatch(menuSource, /statusStarted|statusTodo/);

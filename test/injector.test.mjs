@@ -82,6 +82,15 @@ test("passive automation policy keeps idle pauses and only resumes quota pauses"
   assert.match(source, /record\.quota \? \{ quota: record\.quota \} : \{\}/);
 });
 
+test("persisted automation policies retain remote project identity", () => {
+  const storedPolicySource = source.slice(
+    source.indexOf("function storedAutomationPolicy"),
+    source.indexOf("function restoredAutomationPolicy"),
+  );
+  assert.match(storedPolicySource, /codexProjectKind: request\.codexProjectKind/);
+  assert.match(storedPolicySource, /codexHostId: request\.codexHostId/);
+});
+
 test("the package injection command remains resident for tab-triggered recovery", () => {
   assert.match(packageJson.scripts["codex:inject"], /--watch/);
   assert.match(packageJson.scripts["codex:daemon"], /--daemon --open/);

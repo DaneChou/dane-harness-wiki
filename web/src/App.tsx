@@ -2089,7 +2089,10 @@ export function App() {
       return;
     }
     if (openingThreadTaskId) return;
-    const codexProject = hostContext?.projects?.find((project) => project.id === selectedProject?.id);
+    const codexProjectId = selectedProject?.id === GLOBAL_PROJECT_ID
+      ? hostContext?.projectId
+      : selectedProject?.id;
+    const codexProject = hostContext?.projects?.find((project) => project.id === codexProjectId);
     setOpeningThreadTaskId(task.id);
     setActionError(null);
     postEmbeddedHostMessage({
@@ -2098,9 +2101,7 @@ export function App() {
         taskId: task.id,
         identifier: task.identifier,
         instruction,
-        codexProjectId: codexProject?.id ?? (
-          selectedProject?.id === GLOBAL_PROJECT_ID ? hostContext?.projectId : selectedProject?.id
-        ),
+        codexProjectId,
         codexProjectKind: codexProject?.projectKind ?? "local",
         codexHostId: codexProject?.hostId ?? "local",
         projectName: selectedProject?.name,

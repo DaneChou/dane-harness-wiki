@@ -835,6 +835,8 @@ function storedAutomationPolicy(request) {
   return {
     taskboardProjectId: request.taskboardProjectId,
     codexProjectId: request.codexProjectId,
+    codexProjectKind: request.codexProjectKind,
+    codexHostId: request.codexHostId,
     projectName: request.projectName,
     workspacePath: request.workspacePath,
     skillPath: request.skillPath,
