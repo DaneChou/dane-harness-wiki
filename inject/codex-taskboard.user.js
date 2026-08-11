@@ -772,6 +772,16 @@
       .find((row) => normalizedLabel(row.getAttribute("data-app-action-sidebar-project-label")) === expected) || null;
   }
 
+  function projectRowForTask(payload, snapshotProjectId) {
+    const requestedProjectId = typeof payload.codexProjectId === "string"
+      ? payload.codexProjectId.trim()
+      : "";
+    return projectRowById(requestedProjectId)
+      || projectRowByLabel(payload.workspaceLabel)
+      || projectRowById(snapshotProjectId)
+      || projectRowByLabel(payload.projectName);
+  }
+
   async function ensureProjectRows() {
     let section = findProjectsSection();
     const deadline = Date.now() + 1_200;
@@ -829,13 +839,7 @@
       } else {
         await ensureProjectRows();
         const snapshotProjectId = hostContextSnapshot?.projectId || "";
-        const requestedProjectId = typeof payload.codexProjectId === "string"
-          ? payload.codexProjectId.trim()
-          : "";
-        const row = projectRowByLabel(payload.workspaceLabel)
-          || projectRowById(requestedProjectId)
-          || projectRowById(snapshotProjectId)
-          || projectRowByLabel(payload.projectName);
+        const row = projectRowForTask(payload, snapshotProjectId);
         if (row?.getAttribute("data-app-action-sidebar-project-collapsed") === "true") {
           row.click?.();
           await new Promise((resolve) => window.setTimeout(resolve, 120));
