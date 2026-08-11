@@ -379,6 +379,37 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
   );
 });
 
+test("SSH task project selection prefers its stable ID and falls back to the worktree label", () => {
+  const functionSource = source.slice(
+    source.indexOf("function projectRowForTask"),
+    source.indexOf("\n\n  async function ensureProjectRows"),
+  );
+  const sameNameProject = { id: "unrelated-project" };
+  const requestedProject = { id: "remote-project" };
+  const rowsById = new Map([["remote-project", requestedProject]]);
+  const projectRowForTask = vm.runInNewContext(`(${functionSource})`, {
+    projectRowById: (projectId) => rowsById.get(projectId) || null,
+    projectRowByLabel: (label) => label === "shared-worktree" ? sameNameProject : null,
+  });
+
+  assert.equal(
+    projectRowForTask({
+      codexProjectId: "remote-project",
+      workspaceLabel: "shared-worktree",
+    }, ""),
+    requestedProject,
+  );
+
+  rowsById.clear();
+  assert.equal(
+    projectRowForTask({
+      codexProjectId: "missing-project",
+      workspaceLabel: "shared-worktree",
+    }, ""),
+    sameNameProject,
+  );
+});
+
 test("cleanup removes observers, listeners, timers and owned DOM", () => {
   assert.match(source, /observer\?\.disconnect\(\)/);
   assert.match(source, /window\.removeEventListener\("message", onFrameMessage\)/);
