@@ -224,6 +224,10 @@ test("the remote automation prompt keeps taskctl local and delegates work to the
   assert.match(prompt, /projectId:"remote-project-123"/);
   assert.match(prompt, /Codex wait_threads/);
   assert.match(prompt, /远程会话不运行 taskctl/);
+  assert.match(prompt, /若首次 issue get 返回 threadId，认领写入时将 --thread-id 设为该值/);
+  assert.match(prompt, /所有认领、评论和状态写入只由当前本地控制器完成/);
+  assert.match(prompt, /认领成功后，若首次 issue get 返回可用 threadId，使用 Codex send_message_to_thread/);
+  assert.doesNotMatch(prompt, /要求原远程会话按本协议判断和认领/);
   assert.match(prompt, /移动到 in_review/);
 });
 

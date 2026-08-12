@@ -76,11 +76,10 @@ export function buildTaskboardAutomationPrompt(request) {
     ? [
         `本自动化仅在本机作为任务面板控制器运行；实际开发必须派发到 Codex SSH 远程项目 ${JSON.stringify(request.codexProjectId)}，主机 ID ${JSON.stringify(request.codexHostId)}，远程目录 ${JSON.stringify(request.workspacePath)}。不要在当前本地自动化会话修改项目文件。`,
         "每次仅处理一个 todo：选定后先用 issue get 读取最新议题内容，并用 comment list 读取全部评论。根据描述和最新评论判断是否允许开始；若其中写明等待、暂不执行或当前不应开始，立即跳过并报告，不改状态。评论也包含已完成后被打回的返工要求。",
-        `若首次 issue get 返回 threadId，议题已绑定原会话：不要在当前自动化会话认领；使用 Codex send_message_to_thread 并显式传入 hostId=${JSON.stringify(request.codexHostId)}，要求原远程会话按本协议判断和认领，然后结束当前自动化会话。若该主机上找不到此 threadId，则按无绑定处理。`,
-        "确认允许开始且没有可用 threadId 后，必须在读取代码、下载附件、分析或实施前，使用刚读取的 version 将仍可认领的 todo 移到 in_progress；写入成功前不得继续。不得认领已被其他会话绑定或其他 Agent 领取的议题。",
-        "若因 version 陈旧发生版本冲突，重新运行 issue get 和 comment list；仅当仍为可认领 todo、未绑定其他会话、未归档且描述和最新评论未变化时，用最新 version 重试一次。若已被认领、状态或要求已变、已归档、服务或永久 API 错误，或重试仍失败，立即跳过该议题、退出并报告；不得抢占或循环重试。",
-        `认领成功后，使用 Codex create_thread 创建远程任务，target 必须是 {type:"project",projectId:${JSON.stringify(request.codexProjectId)},environment:{type:"local"}}。发送给远程会话的指令必须包含议题编号、标题、完整描述、全部评论和开发上下文，并说明远程会话不运行 taskctl，只需完成实现、验证并返回改动、结果和剩余风险。`,
-        "新建远程任务成功后，重新 issue get，并使用最新 version 再次移动到 in_progress，同时把 --thread-id 设为 create_thread 返回的 threadId，以保存远程绑定。",
+        "确认允许开始后，必须在读取代码、下载附件、分析或实施前，由当前本地控制器使用刚读取的 version 将仍可认领的 todo 移到 in_progress；若首次 issue get 返回 threadId，认领写入时将 --thread-id 设为该值以保留远程绑定。写入成功前不得继续。所有认领、评论和状态写入只由当前本地控制器完成，不得要求远程会话运行 taskctl。",
+        "若因 version 陈旧发生版本冲突，重新运行 issue get 和 comment list；仅当仍为可认领 todo、未被其他 threadId 或 Agent 领取、原有远程绑定未变化、未归档且描述和最新评论未变化时，用最新 version 重试一次。若已被认领、绑定、状态或要求已变、已归档、服务或永久 API 错误，或重试仍失败，立即跳过该议题、退出并报告；不得抢占或循环重试。",
+        `认领成功后，若首次 issue get 返回可用 threadId，使用 Codex send_message_to_thread 并显式传入 hostId=${JSON.stringify(request.codexHostId)}，要求原远程会话仅继续实现和验证；若该主机上找不到此 threadId，则按无可用绑定处理。没有可用远程 threadId 时，使用 Codex create_thread 创建远程任务，target 必须是 {type:"project",projectId:${JSON.stringify(request.codexProjectId)},environment:{type:"local"}}。发送给远程会话的指令必须包含议题编号、标题、完整描述、全部评论和开发上下文，并说明远程会话不运行 taskctl，只需完成实现、验证并返回改动、结果和剩余风险。`,
+        "仅在新建远程任务成功后，重新 issue get，并使用最新 version 再次移动到 in_progress，同时把 --thread-id 设为 create_thread 返回的 threadId，以替换或保存远程绑定。",
         `使用 Codex wait_threads 等待该远程会话完成或需要处理；目标必须同时传入远程 threadId 和 hostId=${JSON.stringify(request.codexHostId)}。远程会话完成后，由当前本地控制器使用 comment add 写入其改动、验证结果、执行结果和剩余风险，再用最新 version 和远程 threadId 将议题移动到 in_review。若远程会话明确需要用户输入或无法继续，则记录原因并移动到 blocked；不要把未完成工作标记为 in_review。`,
       ]
     : [
