@@ -1,8 +1,4 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import { defaultUrlTransform } from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import { taskboardStorage } from "../storage";
 import {
   ApiError,
@@ -15,7 +11,6 @@ import {
   listTaskActivities,
   markdownIncludesAttachment,
   resolveTaskboardUrl,
-  resolvePersistedAttachmentUrl,
   uploadAttachment,
   uploadCommentAttachment,
   updateComment,
@@ -77,6 +72,7 @@ import { TaskPropertyPicker } from "./TaskPropertyPicker";
 import { buildIssueUrl } from "../issueRoute";
 import copyIdIcon from "../assets/figma-taskboard/copy-id.svg";
 import copyLinkIcon from "../assets/figma-taskboard/copy-link.svg";
+import { MarkdownDocument } from "./MarkdownDocument";
 
 type TaskDetailError = string | readonly [string, string];
 
@@ -295,19 +291,7 @@ function ActivityChangeIcon({ field, before, after }: {
 }
 
 function DescriptionDocument({ value }: { value: string }) {
-  return (
-    <div className="issue-description-document">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
-        components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
-        }}
-      >
-        {value}
-      </ReactMarkdown>
-    </div>
-  );
+  return <MarkdownDocument value={value} />;
 }
 
 function ConversationLink({

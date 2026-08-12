@@ -2725,6 +2725,48 @@ kbd {
   font-size: inherit;
 }
 
+.issue-description-document .markdown-mermaid {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  min-height: 80px;
+  margin: 12px 0;
+  padding: 12px;
+  overflow: auto;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+}
+
+.issue-description-document .markdown-mermaid svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+.issue-description-document .markdown-mermaid-fallback {
+  width: 100%;
+  color: var(--text-secondary);
+}
+
+.issue-description-document .markdown-mermaid-fallback p {
+  margin: 0 0 8px;
+  color: var(--danger);
+}
+
+.issue-description-document .markdown-mermaid-fallback summary {
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.issue-description-document .markdown-mermaid-fallback pre {
+  margin-bottom: 0;
+}
+
+:root[data-theme="dark"] .issue-description-document .markdown-mermaid {
+  background: var(--surface-active);
+}
+
 .issue-description-document table {
   width: 100%;
   margin: 12px 0;
