@@ -170,6 +170,14 @@ test("the automation host request accepts only whitelisted project automation op
     null,
   );
   assert.deepEqual(parseTaskboardAutomationHostRequest(remoteRequest), remoteRequest);
+  const windowsRemoteRequest = {
+    ...remoteRequest,
+    workspacePath: String.raw`C:\Users\admin\Documents\dashi-taskboard`,
+  };
+  assert.deepEqual(
+    parseTaskboardAutomationHostRequest(windowsRemoteRequest),
+    windowsRemoteRequest,
+  );
   assert.equal(
     parseTaskboardAutomationHostRequest({ ...remoteRequest, codexHostId: "local" }),
     null,
