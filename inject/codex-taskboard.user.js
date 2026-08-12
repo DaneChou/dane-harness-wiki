@@ -446,8 +446,8 @@
     const metadata = new Map();
     const localProjects = entries.get("local-projects");
     if (localProjects && typeof localProjects === "object" && !Array.isArray(localProjects)) {
-      Object.values(localProjects).forEach((project) => {
-        const id = typeof project?.id === "string" ? project.id.trim() : "";
+      Object.entries(localProjects).forEach(([projectId, project]) => {
+        const id = projectId.trim();
         const workspacePath = Array.isArray(project?.rootPaths)
           ? project.rootPaths.find((root) => typeof root === "string" && root.trim())?.trim()
           : "";

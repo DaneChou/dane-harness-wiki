@@ -346,7 +346,7 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
             {
               key: "local-projects",
               value: {
-                local: { id: "local", rootPaths: ["/Users/example/project"] },
+                local: { rootPaths: ["/Users/example/project"] },
               },
             },
             {
