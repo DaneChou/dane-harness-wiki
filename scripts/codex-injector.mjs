@@ -2,7 +2,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -33,6 +33,9 @@ const defaultCodexDebuggingPort = 9229;
 const independentCodexProfilePath = process.env.CODEX_TASKBOARD_CODEX_PROFILE
   ? path.resolve(process.env.CODEX_TASKBOARD_CODEX_PROFILE)
   : "/private/tmp/codex-taskboard-independent-profile-v2";
+const sourceCodexProfilePath = process.env.CODEX_TASKBOARD_CODEX_SOURCE_PROFILE
+  ? path.resolve(process.env.CODEX_TASKBOARD_CODEX_SOURCE_PROFILE)
+  : null;
 const injectionPath = path.join(projectRoot, "inject", "codex-taskboard.user.js");
 const taskboardDataDirectory = process.env.CODEX_TASKBOARD_DATA_DIR
   ? path.resolve(process.env.CODEX_TASKBOARD_DATA_DIR)
@@ -233,6 +236,52 @@ async function removeTaskboardRuntime() {
     }
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function importCodexBrowserProfile() {
+  if (!sourceCodexProfilePath || sourceCodexProfilePath === independentCodexProfilePath) return;
+  const markerPath = path.join(
+    independentCodexProfilePath,
+    ".codex-taskboard-browser-profile-imported-v1",
+  );
+  try {
+    await stat(markerPath);
+    return;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+
+  const databasePaths = [
+    "Default/Partitions/codex-browser-app/Cookies",
+    "Default/Partitions/codex-browser-app/Login Data",
+    "Default/Partitions/codex-browser-app/Login Data For Account",
+  ];
+  const sources = [];
+  for (const relativePath of databasePaths) {
+    const sourcePath = path.join(sourceCodexProfilePath, relativePath);
+    try {
+      await stat(sourcePath);
+      sources.push({ relativePath, sourcePath });
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  if (sources.length === 0) return;
+
+  const { DatabaseSync, backup } = await import("node:sqlite");
+  for (const { relativePath, sourcePath } of sources) {
+    const destinationPath = path.join(independentCodexProfilePath, relativePath);
+    await mkdir(path.dirname(destinationPath), { recursive: true });
+    const sourceDatabase = new DatabaseSync(sourcePath, { readOnly: true });
+    try {
+      await backup(sourceDatabase, destinationPath);
+    } finally {
+      sourceDatabase.close();
+    }
+  }
+  if (sources.length === databasePaths.length) {
+    await writeFile(markerPath, "1\n");
   }
 }
 
@@ -1522,6 +1571,43 @@ async function main() {
   let codexProcess = null;
   let cdpRuntime = null;
   const injectedTargets = new Map();
+  let openRequestGeneration = options.open ? 1 : 0;
+  let openedRequestGeneration = 0;
+  const hasOpenPending = () => openedRequestGeneration < openRequestGeneration;
+  const queueTaskboardOpen = () => {
+    openRequestGeneration += 1;
+    console.log(JSON.stringify({ openTaskboardSignalQueued: true }));
+  };
+  const requestTaskboardOpen = async () => {
+    const generation = openRequestGeneration;
+    if (generation <= openedRequestGeneration) return true;
+    const connection = injectedTargets.values().next().value;
+    if (!connection) return false;
+    try {
+      const evaluation = await connection.send("Runtime.evaluate", {
+        expression: `(() => {
+          const taskboard = window.__codexTaskboardInjection__;
+          if (typeof taskboard?.open !== "function") return false;
+          taskboard.open();
+          return true;
+        })()`,
+        returnByValue: true,
+      });
+      if (evaluation.result.value !== true) {
+        throw new Error("Taskboard injection is not ready");
+      }
+      await connection.send("Page.bringToFront");
+      openedRequestGeneration = Math.max(openedRequestGeneration, generation);
+      return true;
+    } catch (error) {
+      console.error(`Waiting to open Taskboard: ${error.message}`);
+      return false;
+    }
+  };
+  if (options.watch) {
+    process.on("SIGUSR2", queueTaskboardOpen);
+    console.log(JSON.stringify({ openTaskboardSignalReady: true }));
+  }
   let stopping = false;
   let wakeStop;
   const stopRequested = new Promise((resolve) => {
@@ -1600,6 +1686,7 @@ async function main() {
 
     await supervisor.ensure({ force: true });
     await publishTaskboardRuntime();
+    if (options.launch) await importCodexBrowserProfile();
 
     if (options.cdpPipe) {
       const launched = await launchCodexWithPipe(options.appPath);
@@ -1615,12 +1702,14 @@ async function main() {
 
     const { source, sourceHash } = await currentInjectionSource();
     let firstResults = [];
+    const firstOpenGeneration = openRequestGeneration;
+    const shouldOpenFirstTarget = firstOpenGeneration > openedRequestGeneration;
     try {
       firstResults = await injectAll(
         cdpRuntime,
         source,
         sourceHash,
-        options.open,
+        shouldOpenFirstTarget,
         options.screenshot,
         injectedTargets,
         options.watch,
@@ -1633,9 +1722,14 @@ async function main() {
       console.error(`Waiting for Codex renderer: ${error.message}`);
     }
     if (firstResults.length > 0) {
+      if (shouldOpenFirstTarget) {
+        openedRequestGeneration = Math.max(openedRequestGeneration, firstOpenGeneration);
+      }
       console.log(JSON.stringify({ injected: firstResults }, null, 2));
     }
-    let openPending = options.open && firstResults.length === 0;
+    if (hasOpenPending() && injectedTargets.size > 0) {
+      await requestTaskboardOpen();
+    }
     let idleAfterNormalExit = false;
 
     if (!options.watch) {
@@ -1663,13 +1757,24 @@ async function main() {
           await connection.hostBridge?.publishHeartbeat();
         } catch (_) {}
       }
-      if (idleAfterNormalExit) continue;
+      if (idleAfterNormalExit) {
+        if (!hasOpenPending()) continue;
+        try {
+          const launched = await launchCodexWithPipe(options.appPath);
+          codexProcess = launched.child;
+          cdpRuntime = pipeCdpRuntime(launched.browser);
+          idleAfterNormalExit = false;
+        } catch (restartError) {
+          console.error(`Waiting to restart Codex: ${restartError.message}`);
+          continue;
+        }
+      }
       try {
         const results = await injectAll(
           cdpRuntime,
           source,
           sourceHash,
-          openPending,
+          false,
           null,
           injectedTargets,
           true,
@@ -1678,8 +1783,10 @@ async function main() {
           options.startupToken,
         );
         if (results.length > 0) {
-          openPending = false;
           console.log(JSON.stringify({ injected: results }, null, 2));
+        }
+        if (hasOpenPending() && injectedTargets.size > 0) {
+          await requestTaskboardOpen();
         }
       } catch (error) {
         if (stopping) break;
@@ -1721,9 +1828,11 @@ async function main() {
           });
           injectedTargets.clear();
           cdpRuntime?.close();
+          cdpRuntime = null;
           const exitCode = codexProcess.exitCode;
           codexProcess = null;
           if (exitCode === 0) {
+            idleAfterNormalExit = true;
             console.error(
               "Waiting for Codex after normal exit; open Codex Taskboard again to restart it.",
             );
@@ -1740,7 +1849,7 @@ async function main() {
               await waitUntilReachable(cdpVersionUrl, 30_000);
               cdpRuntime = tcpCdpRuntime(options.port);
             }
-            openPending = options.open;
+            if (options.open) openRequestGeneration += 1;
           } catch (restartError) {
             console.error(`Waiting to restart Codex: ${restartError.message}`);
           }
@@ -1753,6 +1862,7 @@ async function main() {
     if (options.watch) {
       process.removeListener("SIGINT", requestStop);
       process.removeListener("SIGTERM", requestStop);
+      process.removeListener("SIGUSR2", queueTaskboardOpen);
       await cleanup();
     }
   }
