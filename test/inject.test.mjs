@@ -195,6 +195,7 @@ test("the iframe automation contract is forwarded through the fixed host binding
   assert.match(source, /type: "taskboard:automation-response"/);
   assert.match(source, /requestId,\s*ok: true,\s*item: response\.item/);
   assert.match(source, /items: response\.items/);
+  assert.match(source, /policy: response\.policy/);
   assert.match(source, /requestId,\s*ok: false,\s*error:/);
   assert.match(source, /type: HOST_REQUEST_MESSAGE/);
   assert.match(source, /capability: HOST_CAPABILITY/);

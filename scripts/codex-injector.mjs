@@ -1205,7 +1205,13 @@ async function updateAndApplyQuotaPolicy(request, rpc) {
   quotaPolicyRecords.set(request.taskboardProjectId, record);
   try {
     await persistQuotaPolicies();
-    return await enqueueQuotaPolicyMutation(record, rpc, { explicit: true });
+    const result = await enqueueQuotaPolicyMutation(record, rpc, { explicit: true });
+    const current = quotaPolicyRecords.get(request.taskboardProjectId);
+    return {
+      ...result,
+      policy: storedAutomationPolicy(current.request),
+      ...(current.quota ? { quota: current.quota } : {}),
+    };
   } catch (error) {
     if (quotaPolicyRecords.get(request.taskboardProjectId)?.version === record.version) {
       if (previous) quotaPolicyRecords.set(request.taskboardProjectId, previous);
@@ -1216,10 +1222,27 @@ async function updateAndApplyQuotaPolicy(request, rpc) {
   }
 }
 
-async function reconcileStoredAutomationPolicy(projectId, rpc) {
+async function reconcileStoredAutomationPolicy(request, rpc) {
   await ensureQuotaPoliciesLoaded();
+  const projectId = request.taskboardProjectId;
   const record = quotaPolicyRecords.get(projectId);
   if (!record) return null;
+  if (
+    record.request.codexProjectId !== request.codexProjectId
+    || record.request.codexProjectKind !== request.codexProjectKind
+    || record.request.codexHostId !== request.codexHostId
+    || record.request.workspacePath !== request.workspacePath
+  ) {
+    return updateAndApplyQuotaPolicy({
+      ...request,
+      automationId: record.request.automationId,
+      enabledByUser: record.request.enabledByUser,
+      quotaAware: record.request.quotaAware,
+      intervalMinutes: record.request.intervalMinutes,
+      model: record.request.model,
+      reasoningEffort: record.request.reasoningEffort,
+    }, rpc);
+  }
   const result = await enqueueQuotaPolicyMutation(record, rpc);
   const current = quotaPolicyRecords.get(projectId);
   return {
@@ -1359,7 +1382,7 @@ function installTaskboardHostBinding(cdp, supervisor, startupToken) {
           );
           if (request.operation === "list") {
             const stored = await reconcileStoredAutomationPolicy(
-              request.taskboardProjectId,
+              request,
               rpc,
             );
             return stored ?? reconcileTaskboardAutomation(request, rpc);

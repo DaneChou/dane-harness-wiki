@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import vm from "node:vm";
 
 const source = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
 const runtimeSource = await readFile(
@@ -89,6 +90,75 @@ test("persisted automation policies retain remote project identity", () => {
   );
   assert.match(storedPolicySource, /codexProjectKind: request\.codexProjectKind/);
   assert.match(storedPolicySource, /codexHostId: request\.codexHostId/);
+});
+
+test("automation list rebuilds a stored policy on the incoming project identity", async () => {
+  const reconcileSource = source.slice(
+    source.indexOf("async function reconcileStoredAutomationPolicy"),
+    source.indexOf("async function enqueueCurrentQuotaPolicy"),
+  );
+  const storedRequest = {
+    taskboardProjectId: "taskboard-project",
+    codexProjectId: "old-project",
+    codexProjectKind: "local",
+    codexHostId: "local",
+    projectName: "Old project",
+    workspacePath: "/old/project",
+    skillPath: "/old/skill/SKILL.md",
+    automationId: "automation-1",
+    enabledByUser: true,
+    quotaAware: true,
+    intervalMinutes: 15,
+    model: "gpt-5.5",
+    reasoningEffort: "high",
+  };
+  const incomingRequest = {
+    ...storedRequest,
+    codexProjectId: "remote-project",
+    codexProjectKind: "remote",
+    codexHostId: "remote-host",
+    projectName: "Remote project",
+    workspacePath: "/remote/project",
+    skillPath: "/new/skill/SKILL.md",
+    enabledByUser: false,
+    quotaAware: false,
+    intervalMinutes: 5,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "ultra",
+  };
+  let appliedRequest;
+  const reconcileStoredAutomationPolicy = vm.runInNewContext(`(${reconcileSource})`, {
+    ensureQuotaPoliciesLoaded: async () => {},
+    quotaPolicyRecords: new Map([[
+      storedRequest.taskboardProjectId,
+      { request: storedRequest },
+    ]]),
+    updateAndApplyQuotaPolicy: async (request) => {
+      appliedRequest = request;
+      return { policy: request };
+    },
+    enqueueQuotaPolicyMutation: () => {
+      throw new Error("stored target must not continue");
+    },
+    storedAutomationPolicy: (request) => request,
+  });
+
+  const result = await reconcileStoredAutomationPolicy(incomingRequest, () => {});
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(appliedRequest)),
+    {
+      ...incomingRequest,
+      automationId: "automation-1",
+      enabledByUser: true,
+      quotaAware: true,
+      intervalMinutes: 15,
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+    },
+  );
+  assert.equal(result.policy, appliedRequest);
+  assert.match(source, /reconcileStoredAutomationPolicy\(\s*request,\s*rpc/);
+  assert.match(source, /policy: storedAutomationPolicy\(current\.request\)/);
 });
 
 test("the package injection command remains resident for tab-triggered recovery", () => {

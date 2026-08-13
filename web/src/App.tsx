@@ -208,6 +208,9 @@ interface AutomationQuotaStatus {
 interface ProjectAutomationRecord {
   automationId?: string;
   codexProjectId: string;
+  codexProjectKind: "local" | "remote";
+  codexHostId: string;
+  workspacePath: string;
   status: ProjectAutomationStatus;
   enabledByUser: boolean;
   quotaAware: boolean;
@@ -256,6 +259,10 @@ interface AutomationHostResponse {
   quota?: AutomationQuotaStatus;
   policy?: {
     automationId?: string;
+    codexProjectId: string;
+    codexProjectKind: "local" | "remote";
+    codexHostId: string;
+    workspacePath: string;
     enabledByUser: boolean;
     quotaAware: boolean;
     intervalMinutes: AutomationIntervalMinutes;
@@ -380,6 +387,9 @@ function readProjectAutomations(): ProjectAutomations {
       if (
         (candidate.automationId !== undefined && typeof candidate.automationId !== "string")
         || typeof candidate.codexProjectId !== "string"
+        || (candidate.codexProjectKind !== "local" && candidate.codexProjectKind !== "remote")
+        || typeof candidate.codexHostId !== "string"
+        || typeof candidate.workspacePath !== "string"
         || (candidate.status !== "ACTIVE" && candidate.status !== "PAUSED")
         || !isAutomationIntervalMinutes(candidate.intervalMinutes ?? 5)
         || !isAutomationModel(model)
@@ -393,6 +403,9 @@ function readProjectAutomations(): ProjectAutomations {
       result[projectId] = {
         automationId: candidate.automationId,
         codexProjectId: candidate.codexProjectId,
+        codexProjectKind: candidate.codexProjectKind,
+        codexHostId: candidate.codexHostId,
+        workspacePath: candidate.workspacePath,
         status: candidate.status,
         enabledByUser,
         quotaAware,
@@ -428,6 +441,10 @@ function isAutomationHostPolicy(
   return Boolean(
     value
     && (value.automationId === undefined || typeof value.automationId === "string")
+    && typeof value.codexProjectId === "string"
+    && (value.codexProjectKind === "local" || value.codexProjectKind === "remote")
+    && typeof value.codexHostId === "string"
+    && typeof value.workspacePath === "string"
     && typeof value.enabledByUser === "boolean"
     && typeof value.quotaAware === "boolean"
     && isAutomationIntervalMinutes(value.intervalMinutes)
@@ -977,6 +994,9 @@ export function App() {
         record
         && current[projectId]?.automationId === record.automationId
         && current[projectId]?.codexProjectId === record.codexProjectId
+        && current[projectId]?.codexProjectKind === record.codexProjectKind
+        && current[projectId]?.codexHostId === record.codexHostId
+        && current[projectId]?.workspacePath === record.workspacePath
         && current[projectId]?.status === record.status
         && current[projectId]?.enabledByUser === record.enabledByUser
         && current[projectId]?.quotaAware === record.quotaAware
@@ -1058,16 +1078,26 @@ export function App() {
           previousRecord?.automationId,
         );
         const item = isAutomationHostItem(response.item) ? response.item : undefined;
+        const policy = isAutomationHostPolicy(response.policy) ? response.policy : null;
+        if (!policy) {
+          throw new Error(textRef.current(
+            "Codex 没有返回实际生效的自动化策略",
+            "Codex did not return the effective automation policy.",
+          ));
+        }
         writeProjectAutomation(queuedSave.projectId, {
-          automationId: item?.id,
-          codexProjectId: queuedSave.context.codexProjectId,
+          automationId: item?.id ?? policy.automationId,
+          codexProjectId: policy.codexProjectId,
+          codexProjectKind: policy.codexProjectKind,
+          codexHostId: policy.codexHostId,
+          workspacePath: policy.workspacePath,
           status: item?.status ?? "PAUSED",
-          enabledByUser: queuedSave.options.enabledByUser,
-          quotaAware: queuedSave.options.quotaAware,
+          enabledByUser: policy.enabledByUser,
+          quotaAware: policy.quotaAware,
           ...(response.quota ? { quota: response.quota } : {}),
-          intervalMinutes: queuedSave.options.intervalMinutes,
-          model: queuedSave.options.model,
-          reasoningEffort: queuedSave.options.reasoningEffort,
+          intervalMinutes: policy.intervalMinutes,
+          model: policy.model,
+          reasoningEffort: policy.reasoningEffort,
         });
       } catch (error) {
         writeProjectAutomation(queuedSave.projectId, previousRecord);
@@ -1108,6 +1138,7 @@ export function App() {
         ? response.items.filter(isAutomationHostItem)
         : [];
       const policy = isAutomationHostPolicy(response.policy) ? response.policy : null;
+      const effectiveProjectIdentity = policy ?? automationRequestContext;
       if (!stored) {
         if (!policy) return;
         const item = (isAutomationHostItem(response.item) ? response.item : undefined)
@@ -1115,7 +1146,10 @@ export function App() {
           ?? (items.length === 1 ? items[0] : undefined);
         writeProjectAutomation(projectId, {
           automationId: item?.id ?? policy.automationId,
-          codexProjectId: automationRequestContext.codexProjectId,
+          codexProjectId: policy.codexProjectId,
+          codexProjectKind: policy.codexProjectKind,
+          codexHostId: policy.codexHostId,
+          workspacePath: policy.workspacePath,
           status: item?.status ?? "PAUSED",
           enabledByUser: policy.enabledByUser,
           quotaAware: policy.quotaAware,
@@ -1134,19 +1168,29 @@ export function App() {
           writeProjectAutomation(projectId, {
             ...stored,
             automationId: undefined,
+            codexProjectId: effectiveProjectIdentity.codexProjectId,
+            codexProjectKind: effectiveProjectIdentity.codexProjectKind,
+            codexHostId: effectiveProjectIdentity.codexHostId,
+            workspacePath: effectiveProjectIdentity.workspacePath,
             status: "PAUSED",
             enabledByUser: policy?.enabledByUser ?? stored.enabledByUser,
             quotaAware: policy?.quotaAware ?? stored.quotaAware,
             ...(response.quota ? { quota: response.quota } : {}),
+            intervalMinutes: policy?.intervalMinutes ?? stored.intervalMinutes,
+            model: policy?.model ?? stored.model,
+            reasoningEffort: policy?.reasoningEffort ?? stored.reasoningEffort,
           });
         }
         return;
       }
-      const intervalMinutes = intervalMinutesFromRrule(item.rrule);
+      const intervalMinutes = policy?.intervalMinutes ?? intervalMinutesFromRrule(item.rrule);
       if (!intervalMinutes) return;
       writeProjectAutomation(projectId, {
         automationId: item.id,
-        codexProjectId: automationRequestContext.codexProjectId,
+        codexProjectId: effectiveProjectIdentity.codexProjectId,
+        codexProjectKind: effectiveProjectIdentity.codexProjectKind,
+        codexHostId: effectiveProjectIdentity.codexHostId,
+        workspacePath: effectiveProjectIdentity.workspacePath,
         status: item.status,
         enabledByUser: policy?.enabledByUser ?? stored.enabledByUser,
         quotaAware: policy?.quotaAware ?? stored.quotaAware,
@@ -1158,8 +1202,8 @@ export function App() {
               : {}
         ),
         intervalMinutes,
-        model: item.model,
-        reasoningEffort: item.reasoningEffort,
+        model: policy?.model ?? item.model,
+        reasoningEffort: policy?.reasoningEffort ?? item.reasoningEffort,
       });
     } catch (error) {
       setAutomationError(error instanceof Error
