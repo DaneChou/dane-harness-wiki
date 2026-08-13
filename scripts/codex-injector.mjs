@@ -910,7 +910,10 @@ async function openAttachment(request) {
   return { opened: true };
 }
 
-async function requestCodexMethodViaCdp(cdp, executionContextId, method, params) {
+async function requestCodexAutomationViaCdp(cdp, executionContextId, method, params) {
+  if (!codexAutomationMethods.has(method)) {
+    throw new Error(`Unsupported Codex automation method: ${method}`);
+  }
   const requestId = [
     "taskboard-automation",
     process.pid,
@@ -975,13 +978,13 @@ async function requestCodexMethodViaCdp(cdp, executionContextId, method, params)
   if (evaluation.exceptionDetails) {
     throw new Error(
       evaluation.exceptionDetails.exception?.description
-      || "Codex request failed",
+      || "Codex automation request failed",
     );
   }
   const response = evaluation.result.value;
-  if (!response?.ok) throw new Error(response?.error || "Codex request failed");
+  if (!response?.ok) throw new Error(response?.error || "Codex automation request failed");
   if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
-    throw new Error(`Codex request returned HTTP ${response.status}`);
+    throw new Error(`Codex automation request returned HTTP ${response.status}`);
   }
   if (typeof response.bodyJsonString !== "string" || response.bodyJsonString.length === 0) {
     return {};
@@ -989,15 +992,8 @@ async function requestCodexMethodViaCdp(cdp, executionContextId, method, params)
   try {
     return JSON.parse(response.bodyJsonString);
   } catch {
-    throw new Error("Codex request returned invalid JSON");
+    throw new Error("Codex automation request returned invalid JSON");
   }
-}
-
-async function requestCodexAutomationViaCdp(cdp, executionContextId, method, params) {
-  if (!codexAutomationMethods.has(method)) {
-    throw new Error(`Unsupported Codex automation method: ${method}`);
-  }
-  return requestCodexMethodViaCdp(cdp, executionContextId, method, params);
 }
 
 async function applyTaskboardAutomationPolicy(
