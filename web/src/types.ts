@@ -176,6 +176,8 @@ export interface Project {
   id: string;
   name: string;
   workspacePath: string | null;
+  source: "local" | "jira";
+  labels: string[];
   issueCount: number;
   createdAt: string;
   updatedAt: string;
@@ -192,6 +194,7 @@ export interface ProjectSummary {
 export interface TaskRelationSummary {
   id: string;
   identifier: string;
+  externalKey?: string | null;
   projectId: string;
   title: string;
   status: TaskStatus;
@@ -242,11 +245,26 @@ export interface Task {
   startDate: string | null;
   dueDate: string | null;
   recurrence: Recurrence | null;
+  source: "local" | "jira";
+  externalOrigin?: string | null;
+  externalKey?: string | null;
+  externalUrl: string | null;
   archivedAt: string | null;
   relations: TaskRelations;
   version: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface JiraConnection {
+  configured: boolean;
+  baseUrl: string | null;
+  username: string | null;
+  displayName: string | null;
+  projects: string[];
+  projectId: string;
+  lastSyncedAt: string | null;
+  insecureHttp: boolean;
 }
 
 export interface Comment {
