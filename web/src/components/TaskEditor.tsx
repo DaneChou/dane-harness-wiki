@@ -539,40 +539,6 @@ export function TaskEditor({
         </div>
 
         <div className="task-form-dock">
-          {!task && (
-            <div className="task-create-relations">
-              <DraftRelationPicker
-                label={text("父议题", "Parent issue")}
-                addLabel={selectedParent
-                  ? text("更换父议题", "Change parent issue")
-                  : text("选择父议题", "Select parent issue")}
-                selected={selectedParent ? [selectedParent] : []}
-                candidates={availableRelationTasks.filter((candidate) => (
-                  candidate.id !== parentId && !selectedSubIssueDescendantIds.has(candidate.id)
-                ))}
-                onSelect={(candidate) => setParentId(candidate.id)}
-                onRemove={() => setParentId(null)}
-              />
-              <DraftRelationPicker
-                label={text("依赖议题", "Dependencies")}
-                addLabel={text("添加依赖议题", "Add dependency")}
-                selected={selectedDependencies}
-                candidates={availableRelationTasks.filter((candidate) => !dependencyIds.includes(candidate.id))}
-                onSelect={(candidate) => setDependencyIds((current) => [...current, candidate.id])}
-                onRemove={(id) => setDependencyIds((current) => current.filter((candidate) => candidate !== id))}
-              />
-              <DraftRelationPicker
-                label={text("子议题", "Sub-issues")}
-                addLabel={text("添加子议题", "Add sub-issue")}
-                selected={selectedSubIssues}
-                candidates={availableRelationTasks.filter((candidate) => (
-                  !selectedParentAncestorIds.has(candidate.id) && !subIssueIds.includes(candidate.id)
-                ))}
-                onSelect={(candidate) => setSubIssueIds((current) => [...current, candidate.id])}
-                onRemove={(id) => setSubIssueIds((current) => current.filter((candidate) => candidate !== id))}
-              />
-            </div>
-          )}
           <div className="property-row">
             <TaskPropertyPicker
               value={status}
@@ -677,6 +643,40 @@ export function TaskEditor({
               <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => setMenu(menu === "more" ? null : "more")}><LinearIcon name="more" /></button>
               {menu === "more" && (
                 <div className="composer-popover more-popover">
+                  {!task && (
+                    <div className="task-create-relations">
+                      <DraftRelationPicker
+                        label={text("父议题", "Parent issue")}
+                        addLabel={selectedParent
+                          ? text("更换父议题", "Change parent issue")
+                          : text("选择父议题", "Select parent issue")}
+                        selected={selectedParent ? [selectedParent] : []}
+                        candidates={availableRelationTasks.filter((candidate) => (
+                          candidate.id !== parentId && !selectedSubIssueDescendantIds.has(candidate.id)
+                        ))}
+                        onSelect={(candidate) => setParentId(candidate.id)}
+                        onRemove={() => setParentId(null)}
+                      />
+                      <DraftRelationPicker
+                        label={text("依赖议题", "Dependencies")}
+                        addLabel={text("添加依赖议题", "Add dependency")}
+                        selected={selectedDependencies}
+                        candidates={availableRelationTasks.filter((candidate) => !dependencyIds.includes(candidate.id))}
+                        onSelect={(candidate) => setDependencyIds((current) => [...current, candidate.id])}
+                        onRemove={(id) => setDependencyIds((current) => current.filter((candidate) => candidate !== id))}
+                      />
+                      <DraftRelationPicker
+                        label={text("子议题", "Sub-issues")}
+                        addLabel={text("添加子议题", "Add sub-issue")}
+                        selected={selectedSubIssues}
+                        candidates={availableRelationTasks.filter((candidate) => (
+                          !selectedParentAncestorIds.has(candidate.id) && !subIssueIds.includes(candidate.id)
+                        ))}
+                        onSelect={(candidate) => setSubIssueIds((current) => [...current, candidate.id])}
+                        onRemove={(id) => setSubIssueIds((current) => current.filter((candidate) => candidate !== id))}
+                      />
+                    </div>
+                  )}
                   <button type="button" onClick={() => setMenu("due")}><span><LinearIcon name="calendarAdd" /></span><strong>{text("设置截止日期", "Set due date")}</strong><kbd>⇧ D</kbd><b><LinearIcon name="chevronRight" /></b></button>
                   <button type="button" onClick={() => setMenu("recurrence")}><span><LinearIcon name="recurrence" /></span><strong>{text("设置重复…", "Set recurrence…")}</strong><b><LinearIcon name="chevronRight" /></b></button>
                 </div>

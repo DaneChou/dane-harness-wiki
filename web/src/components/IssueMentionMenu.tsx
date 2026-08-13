@@ -6,6 +6,7 @@ import { StatusIcon } from "./BoardColumn";
 
 interface IssueMentionMenuProps {
   anchor: HTMLTextAreaElement;
+  anchorOffset: number;
   tasks: readonly Task[];
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
@@ -15,6 +16,7 @@ interface IssueMentionMenuProps {
 
 export function IssueMentionMenu({
   anchor,
+  anchorOffset,
   tasks,
   activeIndex,
   onActiveIndexChange,
@@ -29,7 +31,57 @@ export function IssueMentionMenu({
   useLayoutEffect(() => {
     const menu = menuRef.current;
     if (!menu) return;
-    const anchorRect = anchor.getBoundingClientRect();
+    const textareaRect = anchor.getBoundingClientRect();
+    const style = getComputedStyle(anchor);
+    const mirror = document.createElement("div");
+    const mirroredProperties = [
+      "border-bottom-width",
+      "border-left-width",
+      "border-right-width",
+      "border-top-width",
+      "box-sizing",
+      "direction",
+      "font-family",
+      "font-size",
+      "font-style",
+      "font-weight",
+      "letter-spacing",
+      "line-height",
+      "padding-bottom",
+      "padding-left",
+      "padding-right",
+      "padding-top",
+      "tab-size",
+      "text-align",
+      "text-indent",
+      "text-transform",
+      "word-spacing",
+    ];
+    mirror.style.position = "fixed";
+    mirror.style.visibility = "hidden";
+    mirror.style.pointerEvents = "none";
+    mirror.style.top = `${textareaRect.top}px`;
+    mirror.style.left = `${textareaRect.left}px`;
+    mirror.style.width = `${textareaRect.width}px`;
+    mirror.style.borderStyle = "solid";
+    mirror.style.borderColor = "transparent";
+    mirror.style.whiteSpace = "pre-wrap";
+    mirror.style.overflowWrap = "break-word";
+    for (const property of mirroredProperties) {
+      mirror.style.setProperty(property, style.getPropertyValue(property));
+    }
+    mirror.textContent = anchor.value.slice(0, anchorOffset);
+    const marker = document.createElement("span");
+    marker.textContent = anchor.value.slice(anchorOffset, anchorOffset + 1) || "\u200b";
+    mirror.append(marker);
+    document.body.append(mirror);
+    const markerRect = marker.getBoundingClientRect();
+    mirror.remove();
+    const anchorRect = {
+      left: markerRect.left - anchor.scrollLeft,
+      top: markerRect.top - anchor.scrollTop,
+      bottom: markerRect.bottom - anchor.scrollTop,
+    };
     const menuRect = menu.getBoundingClientRect();
     const gap = 4;
     const edge = 8;
@@ -38,7 +90,7 @@ export function IssueMentionMenu({
     const left = Math.max(edge, Math.min(anchorRect.left, window.innerWidth - menuRect.width - edge));
     const top = openAbove ? anchorRect.top - menuRect.height - gap : anchorRect.bottom + gap;
     setPosition({ left, top: Math.max(edge, top) });
-  }, [activeIndex, anchor, tasks.length]);
+  }, [activeIndex, anchor, anchorOffset, tasks.length]);
 
   useLayoutEffect(() => {
     menuRef.current

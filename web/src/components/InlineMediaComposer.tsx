@@ -533,6 +533,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         {mention && (
           <IssueMentionMenu
             anchor={mention.anchor}
+            anchorOffset={mention.start}
             tasks={mentionResults}
             activeIndex={selectedMentionIndex}
             onActiveIndexChange={setActiveMentionIndex}

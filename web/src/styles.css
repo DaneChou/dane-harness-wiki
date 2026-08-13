@@ -6515,10 +6515,10 @@ kbd {
 
 .task-create-relations {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  padding: 8px 20px 2px;
-  border-top: var(--border-hairline) solid var(--border);
+  gap: 4px;
+  margin-bottom: 6px;
+  padding: 6px;
+  border-bottom: var(--border-hairline) solid var(--border);
 }
 
 .task-create-relation-group {
@@ -6545,7 +6545,9 @@ kbd {
 
 .task-create-relation-group .issue-relation-popover {
   top: auto;
+  right: 0;
   bottom: 30px;
+  left: auto;
 }
 
 .task-create-relation-row {
@@ -6754,7 +6756,7 @@ kbd {
 }
 
 .label-options button,
-.more-popover button,
+.more-popover > button,
 .due-popover button {
   display: flex;
   align-items: center;
@@ -6771,7 +6773,7 @@ kbd {
 }
 
 .label-options button:hover,
-.more-popover button:hover,
+.more-popover > button:hover,
 .due-popover button:hover {
   background: var(--surface-hover);
 }
@@ -6784,7 +6786,7 @@ kbd {
 }
 
 .label-options button span,
-.more-popover button strong,
+.more-popover > button strong,
 .due-popover button strong {
   flex: 1;
   overflow: hidden;
@@ -6794,17 +6796,20 @@ kbd {
 }
 
 .label-options button b,
-.more-popover button b {
+.more-popover > button b {
   color: var(--text-tertiary);
   font-weight: 500;
 }
 
 .more-popover {
-  width: 238px;
+  right: 0;
+  left: auto;
+  overflow: visible;
+  width: 340px;
   padding: 6px;
 }
 
-.more-popover button > span {
+.more-popover > button > span {
   width: 18px;
   color: var(--text-tertiary);
   font-size: 16px;
