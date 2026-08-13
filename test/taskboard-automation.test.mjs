@@ -228,6 +228,11 @@ test("the remote automation prompt keeps taskctl local and delegates work to the
   assert.match(prompt, /所有认领、评论和状态写入只由当前本地控制器完成/);
   assert.match(prompt, /认领成功后，若首次 issue get 返回可用 threadId，使用 Codex send_message_to_thread/);
   assert.doesNotMatch(prompt, /要求原远程会话按本协议判断和认领/);
+  assert.match(prompt, /远程 worker 已确认[\s\S]*comment add[\s\S]*移回 todo/);
+  assert.match(prompt, /首次 issue get 有远程 threadId[\s\S]*--thread-id 显式保留该 threadId/);
+  assert.match(prompt, /绑定写入失败[\s\S]*状态不确定[\s\S]*远程 threadId[\s\S]*移动到 blocked/);
+  assert.match(prompt, /wait_threads 失败[\s\S]*状态不确定[\s\S]*--thread-id 显式保留该远程 threadId[\s\S]*移动到 blocked/);
+  assert.match(prompt, /不得扫描或接管其他 in_progress/);
   assert.match(prompt, /移动到 in_review/);
 });
 
