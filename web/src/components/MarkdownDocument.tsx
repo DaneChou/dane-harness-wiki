@@ -18,30 +18,144 @@ interface MarkdownAstNode {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
+  position?: {
+    start: { offset?: number };
+    end: { offset?: number };
+  };
 }
 
 const RAW_COMMENT = /<!--[\s\S]*?-->/g;
-const ENCODED_COMMENT = /&lt;!--[\s\S]*?--&gt;/gi;
 const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
-const MERMAID_EXTERNAL_RESOURCE = /@\{[^}\r\n]*\b["']?img["']?\s*:|\bproperties\s+[^:\r\n]+\s*:\s*\{[^}\r\n]*["']?icon["']?\s*:\s*["']?https?:\/\/|^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?https?:\/\//im;
+const MERMAID_EXTERNAL_RESOURCE = /@\{[^}]*\b["']?img["']?\s*:\s*["']?\s*(?:https?:)?\/\/|\bproperties\s+[^:\r\n]+\s*:\s*\{[^}]*["']?icon["']?\s*:\s*["']?\s*(?:https?:)?\/\/|^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
+
+interface EncodedCommentMarker {
+  kind: "open" | "close";
+  node: MarkdownAstNode;
+  sourceOffset: number;
+  sourceEndOffset: number;
+  valueOffset: number;
+  valueEndOffset: number;
+}
+
+interface EncodedCommentRange {
+  open: EncodedCommentMarker;
+  close: EncodedCommentMarker;
+}
+
+function hasExternalMermaidCss(source: string) {
+  const frontmatter = source.match(/^\s*---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (frontmatter) {
+    const themeCssOffset = frontmatter[1].search(/["']?\bthemeCSS\b["']?\s*:/i);
+    if (themeCssOffset >= 0 && EXTERNAL_CSS_REFERENCE.test(frontmatter[1].slice(themeCssOffset))) return true;
+  }
+
+  for (const directive of source.matchAll(/%%\{\s*(?:init|initialize)\s*:\s*([\s\S]*?)\}%%/gi)) {
+    const themeCssOffset = directive[1].search(/["']?\bthemeCSS\b["']?\s*:/i);
+    if (themeCssOffset >= 0 && EXTERNAL_CSS_REFERENCE.test(directive[1].slice(themeCssOffset))) return true;
+  }
+
+  return source.split(/\r?\n/).some((line) => (
+    /^\s*(?:style\s+\S+|classDef\s+\S+|linkStyle\s+\S+|rect\b|UpdateElementStyle\s*\(|UpdateRelStyle\s*\()/i.test(line)
+    && EXTERNAL_CSS_REFERENCE.test(line)
+  ));
+}
 
 export function remarkStripMarkdownComments() {
-  return (tree: MarkdownAstNode) => {
-    const visit = (node: MarkdownAstNode) => {
-      if (!node.children) return;
-      node.children = node.children.filter((child) => {
-        if (child.type === "html" && child.value) {
-          child.value = child.value.replace(RAW_COMMENT, "");
-          return child.value.trim().length > 0;
-        }
-        if (child.type === "text" && child.value) {
-          child.value = child.value.replace(ENCODED_COMMENT, "").replace(RAW_COMMENT, "");
-        }
-        visit(child);
-        return true;
-      });
+  return (tree: MarkdownAstNode, file: { value?: unknown }) => {
+    const source = String(file.value ?? "");
+    const markers: EncodedCommentMarker[] = [];
+
+    const collectMarkers = (node: MarkdownAstNode) => {
+      if (node.type === "text" && node.value && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
+        const sourceStart = node.position.start.offset;
+        const sourceValue = source.slice(sourceStart, node.position.end.offset);
+        const valueOpenMarkers = [...node.value.matchAll(/<!--/g)];
+        const sourceOpenMarkers = [...sourceValue.matchAll(/&lt;!--|<!--/gi)].filter((match) => {
+          if (!match[0].toLowerCase().startsWith("&lt;")) return true;
+          let backslashes = 0;
+          for (let index = (match.index ?? 0) - 1; index >= 0 && sourceValue[index] === "\\"; index -= 1) {
+            backslashes += 1;
+          }
+          return backslashes % 2 === 0;
+        });
+        sourceOpenMarkers.forEach((match, index) => {
+          if (!match[0].toLowerCase().startsWith("&lt;") || !valueOpenMarkers[index]) return;
+          markers.push({
+            kind: "open",
+            node,
+            sourceOffset: sourceStart + (match.index ?? 0),
+            sourceEndOffset: sourceStart + (match.index ?? 0) + match[0].length,
+            valueOffset: valueOpenMarkers[index].index,
+            valueEndOffset: valueOpenMarkers[index].index + valueOpenMarkers[index][0].length,
+          });
+        });
+
+        const valueCloseMarkers = [...node.value.matchAll(/-->/g)];
+        const sourceCloseMarkers = [...sourceValue.matchAll(/--&gt;|-->/gi)];
+        sourceCloseMarkers.forEach((match, index) => {
+          if (!match[0].toLowerCase().endsWith("&gt;") || !valueCloseMarkers[index]) return;
+          markers.push({
+            kind: "close",
+            node,
+            sourceOffset: sourceStart + (match.index ?? 0),
+            sourceEndOffset: sourceStart + (match.index ?? 0) + match[0].length,
+            valueOffset: valueCloseMarkers[index].index,
+            valueEndOffset: valueCloseMarkers[index].index + valueCloseMarkers[index][0].length,
+          });
+        });
+      }
+      node.children?.forEach(collectMarkers);
     };
-    visit(tree);
+    collectMarkers(tree);
+
+    const ranges: EncodedCommentRange[] = [];
+    let open: EncodedCommentMarker | null = null;
+    markers.sort((left, right) => left.sourceOffset - right.sourceOffset).forEach((marker) => {
+      if (marker.kind === "open") {
+        if (!open) open = marker;
+      } else if (open) {
+        ranges.push({ open, close: marker });
+        open = null;
+      }
+    });
+
+    const fullyInsideRange = (node: MarkdownAstNode) => (
+      node.position?.start.offset !== undefined
+      && node.position.end.offset !== undefined
+      && ranges.some((range) => (
+        range.open.sourceOffset <= node.position!.start.offset!
+        && node.position!.end.offset! <= range.close.sourceEndOffset
+      ))
+    );
+
+    const visit = (node: MarkdownAstNode, root = false): boolean => {
+      if (!root && fullyInsideRange(node)) return false;
+      if (node.type === "html" && node.value) {
+        node.value = node.value.replace(RAW_COMMENT, "");
+        return node.value.trim().length > 0;
+      }
+      if (node.type === "text" && node.value && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
+        const removals = ranges.flatMap((range) => {
+          if (node.position!.end.offset! <= range.open.sourceOffset || range.close.sourceEndOffset <= node.position!.start.offset!) {
+            return [];
+          }
+          return [{
+            start: range.open.node === node ? range.open.valueOffset : 0,
+            end: range.close.node === node ? range.close.valueEndOffset : node.value!.length,
+          }];
+        }).sort((left, right) => right.start - left.start);
+        for (const removal of removals) {
+          node.value = node.value.slice(0, removal.start) + node.value.slice(removal.end);
+        }
+        return node.value.length > 0;
+      }
+      if (node.children) {
+        node.children = node.children.filter((child) => visit(child));
+        if (!root && node.children.length === 0) return false;
+      }
+      return true;
+    };
+    visit(tree, true);
   };
 }
 
@@ -75,10 +189,12 @@ export function MermaidDiagram({ source }: { source: string }) {
   const { text } = useTaskboardI18n();
   const reactId = useId();
   const renderId = `taskboard-mermaid-${reactId.replace(/[^A-Za-z0-9_-]/g, "")}`;
-  const [theme, setTheme] = useState(() => (
+  const [theme, setTheme] = useState<"light" | "dark">(() => (
     typeof document !== "undefined" && document.documentElement.dataset.theme === "dark" ? "dark" : "light"
   ));
-  const [diagram, setDiagram] = useState<{ svg: string } | { error: true } | null>(null);
+  const [diagram, setDiagram] = useState<(
+    { source: string; theme: "light" | "dark" } & ({ svg: string } | { error: true })
+  ) | null>(null);
 
   useEffect(() => {
     if (typeof document === "undefined") return undefined;
@@ -93,8 +209,8 @@ export function MermaidDiagram({ source }: { source: string }) {
   useEffect(() => {
     let cancelled = false;
     setDiagram(null);
-    if (MERMAID_EXTERNAL_RESOURCE.test(source) || EXTERNAL_CSS_REFERENCE.test(source)) {
-      setDiagram({ error: true });
+    if (MERMAID_EXTERNAL_RESOURCE.test(source) || hasExternalMermaidCss(source)) {
+      setDiagram({ source, theme, error: true });
       return undefined;
     }
     void Promise.all([import("mermaid"), import("dompurify")])
@@ -126,18 +242,19 @@ export function MermaidDiagram({ source }: { source: string }) {
             element.removeAttribute("style");
           }
         });
-        if (!cancelled) setDiagram({ svg: svgRoot.innerHTML });
+        if (!cancelled) setDiagram({ source, theme, svg: svgRoot.innerHTML });
       })
       .catch(() => {
-        if (!cancelled) setDiagram({ error: true });
+        if (!cancelled) setDiagram({ source, theme, error: true });
       });
     return () => { cancelled = true; };
   }, [renderId, source, theme]);
 
-  if (!diagram) {
+  const currentDiagram = diagram?.source === source && diagram.theme === theme ? diagram : null;
+  if (!currentDiagram) {
     return <div className="markdown-mermaid" aria-busy="true"><MermaidFallback source={source} /></div>;
   }
-  if ("error" in diagram) {
+  if ("error" in currentDiagram) {
     return <div className="markdown-mermaid"><MermaidFallback source={source} error /></div>;
   }
   return (
@@ -145,7 +262,7 @@ export function MermaidDiagram({ source }: { source: string }) {
       className="markdown-mermaid"
       role="img"
       aria-label={text("Mermaid 图", "Mermaid diagram")}
-      dangerouslySetInnerHTML={{ __html: diagram.svg }}
+      dangerouslySetInnerHTML={{ __html: currentDiagram.svg }}
     />
   );
 }
