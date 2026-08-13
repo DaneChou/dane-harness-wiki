@@ -1347,13 +1347,78 @@ async function startTaskConversationViaCdp(cdp, executionContextId, request) {
     });
     const threadId = typeof started.result.value === "string" ? started.result.value : "";
     if (threadId && threadId !== previousThreadId) {
-      await requestCodexMethodViaCdp(cdp, executionContextId, "set-thread-title", {
-        conversationId: threadId,
-        title,
-        requireAcknowledgement: true,
-        updateDescription: false,
+      await cdp.send("Runtime.evaluate", {
+        expression: `window.postMessage({ type: "rename-thread" }, window.location.origin)`,
+        contextId: executionContextId,
+        returnByValue: true,
       });
-      return { threadId, title };
+
+      const renameDeadline = Date.now() + 8_000;
+      let renameReady = false;
+      while (Date.now() < renameDeadline) {
+        const prepared = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const dialog = Array.from(document.querySelectorAll('[role="dialog"]'))
+              .find((candidate) => candidate.getClientRects().length > 0);
+            const input = dialog?.querySelector('input');
+            if (!input || input.getClientRects().length === 0) return false;
+            input.focus();
+            const valueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              'value',
+            )?.set;
+            valueSetter?.call(input, ${JSON.stringify(title)});
+            input.dispatchEvent(new InputEvent('input', {
+              bubbles: true,
+              data: ${JSON.stringify(title)},
+              inputType: 'insertText',
+            }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+          })()`,
+          contextId: executionContextId,
+          returnByValue: true,
+        });
+        if (prepared.result.value === true) {
+          renameReady = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      if (!renameReady) throw new Error("Codex rename dialog did not open");
+      await cdp.send("Runtime.evaluate", {
+        expression: `(() => {
+          const dialog = Array.from(document.querySelectorAll('[role="dialog"]'))
+            .find((candidate) => candidate.getClientRects().length > 0);
+          const input = dialog?.querySelector('input');
+          const submit = dialog?.querySelector('button[type="submit"]');
+          if (!input || input.value !== ${JSON.stringify(title)} || !submit) {
+            throw new Error("Codex rename dialog did not accept the task title");
+          }
+          submit.click();
+        })()`,
+        contextId: executionContextId,
+        returnByValue: true,
+      });
+
+      while (Date.now() < renameDeadline) {
+        const renamed = await cdp.send("Runtime.evaluate", {
+          expression: `(() => {
+            const activeRow = Array.from(document.querySelectorAll(
+              '[data-app-action-sidebar-thread-id]'
+            )).find((row) => (
+              row.getAttribute('data-app-action-sidebar-thread-active') === 'true'
+              || ['page', 'true'].includes(row.getAttribute('aria-current'))
+            ));
+            return activeRow?.getAttribute('data-app-action-sidebar-thread-title') === ${JSON.stringify(title)};
+          })()`,
+          contextId: executionContextId,
+          returnByValue: true,
+        });
+        if (renamed.result.value === true) return { threadId, title };
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      }
+      throw new Error("Timed out while naming the Codex conversation");
     }
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
