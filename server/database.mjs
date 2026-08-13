@@ -1038,7 +1038,8 @@ export class TaskboardDatabase {
           archived_at, version, created_at, updated_at
         ) VALUES (
           ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, NULL, ?, ?, ?, ?,
+          ?, NULL, NULL, NULL, NULL, NULL,
+          ?, ?, ?, ?,
           ?, ?, ?, ?,
           NULL, NULL, NULL, NULL,
           NULL, ?, NULL, NULL,
