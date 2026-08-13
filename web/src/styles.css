@@ -6242,7 +6242,7 @@ kbd {
 .property-priority.priority-none { color: var(--priority-none); }
 
 .property-thread input { width: 178px; }
-.property-development select { max-width: 190px; }
+.property-development .task-property-trigger-label { max-width: 190px; }
 .property-more { width: 28px; padding: 0; justify-content: center; letter-spacing: 1px; }
 
 .composer-attachment-button {
@@ -6487,6 +6487,103 @@ kbd {
 
 .dialog-actions {
   gap: 8px;
+}
+
+.create-more-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.create-more-control .board-setting-switch {
+  width: 30px;
+  height: 18px;
+}
+
+.create-more-control .board-setting-switch > span:first-child {
+  top: 3px;
+  width: 12px;
+  height: 12px;
+}
+
+.create-more-control .board-setting-switch.is-on > span:first-child {
+  transform: translateX(12px);
+}
+
+.task-create-relations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 8px 20px 2px;
+  border-top: var(--border-hairline) solid var(--border);
+}
+
+.task-create-relation-group {
+  position: relative;
+  min-width: 0;
+  padding: 3px 5px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.task-create-relation-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 28px;
+  gap: 6px;
+  padding-left: 5px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 550;
+}
+
+.task-create-relation-group .issue-relation-popover {
+  top: auto;
+  bottom: 30px;
+}
+
+.task-create-relation-row {
+  display: grid;
+  grid-template-columns: 14px max-content minmax(0, 1fr) 22px;
+  align-items: center;
+  min-width: 0;
+  height: 28px;
+  gap: 6px;
+  padding-left: 5px;
+  color: var(--text-secondary);
+}
+
+.task-create-relation-row > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.task-create-relation-row > button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.task-create-relation-row > button:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.task-create-relation-row > button svg {
+  width: 12px;
+  height: 12px;
 }
 
 .keyboard-note,

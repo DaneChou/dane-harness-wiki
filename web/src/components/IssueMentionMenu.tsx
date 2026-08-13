@@ -1,0 +1,91 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { Task } from "../types";
+import { useTaskboardI18n } from "../i18n";
+import { StatusIcon } from "./BoardColumn";
+
+interface IssueMentionMenuProps {
+  anchor: HTMLTextAreaElement;
+  tasks: readonly Task[];
+  activeIndex: number;
+  onActiveIndexChange: (index: number) => void;
+  onSelect: (task: Task) => void;
+  onClose: () => void;
+}
+
+export function IssueMentionMenu({
+  anchor,
+  tasks,
+  activeIndex,
+  onActiveIndexChange,
+  onSelect,
+  onClose,
+}: IssueMentionMenuProps) {
+  const { text } = useTaskboardI18n();
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState({ left: 0, top: 0 });
+  const portalTarget = anchor.closest("dialog") ?? document.body;
+
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!menu) return;
+    const anchorRect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    const gap = 4;
+    const edge = 8;
+    const openAbove = anchorRect.bottom + gap + menuRect.height > window.innerHeight - edge
+      && anchorRect.top - gap - menuRect.height >= edge;
+    const left = Math.max(edge, Math.min(anchorRect.left, window.innerWidth - menuRect.width - edge));
+    const top = openAbove ? anchorRect.top - menuRect.height - gap : anchorRect.bottom + gap;
+    setPosition({ left, top: Math.max(edge, top) });
+  }, [activeIndex, anchor, tasks.length]);
+
+  useLayoutEffect(() => {
+    menuRef.current
+      ?.querySelector<HTMLElement>(`[data-mention-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  useEffect(() => {
+    function closeFromOutside(event: PointerEvent) {
+      const target = event.target as Node;
+      if (target !== anchor && !menuRef.current?.contains(target)) onClose();
+    }
+
+    document.addEventListener("pointerdown", closeFromOutside);
+    return () => document.removeEventListener("pointerdown", closeFromOutside);
+  }, [anchor, onClose]);
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="issue-relation-popover issue-mention-popover"
+      role="listbox"
+      aria-label={text("引用议题", "Mention issue")}
+      style={{ position: "fixed", left: position.left, top: position.top }}
+      onPointerDown={(event) => event.preventDefault()}
+    >
+      <div className="issue-relation-results">
+        {tasks.length > 0 ? tasks.map((task, index) => (
+          <button
+            className={index === activeIndex ? "is-active" : ""}
+            type="button"
+            role="option"
+            aria-selected={index === activeIndex}
+            data-mention-index={index}
+            key={task.id}
+            onPointerEnter={() => onActiveIndexChange(index)}
+            onClick={() => onSelect(task)}
+          >
+            <StatusIcon status={task.status} />
+            <span className="issue-relation-option-id">{task.externalKey ?? task.identifier}</span>
+            <span className="issue-relation-option-title">{task.title}</span>
+          </button>
+        )) : (
+          <p className="issue-relation-empty">{text("没有匹配的议题", "No matching issues")}</p>
+        )}
+      </div>
+    </div>,
+    portalTarget,
+  );
+}

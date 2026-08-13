@@ -71,7 +71,11 @@ import { ProjectAutomationMenu } from "./components/ProjectAutomationMenu";
 import { TaskboardIcon } from "./components/TaskboardIcon";
 import { TaskContextMenu } from "./components/TaskContextMenu";
 import { TaskDetail } from "./components/TaskDetail";
-import { TaskEditor, type NewTaskEditorDraft } from "./components/TaskEditor";
+import {
+  TaskEditor,
+  type NewTaskCreateOptions,
+  type NewTaskEditorDraft,
+} from "./components/TaskEditor";
 import { TaskFilterMenu } from "./components/TaskFilterMenu";
 import { taskboardStorage } from "./storage";
 import {
@@ -1904,6 +1908,7 @@ export function App() {
     draft: TaskDraft,
     attachments: File[],
     inlineImages: PendingInlineImage[],
+    createOptions?: NewTaskCreateOptions,
   ) {
     if (!selectedProjectId || !editor) return;
     setActionError(null);
@@ -1941,12 +1946,34 @@ export function App() {
           saved = await updateTaskRequest(saved, { ...draft, description });
         }
       }
+      const relationUpdates = new Map<string, Task>();
+      if (creating && createOptions) {
+        const { parentId, dependencyIds, subIssueIds } = createOptions.relations;
+        if (parentId) {
+          const result = await addTaskRelation(saved, "parent", parentId);
+          saved = result.task;
+          relationUpdates.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const dependencyId of dependencyIds) {
+          const result = await addTaskRelation(saved, "blocked_by", dependencyId);
+          saved = result.task;
+          relationUpdates.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const subIssueId of subIssueIds) {
+          const child = relationUpdates.get(subIssueId)
+            ?? tasksRef.current.find((candidate) => candidate.id === subIssueId)!;
+          const result = await addTaskRelation(child, "parent", saved.id);
+          relationUpdates.set(result.task.id, result.task);
+          saved = result.relatedTask;
+        }
+      }
+      relationUpdates.set(saved.id, saved);
       setTasks((current) => sortTasks([
-        ...current.filter((task) => task.id !== saved.id),
-        saved,
+        ...current.filter((task) => !relationUpdates.has(task.id)),
+        ...relationUpdates.values(),
       ]));
       if (creating) setNewTaskDraft(null);
-      setEditor(null);
+      if (!creating || !createOptions?.keepOpen) setEditor(null);
       if (failedAttachments > 0) {
         setActionError(text(
           `${saved.identifier} 已创建，但有 ${failedAttachments} 个附件上传失败，可在详情页重试。`,
@@ -3297,6 +3324,7 @@ export function App() {
         <TaskEditor
           key={editor.task?.id ?? `new-${editor.status}`}
           task={editor.task}
+          tasks={tasks}
           initialStatus={editor.status}
           initialDraft={editor.task ? null : newTaskDraft}
           labels={availableLabels}

@@ -42,6 +42,7 @@ import {
   type InlineMediaSegment,
   type PendingInlineImage,
 } from "./InlineMediaComposer";
+import { IssuePicker } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 
 const RECURRENCE_UNITS: Record<TaskboardLanguage, Record<Recurrence["unit"], string>> = {
@@ -61,6 +62,17 @@ const RECURRENCE_UNITS: Record<TaskboardLanguage, Record<Recurrence["unit"], str
 
 type TaskEditorError = string | readonly [string, string];
 
+export interface NewTaskRelationDraft {
+  parentId: string | null;
+  dependencyIds: string[];
+  subIssueIds: string[];
+}
+
+export interface NewTaskCreateOptions {
+  keepOpen: boolean;
+  relations: NewTaskRelationDraft;
+}
+
 export interface NewTaskEditorDraft {
   title: string;
   descriptionSegments: InlineMediaSegment[];
@@ -73,10 +85,12 @@ export interface NewTaskEditorDraft {
   dueDate: string;
   recurrence: Recurrence | null;
   attachments: File[];
+  relations: NewTaskRelationDraft;
 }
 
 interface TaskEditorProps {
   task: Task | null;
+  tasks: Task[];
   initialStatus: TaskStatus;
   initialDraft: NewTaskEditorDraft | null;
   labels: string[];
@@ -89,6 +103,7 @@ interface TaskEditorProps {
     draft: TaskDraft,
     attachments: File[],
     inlineImages: PendingInlineImage[],
+    createOptions?: NewTaskCreateOptions,
   ) => Promise<void>;
 }
 
@@ -128,8 +143,56 @@ function contextLabel(
   return `${context.branch ?? text("分离 HEAD", "detached")} · ${folder}`;
 }
 
+function DraftRelationPicker({
+  label,
+  addLabel,
+  selected,
+  candidates,
+  onSelect,
+  onRemove,
+}: {
+  label: string;
+  addLabel: string;
+  selected: Task[];
+  candidates: Task[];
+  onSelect: (task: Task) => void;
+  onRemove: (taskId: string) => void;
+}) {
+  const { text } = useTaskboardI18n();
+  return (
+    <section className="task-create-relation-group">
+      <header>
+        <span>{label}</span>
+        <IssuePicker
+          label={addLabel}
+          candidates={candidates}
+          onSelect={async (candidate) => onSelect(candidate)}
+        />
+      </header>
+      {selected.map((candidate) => (
+        <div className="task-create-relation-row" key={candidate.id}>
+          <StatusIcon status={candidate.status} />
+          <span className="issue-relation-option-id">{candidate.externalKey ?? candidate.identifier}</span>
+          <span className="issue-relation-option-title">{candidate.title}</span>
+          <button
+            type="button"
+            aria-label={text(
+              `移除 ${candidate.externalKey ?? candidate.identifier}`,
+              `Remove ${candidate.externalKey ?? candidate.identifier}`,
+            )}
+            onClick={() => onRemove(candidate.id)}
+          >
+            <LinearIcon name="close" />
+          </button>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 export function TaskEditor({
   task,
+  tasks,
   initialStatus,
   initialDraft,
   labels: availableLabels,
@@ -142,6 +205,7 @@ export function TaskEditor({
 }: TaskEditorProps) {
   const { language, locale, text } = useTaskboardI18n();
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
   const backdropPointerRef = useRef({ down: false, up: false });
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descriptionComposerRef = useRef<InlineMediaComposerHandle>(null);
@@ -160,7 +224,11 @@ export function TaskEditor({
   const [startDate] = useState(task?.startDate ?? initialDraft?.startDate ?? "");
   const [dueDate, setDueDate] = useState(task?.dueDate ?? initialDraft?.dueDate ?? "");
   const [recurrence, setRecurrence] = useState<Recurrence | null>(task?.recurrence ?? initialDraft?.recurrence ?? null);
-  const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "more" | "due" | "recurrence" | null>(null);
+  const [parentId, setParentId] = useState<string | null>(initialDraft?.relations.parentId ?? null);
+  const [dependencyIds, setDependencyIds] = useState<string[]>(initialDraft?.relations.dependencyIds ?? []);
+  const [subIssueIds, setSubIssueIds] = useState<string[]>(initialDraft?.relations.subIssueIds ?? []);
+  const [createMore, setCreateMore] = useState(false);
+  const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "development" | "more" | "due" | "recurrence" | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<TaskEditorError | null>(null);
@@ -175,6 +243,36 @@ export function TaskEditor({
     return options;
   }, [developmentContext, developmentScan.contexts]);
 
+  const taskById = useMemo(() => new Map(tasks.map((candidate) => [candidate.id, candidate])), [tasks]);
+  const availableRelationTasks = tasks.filter((candidate) => candidate.archivedAt === null);
+  const selectedParent = parentId ? taskById.get(parentId) ?? null : null;
+  const selectedDependencies = dependencyIds
+    .map((id) => taskById.get(id))
+    .filter((candidate): candidate is Task => candidate !== undefined);
+  const selectedSubIssues = subIssueIds
+    .map((id) => taskById.get(id))
+    .filter((candidate): candidate is Task => candidate !== undefined);
+  const selectedParentAncestorIds = useMemo(() => {
+    const ids = new Set<string>();
+    let currentId = parentId;
+    while (currentId && !ids.has(currentId)) {
+      ids.add(currentId);
+      currentId = taskById.get(currentId)?.relations.parent?.id ?? null;
+    }
+    return ids;
+  }, [parentId, taskById]);
+  const selectedSubIssueDescendantIds = useMemo(() => {
+    const ids = new Set<string>();
+    const queue = [...subIssueIds];
+    while (queue.length > 0) {
+      const currentId = queue.shift()!;
+      if (ids.has(currentId)) continue;
+      ids.add(currentId);
+      queue.push(...(taskById.get(currentId)?.relations.subIssues.map((item) => item.id) ?? []));
+    }
+    return ids;
+  }, [subIssueIds, taskById]);
+
   const assigneeOptions = [task?.assignee, currentUser, CODEX_AGENT_ACTOR]
     .filter((actor): actor is ActorIdentity => actor !== undefined)
     .filter((actor, index, actors) => (
@@ -188,6 +286,15 @@ export function TaskEditor({
       if (dialogRef.current?.open) dialogRef.current.close();
     };
   }, []);
+
+  useEffect(() => {
+    if (menu !== "more") return;
+    const closeFromOutside = (event: PointerEvent) => {
+      if (!moreMenuRef.current?.contains(event.target as Node)) setMenu(null);
+    };
+    document.addEventListener("pointerdown", closeFromOutside);
+    return () => document.removeEventListener("pointerdown", closeFromOutside);
+  }, [menu]);
 
   useEffect(() => {
     const titleElement = titleRef.current;
@@ -257,7 +364,18 @@ export function TaskEditor({
         startDate: startDate || null,
         dueDate: dueDate || null,
         recurrence,
-      }, attachments, inlineMediaImages(descriptionSegments));
+      }, attachments, inlineMediaImages(descriptionSegments), task ? undefined : {
+        keepOpen: createMore,
+        relations: { parentId, dependencyIds, subIssueIds },
+      });
+      if (!task && createMore) {
+        setTitle("");
+        setDescriptionSegments(createInlineMediaSegments());
+        setAttachments([]);
+        setAttachmentError(null);
+        if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+        requestAnimationFrame(() => titleRef.current?.focus());
+      }
     } catch (caught) {
       if (caught instanceof ApiError && caught.code === "VERSION_CONFLICT") {
         setError([
@@ -323,6 +441,7 @@ export function TaskEditor({
       dueDate,
       recurrence,
       attachments,
+      relations: { parentId, dependencyIds, subIssueIds },
     });
   }
 
@@ -398,6 +517,7 @@ export function TaskEditor({
               ref={descriptionComposerRef}
               className="composer-description inline-media-description"
               segments={descriptionSegments}
+              mentionTasks={tasks}
               placeholder={text("添加描述…", "Add description…")}
               ariaLabel={text("描述", "Description")}
               disabled={saving}
@@ -415,9 +535,44 @@ export function TaskEditor({
               onRemove={(index) => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}
             />
           )}
+
         </div>
 
         <div className="task-form-dock">
+          {!task && (
+            <div className="task-create-relations">
+              <DraftRelationPicker
+                label={text("父议题", "Parent issue")}
+                addLabel={selectedParent
+                  ? text("更换父议题", "Change parent issue")
+                  : text("选择父议题", "Select parent issue")}
+                selected={selectedParent ? [selectedParent] : []}
+                candidates={availableRelationTasks.filter((candidate) => (
+                  candidate.id !== parentId && !selectedSubIssueDescendantIds.has(candidate.id)
+                ))}
+                onSelect={(candidate) => setParentId(candidate.id)}
+                onRemove={() => setParentId(null)}
+              />
+              <DraftRelationPicker
+                label={text("依赖议题", "Dependencies")}
+                addLabel={text("添加依赖议题", "Add dependency")}
+                selected={selectedDependencies}
+                candidates={availableRelationTasks.filter((candidate) => !dependencyIds.includes(candidate.id))}
+                onSelect={(candidate) => setDependencyIds((current) => [...current, candidate.id])}
+                onRemove={(id) => setDependencyIds((current) => current.filter((candidate) => candidate !== id))}
+              />
+              <DraftRelationPicker
+                label={text("子议题", "Sub-issues")}
+                addLabel={text("添加子议题", "Add sub-issue")}
+                selected={selectedSubIssues}
+                candidates={availableRelationTasks.filter((candidate) => (
+                  !selectedParentAncestorIds.has(candidate.id) && !subIssueIds.includes(candidate.id)
+                ))}
+                onSelect={(candidate) => setSubIssueIds((current) => [...current, candidate.id])}
+                onRemove={(id) => setSubIssueIds((current) => current.filter((candidate) => candidate !== id))}
+              />
+            </div>
+          )}
           <div className="property-row">
             <TaskPropertyPicker
               value={status}
@@ -476,25 +631,30 @@ export function TaskEditor({
               onCreateLabel={onCreateLabel}
             />
 
-            <label className="property-control property-development" title={developmentScan.workspacePath ?? undefined}>
-              <LinearIcon name="branch" />
-              <span className="sr-only">{text("代码分支或 Worktree", "Code branch or worktree")}</span>
-              <select
-                value={contextValue(developmentContext)}
-                disabled={developmentScanLoading}
-                onChange={(event) => setDevelopmentContext(event.target.value ? JSON.parse(event.target.value) as DevelopmentContext : null)}
-              >
-                <option value="">{developmentScanLoading
-                  ? text("正在扫描 Git…", "Scanning Git…")
-                  : text("分支 / Worktree", "Branch / worktree")}</option>
-                <optgroup label={text("代码分支", "Code branches")}>
-                  {developmentOptions.filter((context) => context.type === "branch").map((context) => <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>)}
-                </optgroup>
-                <optgroup label="Worktree">
-                  {developmentOptions.filter((context) => context.type === "worktree").map((context) => <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>)}
-                </optgroup>
-              </select>
-            </label>
+            <TaskPropertyPicker
+              value={contextValue(developmentContext)}
+              options={[
+                {
+                  value: "",
+                  label: developmentScanLoading
+                    ? text("正在扫描 Git…", "Scanning Git…")
+                    : text("分支 / Worktree", "Branch / worktree"),
+                  icon: <LinearIcon name="branch" />,
+                },
+                ...developmentOptions.map((context) => ({
+                  value: contextValue(context),
+                  label: contextLabel(context, text),
+                  icon: <LinearIcon name={context.type === "branch" ? "branch" : "folder"} />,
+                })),
+              ]}
+              open={menu === "development"}
+              disabled={developmentScanLoading}
+              triggerClassName="property-control property-development"
+              ariaLabel={text("代码分支或 Worktree", "Code branch or worktree")}
+              title={developmentScan.workspacePath ?? undefined}
+              onOpenChange={(open) => setMenu(open ? "development" : null)}
+              onChange={(value) => setDevelopmentContext(value ? JSON.parse(value) as DevelopmentContext : null)}
+            />
 
             {dueDate && (
               <button className="property-control" type="button" onClick={() => setMenu("due")}>
@@ -513,7 +673,7 @@ export function TaskEditor({
               </button>
             )}
 
-            <div className="composer-menu-anchor">
+            <div className="composer-menu-anchor" ref={moreMenuRef}>
               <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => setMenu(menu === "more" ? null : "more")}><LinearIcon name="more" /></button>
               {menu === "more" && (
                 <div className="composer-popover more-popover">
@@ -566,6 +726,21 @@ export function TaskEditor({
             {task && <span aria-hidden="true" />}
             <div className="dialog-actions">
               {task && <span className="dialog-updated">{text(`编辑 ${task.identifier}`, `Editing ${task.identifier}`)}</span>}
+              {!task && (
+                <div className="create-more-control">
+                  <span>{text("创建更多", "Create more")}</span>
+                  <button
+                    type="button"
+                    className={`board-setting-switch${createMore ? " is-on" : ""}`}
+                    role="switch"
+                    aria-checked={createMore}
+                    disabled={saving}
+                    onClick={() => setCreateMore((current) => !current)}
+                  >
+                    <span aria-hidden="true" />
+                  </button>
+                </div>
+              )}
               <button
                 className="button primary"
                 type="submit"
