@@ -60,11 +60,11 @@ const RECURRENCE_UNITS: Record<TaskboardLanguage, Record<Recurrence["unit"], str
 };
 
 type TaskEditorError = string | readonly [string, string];
-type DraftRelationMenu = "parent" | "dependency" | "subIssue";
+type DraftRelationMenu = "parent" | "related" | "subIssue";
 
 export interface NewTaskRelationDraft {
   parentId: string | null;
-  dependencyIds: string[];
+  relatedIds: string[];
   subIssueIds: string[];
 }
 
@@ -178,7 +178,7 @@ export function TaskEditor({
   const [dueDate, setDueDate] = useState(task?.dueDate ?? initialDraft?.dueDate ?? "");
   const [recurrence, setRecurrence] = useState<Recurrence | null>(task?.recurrence ?? initialDraft?.recurrence ?? null);
   const [parentId, setParentId] = useState<string | null>(initialDraft?.relations.parentId ?? null);
-  const [dependencyIds, setDependencyIds] = useState<string[]>(initialDraft?.relations.dependencyIds ?? []);
+  const [relatedIds, setRelatedIds] = useState<string[]>(initialDraft?.relations.relatedIds ?? []);
   const [subIssueIds, setSubIssueIds] = useState<string[]>(initialDraft?.relations.subIssueIds ?? []);
   const [createMore, setCreateMore] = useState(false);
   const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "development" | "more" | "due" | "recurrence" | null>(null);
@@ -200,7 +200,7 @@ export function TaskEditor({
   const taskById = useMemo(() => new Map(tasks.map((candidate) => [candidate.id, candidate])), [tasks]);
   const availableRelationTasks = tasks.filter((candidate) => candidate.archivedAt === null);
   const selectedParent = parentId ? taskById.get(parentId) ?? null : null;
-  const selectedDependencies = dependencyIds
+  const selectedRelated = relatedIds
     .map((id) => taskById.get(id))
     .filter((candidate): candidate is Task => candidate !== undefined);
   const selectedSubIssues = subIssueIds
@@ -229,20 +229,20 @@ export function TaskEditor({
   const parentCandidates = availableRelationTasks.filter((candidate) => (
     !selectedSubIssueDescendantIds.has(candidate.id)
   ));
-  const dependencyCandidates = availableRelationTasks;
+  const relatedCandidates = availableRelationTasks;
   const subIssueCandidates = availableRelationTasks.filter((candidate) => (
     !selectedParentAncestorIds.has(candidate.id)
   ));
   const relationCandidates = relationMenu === "parent"
     ? parentCandidates
-    : relationMenu === "dependency"
-      ? dependencyCandidates
+    : relationMenu === "related"
+      ? relatedCandidates
       : subIssueCandidates;
   const selectedRelationIds = new Set(
     relationMenu === "parent"
       ? parentId ? [parentId] : []
-      : relationMenu === "dependency"
-        ? dependencyIds
+      : relationMenu === "related"
+        ? relatedIds
         : subIssueIds,
   );
 
@@ -276,8 +276,8 @@ export function TaskEditor({
   function toggleDraftRelation(candidate: Task) {
     if (relationMenu === "parent") {
       setParentId((current) => current === candidate.id ? null : candidate.id);
-    } else if (relationMenu === "dependency") {
-      setDependencyIds((current) => current.includes(candidate.id)
+    } else if (relationMenu === "related") {
+      setRelatedIds((current) => current.includes(candidate.id)
         ? current.filter((id) => id !== candidate.id)
         : [...current, candidate.id]);
     } else if (relationMenu === "subIssue") {
@@ -357,12 +357,14 @@ export function TaskEditor({
         recurrence,
       }, attachments, inlineMediaImages(descriptionSegments), task ? undefined : {
         keepOpen: createMore,
-        relations: { parentId, dependencyIds, subIssueIds },
+        relations: { parentId, relatedIds, subIssueIds },
       });
       if (!task && createMore) {
         setTitle("");
         setDescriptionSegments(createInlineMediaSegments());
         setAttachments([]);
+        setSubIssueIds([]);
+        setRelationMenu(null);
         setAttachmentError(null);
         if (attachmentInputRef.current) attachmentInputRef.current.value = "";
         requestAnimationFrame(() => titleRef.current?.focus());
@@ -432,7 +434,7 @@ export function TaskEditor({
       dueDate,
       recurrence,
       attachments,
-      relations: { parentId, dependencyIds, subIssueIds },
+      relations: { parentId, relatedIds, subIssueIds },
     });
   }
 
@@ -641,7 +643,7 @@ export function TaskEditor({
                       <div className="more-popover-divider" />
                       <button className={relationMenu === "subIssue" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "subIssue"} onClick={() => setRelationMenu("subIssue")}><span><LinearIcon name="plus" /></span><strong>{text("添加子议题", "Add sub-issue")}</strong>{selectedSubIssues.length > 0 && <small>{text(`${selectedSubIssues.length} 个已选`, `${selectedSubIssues.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
                       <button className={relationMenu === "parent" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "parent"} onClick={() => setRelationMenu("parent")}><span><LinearIcon name="plus" /></span><strong>{text("添加父议题", "Add parent issue")}</strong>{selectedParent && <small>{selectedParent.externalKey ?? selectedParent.identifier}</small>}<b><LinearIcon name="chevronRight" /></b></button>
-                      <button className={relationMenu === "dependency" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "dependency"} onClick={() => setRelationMenu("dependency")}><span><LinearIcon name="link" /></span><strong>{text("添加关联议题", "Add related issue")}</strong>{selectedDependencies.length > 0 && <small>{text(`${selectedDependencies.length} 个已选`, `${selectedDependencies.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      <button className={relationMenu === "related" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "related"} onClick={() => setRelationMenu("related")}><span><LinearIcon name="link" /></span><strong>{text("添加关联议题", "Add related issue")}</strong>{selectedRelated.length > 0 && <small>{text(`${selectedRelated.length} 个已选`, `${selectedRelated.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
                       {relationMenu && (
                         <div className="task-create-relation-submenu" role="menu" aria-label={text("选择关系议题", "Select relation issue")}>
                           {relationCandidates.length > 0 ? relationCandidates.map((candidate) => {

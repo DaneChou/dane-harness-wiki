@@ -24,7 +24,7 @@ const oldTodoDraft: NewTaskEditorDraft = {
   attachments: [],
   relations: {
     parentId: null,
-    dependencyIds: [],
+    relatedIds: [],
     subIssueIds: [],
   },
 };

@@ -1936,21 +1936,30 @@ export function App() {
   ) {
     if (!selectedProjectId || !editor) return;
     setActionError(null);
+    const creating = editor.task === null;
+    let saved: Task;
     try {
-      const creating = editor.task === null;
-      let saved = editor.task
+      saved = editor.task
         ? await updateTaskRequest(editor.task, draft)
         : await createTaskRequest(selectedProjectId, draft);
-      if (creating) {
-        setProjects((current) => current.map((project) => (
-          project.id === selectedProjectId
-            ? { ...project, issueCount: project.issueCount + 1 }
-            : project
-        )));
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        void refreshTasks(selectedProjectId, { quiet: true });
       }
-      let uploadedAttachments = 0;
-      let failedAttachments = 0;
-      if (creating && (attachments.length > 0 || inlineImages.length > 0)) {
+      throw error;
+    }
+    if (creating) {
+      setProjects((current) => current.map((project) => (
+        project.id === selectedProjectId
+          ? { ...project, issueCount: project.issueCount + 1 }
+          : project
+      )));
+    }
+    let uploadedAttachments = 0;
+    let failedAttachments = 0;
+    let postCreateWriteFailed = false;
+    if (creating && (attachments.length > 0 || inlineImages.length > 0)) {
+      try {
         const [results, inlineAttachments] = await Promise.all([
           Promise.allSettled(
             attachments.map((file) => uploadAttachment(saved.id, file)),
@@ -1969,17 +1978,22 @@ export function App() {
           );
           saved = await updateTaskRequest(saved, { ...draft, description });
         }
+      } catch {
+        postCreateWriteFailed = true;
       }
-      const relationUpdates = new Map<string, Task>();
-      if (creating && createOptions) {
-        const { parentId, dependencyIds, subIssueIds } = createOptions.relations;
+    }
+    const relationUpdates = new Map<string, Task>();
+    let relationWriteFailed = false;
+    if (creating && createOptions) {
+      const { parentId, relatedIds, subIssueIds } = createOptions.relations;
+      try {
         if (parentId) {
           const result = await addTaskRelation(saved, "parent", parentId);
           saved = result.task;
           relationUpdates.set(result.relatedTask.id, result.relatedTask);
         }
-        for (const dependencyId of dependencyIds) {
-          const result = await addTaskRelation(saved, "blocked_by", dependencyId);
+        for (const relatedId of relatedIds) {
+          const result = await addTaskRelation(saved, "related", relatedId);
           saved = result.task;
           relationUpdates.set(result.relatedTask.id, result.relatedTask);
         }
@@ -1990,42 +2004,49 @@ export function App() {
           relationUpdates.set(result.task.id, result.task);
           saved = result.relatedTask;
         }
+      } catch {
+        relationWriteFailed = true;
       }
-      relationUpdates.set(saved.id, saved);
-      setTasks((current) => sortTasks([
-        ...current.filter((task) => !relationUpdates.has(task.id)),
-        ...relationUpdates.values(),
-      ]));
-      if (creating) setNewTaskDraft(null);
-      if (!creating || !createOptions?.keepOpen) setEditor(null);
-      if (failedAttachments > 0) {
-        setActionError(text(
-          `${saved.identifier} 已创建，但有 ${failedAttachments} 个附件上传失败，可在详情页重试。`,
-          `${saved.identifier} was created, but ${failedAttachments} attachments failed to upload. Try again from the details page.`,
-        ));
+    }
+    relationUpdates.set(saved.id, saved);
+    setTasks((current) => sortTasks([
+      ...current.filter((task) => !relationUpdates.has(task.id)),
+      ...relationUpdates.values(),
+    ]));
+    if (creating) setNewTaskDraft(null);
+    if (!creating || !createOptions?.keepOpen) setEditor(null);
+    if (relationWriteFailed) {
+      setActionError(text(
+        `${saved.identifier} 已创建，但部分关系写入失败。`,
+        `${saved.identifier} was created, but some relations could not be saved.`,
+      ));
+    } else if (postCreateWriteFailed) {
+      setActionError(text(
+        `${saved.identifier} 已创建，但部分后续内容写入失败。`,
+        `${saved.identifier} was created, but some follow-up content could not be saved.`,
+      ));
+    } else if (failedAttachments > 0) {
+      setActionError(text(
+        `${saved.identifier} 已创建，但有 ${failedAttachments} 个附件上传失败，可在详情页重试。`,
+        `${saved.identifier} was created, but ${failedAttachments} attachments failed to upload. Try again from the details page.`,
+      ));
+    }
+    if (creating) {
+      pushUndo(null, async () => {
+        const candidate = tasksRef.current.find((task) => task.id === saved.id);
+        const current = candidate && candidate.version >= saved.version ? candidate : saved;
+        await archiveTaskRequest(current);
+        setTasks((tasks) => tasks.filter((task) => task.id !== saved.id));
+      });
+    } else if (editor.task) {
+      const previous = editor.task;
+      const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
+      if (!draft.assigneeTarget || previousAssigneeTarget) {
+        pushUndo(
+          null,
+          () => restoreTaskDetails(previous, saved, previousAssigneeTarget),
+        );
       }
-      if (creating) {
-        pushUndo(null, async () => {
-          const candidate = tasksRef.current.find((task) => task.id === saved.id);
-          const current = candidate && candidate.version >= saved.version ? candidate : saved;
-          await archiveTaskRequest(current);
-          setTasks((tasks) => tasks.filter((task) => task.id !== saved.id));
-        });
-      } else if (editor.task) {
-        const previous = editor.task;
-        const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
-        if (!draft.assigneeTarget || previousAssigneeTarget) {
-          pushUndo(
-            null,
-            () => restoreTaskDetails(previous, saved, previousAssigneeTarget),
-          );
-        }
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        void refreshTasks(selectedProjectId, { quiet: true });
-      }
-      throw error;
     }
   }
 
