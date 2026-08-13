@@ -2929,6 +2929,33 @@ export function App() {
             openingThread={openingThreadTaskId === detailTask.id}
             onError={setActionError}
           />
+        ) : hasLoadedTasks
+          && tasks.length === 0
+          && selectedProject
+          && !isJiraProject
+          && localAiChatAvailable ? (
+          <div className="page-empty">
+            <h2>{text("当前项目还没有任务", "This project has no issues yet")}</h2>
+            <p>{text(
+              "让 Codex 检查当前项目目录对应的对话，并整理任务状态。",
+              "Ask Codex to inspect conversations for this project directory and organize their task status.",
+            )}</p>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => setAiOpenThreadRequest((current) => ({
+                projectId: selectedProject.id,
+                issueId: null,
+                composerText: text(
+                  "只检查当前项目目录对应的 Codex 对话。请将其中已完成、处理中和待执行的任务整理并导入当前项目的 Taskboard。",
+                  "Only inspect Codex conversations associated with the current project directory. Organize completed, in-progress, and pending tasks, then import them into this project's Taskboard.",
+                ),
+                requestId: (current?.requestId ?? 0) + 1,
+              }))}
+            >
+              {text("导入当前项目任务状态", "Import current project task status")}
+            </button>
+          </div>
         ) : boardView === "dashboard" ? (
           <DashboardView
             key={selectedProjectId}
