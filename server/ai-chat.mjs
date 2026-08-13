@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
+import { signalProcessTree } from "../shared/process-tree.mjs";
 import { ApiError } from "./database.mjs";
 import { discoverAiCatalog, resolveAiWorkspace } from "./ai-chat-catalog.mjs";
 import {
@@ -26,15 +27,7 @@ function cappedError(value) {
 }
 
 function signalProcessGroup(child, signal) {
-  if (Number.isInteger(child?.pid)) {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {}
-  }
-  try {
-    child?.kill(signal);
-  } catch {}
+  signalProcessTree(child, signal);
 }
 
 function wait(milliseconds) {
