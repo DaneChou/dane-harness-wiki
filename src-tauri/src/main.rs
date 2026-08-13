@@ -667,6 +667,7 @@ fn start_launcher_locked(
         .env("CODEX_TASKBOARD_INSTANCE_TOKEN", &instance_token)
         .env("CODEX_TASKBOARD_INSTANCE_SECRET", &instance_secret)
         .env("CODEX_TASKBOARD_VERSION", &version)
+        .env_remove("CODEX_API_KEY")
         .env(
             "CODEX_TASKBOARD_CODEX_PROFILE",
             codex_profile.to_string_lossy().as_ref(),
