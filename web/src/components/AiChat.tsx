@@ -1174,18 +1174,18 @@ export function AiChat({
     });
   }, []);
 
-  const observeRunTransitions = useCallback((runs: AiChatRun[]) => {
-    let completedWhileClosed = false;
+  const observeRunTransitions = useCallback((threadId: string, runs: AiChatRun[]) => {
+    let unreadCompletion = false;
     for (const run of runs) {
       const previous = observedRunStatusesRef.current.get(run.id);
       observedRunStatusesRef.current.set(run.id, run.status);
       if (
         previous === "running"
         && run.status !== "running"
-        && !panelOpenRef.current
-      ) completedWhileClosed = true;
+        && (!panelOpenRef.current || selectedThreadRef.current !== threadId)
+      ) unreadCompletion = true;
     }
-    if (completedWhileClosed) setUnread(true);
+    if (unreadCompletion) setUnread(true);
   }, []);
 
   const loadSnapshot = useCallback(async (threadId: string, quiet = false) => {
@@ -1199,7 +1199,7 @@ export function AiChat({
       if (requestId !== snapshotRequestRef.current || selectedThreadRef.current !== threadId) return;
       setSnapshot(next);
       replaceThread(next.thread);
-      observeRunTransitions(next.runs);
+      observeRunTransitions(threadId, next.runs);
       if (!quiet) setError(null);
     } catch (nextError) {
       if (
@@ -1281,7 +1281,7 @@ export function AiChat({
       try {
         const next = await getAiChatThread(threadId);
         replaceThread(next.thread);
-        observeRunTransitions(next.runs);
+        observeRunTransitions(threadId, next.runs);
       } catch {
         // The selected thread surfaces request errors; background history refresh stays quiet.
       }
@@ -1424,9 +1424,7 @@ export function AiChat({
     sendBlocked,
     attachments.length > 0,
   );
-  const anyRunning = threads.some((thread) => thread.status === "running");
-  const anyFailed = threads.some((thread) => thread.status === "failed");
-  const launcherState = anyRunning ? "running" : anyFailed ? "failed" : unread ? "unread" : "idle";
+  const launcherState = unread ? "unread" : "idle";
   const lastUserEvent = snapshot?.thread.status === "failed"
     ? [...snapshot.events].reverse().find((event) => (
         event.role === "user"
