@@ -2024,7 +2024,6 @@ export function App() {
       ...relationUpdates.values(),
     ]));
     if (creating) setNewTaskDraft(null);
-    if (!creating || !createOptions?.keepOpen) setEditor(null);
     const failedWrites = [
       ...(relationWriteFailed ? [{ zh: "关系", en: "relations" }] : []),
       ...(postCreateWriteFailed ? [{ zh: "正文或图片", en: "description or images" }] : []),
@@ -2033,6 +2032,7 @@ export function App() {
         en: `${failedAttachments} attachment${failedAttachments === 1 ? "" : "s"}`,
       }] : []),
     ];
+    if (!creating || !createOptions?.keepOpen || failedWrites.length > 0) setEditor(null);
     if (failedWrites.length > 0) {
       setActionError(text(
         `${saved.identifier} 已创建，但以下内容写入失败：${failedWrites.map((failure) => failure.zh).join("、")}。`,
