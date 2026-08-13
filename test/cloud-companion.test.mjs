@@ -199,6 +199,55 @@ test("cloud proxy replaces client identity with Basic Auth and makes exactly one
   });
 });
 
+test("cloud companion blocks project moves for issue-linked local AI chats", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "taskboard-cloud-chat-move-"));
+  temporaryDirectories.push(directory);
+  let upstreamCalls = 0;
+  const app = createTaskboardServer({
+    dataDirectory: directory,
+    cloudConfigStore: memoryConfigStore(),
+    remoteFetch: async () => {
+      upstreamCalls += 1;
+      return jsonResponse({ task: { id: "REMOTE-1", projectId: "target" } });
+    },
+  });
+  const address = await app.listen({ host: "127.0.0.1", port: 0 });
+
+  try {
+    const thread = app.database.createAiChatThread({
+      id: "cloud-linked-thread",
+      title: "Cloud issue conversation",
+      origin: {
+        projectId: "source",
+        projectName: "Source",
+        workspacePath: "/work/source",
+        issueId: "REMOTE-1",
+        issueIdentifier: "REMOTE-1",
+      },
+      model: "gpt-real",
+      reasoningEffort: "medium",
+      sandbox: "workspace-write",
+    });
+
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/api/tasks/REMOTE-1`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ version: 1, projectId: "target" }),
+      },
+    );
+    const payload = await response.json();
+
+    assert.equal(response.status, 409);
+    assert.equal(payload.error.code, "AI_CHAT_PROJECT_MOVE_BLOCKED");
+    assert.equal(upstreamCalls, 0);
+    assert.deepEqual(app.database.getAiChatThread(thread.id).origin, thread.origin);
+  } finally {
+    await app.close();
+  }
+});
+
 test("configured cloud mode fails explicitly and never falls back to the local database", async () => {
   const { createCloudProxy } = await importCloudProxy();
   let upstreamCalls = 0;
@@ -516,6 +565,7 @@ test("configured server proxies business APIs without touching local rows and ad
   try {
     const metadata = await fetch(`${baseUrl}/api/meta`).then((response) => response.json());
     assert.deepEqual(metadata, {
+      capabilities: { localAiChat: true },
       mode: "cloud",
       realtime: { transport: "poll", intervalMs: 2000 },
       localCapabilities: { available: true },
@@ -693,6 +743,42 @@ test("taskctl cloud status, logout, and project map use local companion endpoint
   assert.deepEqual(JSON.parse(calls[2].init.body), {
     workspacePath: "/work/portfolio",
   });
+});
+
+test("taskctl companion-control commands use the tokenized launcher runtime endpoint", async () => {
+  const calls = [];
+  const runtimeFile = "C:\\Users\\admin\\AppData\\Roaming\\Codex Taskboard\\launcher-runtime.json";
+  const instanceToken = "7a6f8d37-78ce-46c9-87a8-08e10db88da2";
+  const overrides = {
+    env: { CODEX_TASKBOARD_RUNTIME_FILE: runtimeFile },
+    readFile: async (filePath) => {
+      assert.equal(filePath, runtimeFile);
+      return JSON.stringify({
+        version: 1,
+        url: `http://127.0.0.1:51987/${instanceToken}`,
+      });
+    },
+    fetch: async (url, init) => {
+      calls.push([url.toString(), init.method]);
+      if (init.method === "GET") {
+        return jsonResponse({ mode: "local", authenticated: false });
+      }
+      return jsonResponse({
+        projectId: "portfolio",
+        workspacePath: "/work/portfolio",
+      });
+    },
+  };
+
+  assert.equal((await runCli(["cloud", "status"], overrides)).exitCode, 0);
+  assert.equal((await runCli(
+    ["project", "map", "portfolio", "--workspace-path", "./portfolio"],
+    { ...overrides, cwd: "/work" },
+  )).exitCode, 0);
+  assert.deepEqual(calls, [
+    [`http://127.0.0.1:51987/${instanceToken}/api/local/cloud-session`, "GET"],
+    [`http://127.0.0.1:51987/${instanceToken}/api/local/project-mappings/portfolio`, "PUT"],
+  ]);
 });
 
 test("taskctl accepts only loopback companion origins and supports the legacy loopback URL", async () => {

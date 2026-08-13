@@ -11,9 +11,11 @@ import type {
   DevelopmentScan,
   HostContext,
   IssueRelationType,
+  JiraConnection,
   Project,
   ProjectSummary,
   Task,
+  TaskChangeActivity,
   TaskboardMetadata,
   TaskDraft,
   TaskStatus,
@@ -29,9 +31,14 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 };
 
 let currentUserActor = DEFAULT_USER_ACTOR;
+let apiText = (_chinese: string, english: string) => english;
 
 export function setCurrentUserActor(actor?: ActorIdentity) {
   currentUserActor = actor?.type === "user" ? actor : DEFAULT_USER_ACTOR;
+}
+
+export function setApiText(text: typeof apiText) {
+  apiText = text;
 }
 
 interface ApiErrorBody {
@@ -48,12 +55,16 @@ export class ApiError extends Error {
   readonly details?: unknown;
 
   constructor(status: number, body: ApiErrorBody) {
-    super(body.error?.message ?? `Request failed (${status})`);
+    super(body.error?.message ?? apiText(`请求失败（${status}）`, `Request failed (${status})`));
     this.name = "ApiError";
     this.status = status;
     this.code = body.error?.code ?? "REQUEST_FAILED";
     this.details = body.error?.details;
   }
+}
+
+export function resolveTaskboardUrl(path: string): string {
+  return new URL(path.replace(/^\//, ""), document.baseURI).href;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -68,19 +79,47 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
   }
 
+  const readRequest = method === "GET" || method === "HEAD";
   let response: Response;
-  try {
-    response = await fetch(path, { ...init, headers });
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") throw error;
-    throw new ApiError(0, {
-      error: {
-        code: "SERVICE_UNAVAILABLE",
-        message: "无法连接本地 Taskboard 服务，请重新通过 Taskboard 启动 Codex。",
-      },
-    });
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      response = await fetch(resolveTaskboardUrl(path), { ...init, headers });
+      break;
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw error;
+      if (readRequest && attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+        continue;
+      }
+      const failure = error instanceof Error && error.name === "TimeoutError"
+        ? "timeout"
+        : error instanceof TypeError
+          ? "browser-network"
+          : "network";
+      throw new ApiError(0, {
+        error: {
+          code: readRequest ? "READ_FAILED" : "SERVICE_UNAVAILABLE",
+          message: readRequest
+            ? apiText(
+                "暂时无法读取 Taskboard 数据。面板会自动重试，请稍后再试。",
+                "Taskboard data is temporarily unavailable. The panel will retry automatically.",
+              )
+            : apiText(
+                "暂时无法连接 Taskboard 服务，请稍后重试。",
+                "The Taskboard service is temporarily unavailable. Try again later.",
+              ),
+          details: { method, failure },
+        },
+      });
+    }
   }
-  const body = (await response.json().catch(() => ({}))) as T & ApiErrorBody;
+  let body: T & ApiErrorBody;
+  try {
+    body = (await response.json()) as T & ApiErrorBody;
+  } catch (error) {
+    if ((error as Error).name === "AbortError") throw error;
+    body = {} as T & ApiErrorBody;
+  }
 
   if (!response.ok) throw new ApiError(response.status, body);
   return body;
@@ -89,6 +128,50 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 export async function listProjects(signal?: AbortSignal): Promise<Project[]> {
   const data = await request<{ projects: Project[] }>("/api/projects", { signal });
   return data.projects;
+}
+
+export async function getJiraConnection(signal?: AbortSignal): Promise<JiraConnection> {
+  try {
+    const data = await request<{ connection: JiraConnection }>("/api/local/jira-connection", { signal });
+    return data.connection;
+  } catch (error) {
+    if (
+      error instanceof ApiError
+      && (error.code === "LOCAL_COMPANION_REQUIRED" || error.status === 404)
+    ) {
+      return {
+        configured: false,
+        baseUrl: null,
+        username: null,
+        displayName: null,
+        projects: [],
+        projectId: "jira-my-tasks",
+        lastSyncedAt: null,
+        insecureHttp: false,
+      };
+    }
+    throw error;
+  }
+}
+
+export async function configureJiraConnection(input: {
+  baseUrl: string;
+  username: string;
+  password: string;
+  projects: string[];
+}): Promise<JiraConnection> {
+  const data = await request<{ connection: JiraConnection }>("/api/local/jira-connection", {
+    method: "PUT",
+    body: JSON.stringify(input),
+  });
+  return data.connection;
+}
+
+export async function syncJiraConnection(): Promise<JiraConnection> {
+  const data = await request<{ connection: JiraConnection }>("/api/local/jira-connection/sync", {
+    method: "POST",
+  });
+  return data.connection;
 }
 
 export async function getProjectSummary(
@@ -248,7 +331,9 @@ export function subscribeAiChatThread(
   onHint: (type: "ai.event" | "ai.run") => void,
   onError?: () => void,
 ): () => void {
-  const source = new EventSource(`/api/local/ai/threads/${encodeURIComponent(threadId)}/events`);
+  const source = new EventSource(
+    resolveTaskboardUrl(`/api/local/ai/threads/${encodeURIComponent(threadId)}/events`),
+  );
   source.addEventListener("ai.event", () => onHint("ai.event"));
   source.addEventListener("ai.run", () => onHint("ai.run"));
   if (onError) source.addEventListener("error", onError);
@@ -313,6 +398,34 @@ export async function createProject(input: {
   return data.project;
 }
 
+export async function createProjectLabel(projectId: string, label: string): Promise<Project> {
+  const data = await request<{ project: Project }>(
+    `/api/projects/${encodeURIComponent(projectId)}/labels`,
+    {
+      method: "POST",
+      body: JSON.stringify({ label }),
+    },
+  );
+  return data.project;
+}
+
+export async function deleteProjectLabel(projectId: string, label: string): Promise<Project> {
+  const data = await request<{ project: Project }>(
+    `/api/projects/${encodeURIComponent(projectId)}/labels`,
+    {
+      method: "DELETE",
+      body: JSON.stringify({ label }),
+    },
+  );
+  return data.project;
+}
+
+export async function deleteProject(projectId: string): Promise<void> {
+  await request(`/api/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function listDevelopmentContexts(
   projectId: string,
   codexProjectId?: string,
@@ -331,10 +444,22 @@ export async function listDevelopmentContexts(
   );
 }
 
-export async function listTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {
-  const params = new URLSearchParams({ projectId, archived: "false" });
+async function listTasksByArchive(
+  projectId: string,
+  archived: "true" | "false",
+  signal?: AbortSignal,
+): Promise<Task[]> {
+  const params = new URLSearchParams({ projectId, archived });
   const data = await request<{ tasks: Task[] }>(`/api/tasks?${params}`, { signal });
   return data.tasks;
+}
+
+export function listTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {
+  return listTasksByArchive(projectId, "false", signal);
+}
+
+export function listArchivedTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {
+  return listTasksByArchive(projectId, "true", signal);
 }
 
 export async function createTask(projectId: string, draft: TaskDraft, threadId?: string): Promise<Task> {
@@ -391,6 +516,13 @@ export async function restoreTask(task: Task, threadId?: string): Promise<Task> 
   return data.task;
 }
 
+export async function deleteArchivedTask(task: Task): Promise<void> {
+  await request(`/api/tasks/${encodeURIComponent(task.id)}`, {
+    method: "DELETE",
+    body: JSON.stringify({ version: task.version }),
+  });
+}
+
 export async function addTaskRelation(
   task: Task,
   type: IssueRelationType,
@@ -427,6 +559,17 @@ export async function listComments(taskId: string, signal?: AbortSignal): Promis
     { signal },
   );
   return data.comments;
+}
+
+export async function listTaskActivities(
+  taskId: string,
+  signal?: AbortSignal,
+): Promise<TaskChangeActivity[]> {
+  const data = await request<{ activities: TaskChangeActivity[] }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/activities`,
+    { signal },
+  );
+  return data.activities;
 }
 
 export async function createComment(taskId: string, body: string, threadId?: string): Promise<Comment> {
@@ -503,5 +646,29 @@ export async function deleteAttachment(attachment: Attachment): Promise<void> {
 }
 
 export function attachmentContentUrl(attachment: Attachment): string {
-  return `/api/attachments/${encodeURIComponent(attachment.id)}/content`;
+  return `api/attachments/${encodeURIComponent(attachment.id)}/content`;
+}
+
+export function attachmentDownloadUrl(attachment: Attachment): string {
+  return `api/attachments/${encodeURIComponent(attachment.id)}/download`;
+}
+
+export function resolvePersistedAttachmentUrl(value: string): string {
+  if (/^\/?api\/attachments\/[^/?#]+\/content$/.test(value)) {
+    return resolveTaskboardUrl(value);
+  }
+  try {
+    const url = new URL(value);
+    const match = url.pathname.match(/\/api\/attachments\/([^/]+)\/content$/);
+    if (url.protocol === "http:" && url.hostname === "127.0.0.1" && match) {
+      return resolveTaskboardUrl(`/api/attachments/${match[1]}/content`);
+    }
+  } catch {
+    return value;
+  }
+  return value;
+}
+
+export function markdownIncludesAttachment(markdown: string, attachment: Attachment): boolean {
+  return markdown.includes(`api/attachments/${encodeURIComponent(attachment.id)}/content`);
 }
