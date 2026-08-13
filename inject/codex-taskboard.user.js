@@ -25,6 +25,7 @@
   const REATTACH_DELAY_MS = 160;
   const FRAME_READY_TIMEOUT_MS = 12_000;
   const HOST_REQUEST_TIMEOUT_MS = 12_000;
+  const CONVERSATION_REQUEST_TIMEOUT_MS = 35_000;
   const HOST_HEARTBEAT_MAX_AGE_MS = 8_000;
   const MACOS_TITLEBAR_SAFE_LEFT = 80;
   const FRAME_REFRESH_PARAM = "__codex_taskboard_refresh";
@@ -429,18 +430,18 @@
       || null;
   }
 
-  async function selectedNativeProjectId() {
+  function requestNativeFetch(path, body) {
     const bridge = window.electronBridge;
-    if (!bridge || typeof bridge.sendMessageFromView !== "function") return "";
+    if (!bridge || typeof bridge.sendMessageFromView !== "function") return Promise.resolve(null);
     return new Promise((resolve) => {
-      const requestId = `taskboard-project-context-${crypto.randomUUID()}`;
+      const requestId = `taskboard-native-fetch-${crypto.randomUUID()}`;
       let settled = false;
-      const finish = (projectId = "") => {
+      const finish = (value = null) => {
         if (settled) return;
         settled = true;
         window.clearTimeout(timeout);
         window.removeEventListener("message", onMessage);
-        resolve(projectId);
+        resolve(value);
       };
       const onMessage = (event) => {
         const message = event.data;
@@ -451,8 +452,7 @@
           || message.requestId !== requestId
         ) return;
         try {
-          const selectedProject = JSON.parse(message.bodyJsonString || "null")?.value;
-          finish(typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "");
+          finish(JSON.parse(message.bodyJsonString || "null"));
         } catch (_) {
           finish();
         }
@@ -464,13 +464,37 @@
           type: "fetch",
           requestId,
           method: "POST",
-          url: "vscode://codex/get-global-state",
-          body: JSON.stringify({ key: "selected-project" }),
+          url: `vscode://codex/${path}`,
+          body: JSON.stringify(body),
         });
       } catch (_) {
         finish();
       }
     });
+  }
+
+  async function selectedNativeProjectId() {
+    const selectedProject = (await requestNativeFetch(
+      "get-global-state",
+      { key: "selected-project" },
+    ))?.value;
+    return typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "";
+  }
+
+  async function activeNativeWorkspaceRoots() {
+    const roots = (await requestNativeFetch("active-workspace-roots", {}))?.roots;
+    return Array.isArray(roots) ? roots.filter((root) => typeof root === "string") : [];
+  }
+
+  function normalizeNativeRootPath(value) {
+    const path = String(value || "").trim();
+    if (!path) return "";
+    const windowsPath = /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\");
+    const normalizedSlashes = windowsPath ? path.replace(/\\/g, "/") : path;
+    const withoutTrailingSlash = normalizedSlashes.replace(/\/+$/, "")
+      || (normalizedSlashes.startsWith("/") ? "/" : normalizedSlashes);
+    if (!windowsPath || !/^[A-Za-z]:/.test(withoutTrailingSlash)) return withoutTrailingSlash;
+    return `${withoutTrailingSlash[0].toLowerCase()}${withoutTrailingSlash.slice(1)}`;
   }
 
   function readCodexProjects() {
@@ -786,14 +810,10 @@
   }
 
   async function nativeProjectContext() {
-    const [bootstrap, projectId] = await Promise.all([
-      window.electronBridge?.getInitialSidebarBootstrap?.(),
-      selectedNativeProjectId(),
-    ]);
+    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
     const entries = bootstrap?.globalStateEntries ?? [];
     const localProjects = entries.find((entry) => entry.key === "local-projects")?.value ?? {};
     return {
-      projectId,
       projects: Object.values(localProjects).filter((project) => (
         project
         && typeof project.id === "string"
@@ -805,19 +825,34 @@
   async function resolveNativeProject(requestedProjectId, workspacePath) {
     const context = await nativeProjectContext();
     if (workspacePath) {
-      return context.projects.find((project) => project.rootPaths.includes(workspacePath)) ?? null;
+      const normalizedWorkspacePath = normalizeNativeRootPath(workspacePath);
+      for (const project of context.projects) {
+        const targetRoot = project.rootPaths.find((root) => (
+          typeof root === "string"
+          && normalizeNativeRootPath(root) === normalizedWorkspacePath
+        ));
+        if (targetRoot) return { project, targetRoot };
+      }
+      return null;
     }
-    return context.projects.find((project) => project.id === requestedProjectId) ?? null;
+    const project = context.projects.find((candidate) => candidate.id === requestedProjectId) ?? null;
+    const targetRoot = project?.rootPaths[0];
+    return typeof targetRoot === "string" && normalizeNativeRootPath(targetRoot)
+      ? { project, targetRoot }
+      : null;
   }
 
-  async function waitForNativeProject(project, workspacePath) {
+  async function waitForNativeProject(project, targetRoot) {
     const deadline = Date.now() + 8_000;
+    const normalizedTargetRoot = normalizeNativeRootPath(targetRoot);
     while (Date.now() < deadline) {
-      const context = await nativeProjectContext();
-      const current = context.projects.find((candidate) => candidate.id === context.projectId);
+      const [projectId, activeRoots] = await Promise.all([
+        selectedNativeProjectId(),
+        activeNativeWorkspaceRoots(),
+      ]);
       if (
-        context.projectId === project.id
-        && (!workspacePath || current?.rootPaths.includes(workspacePath))
+        projectId === project.id
+        && activeRoots.some((root) => normalizeNativeRootPath(root) === normalizedTargetRoot)
       ) return;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
@@ -855,8 +890,8 @@
         ));
       }
 
-      const targetProject = await resolveNativeProject(requestedProjectId, workspacePath);
-      if (!targetProject) {
+      const target = await resolveNativeProject(requestedProjectId, workspacePath);
+      if (!target) {
         throw new Error(hostText(
           "Codex 中没有映射目标项目或 worktree",
           "The target project or worktree is not mapped in Codex",
@@ -864,10 +899,10 @@
       }
       bridge.sendMessageFromView({
         type: "electron-set-active-workspace-root",
-        projectId: targetProject.id,
+        projectId: target.project.id,
       });
-      await waitForNativeProject(targetProject, workspacePath);
-      lastNativeProjectId = targetProject.id;
+      await waitForNativeProject(target.project, target.targetRoot);
+      lastNativeProjectId = target.project.id;
 
       closeTaskboard(false);
       await dispatchHostMessage({
@@ -1263,7 +1298,7 @@
       && Date.now() - hostHeartbeatAt <= HOST_HEARTBEAT_MAX_AGE_MS;
   }
 
-  function requestHost(action, payload = {}) {
+  function requestHost(action, payload = {}, timeoutMs = HOST_REQUEST_TIMEOUT_MS) {
     if (!hasLiveHostBinding()) {
       return Promise.reject(hostError(
         "Taskboard 启动器未运行，无法操作 Codex 对话输入框",
@@ -1276,7 +1311,7 @@
       const timeout = window.setTimeout(() => {
         hostRequests.delete(id);
         reject(hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond"));
-      }, HOST_REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       hostRequests.set(id, { resolve, reject, timeout });
       try {
         window.postMessage({
@@ -1307,7 +1342,7 @@
     return requestHost("start-task-conversation", {
       instruction,
       title,
-    });
+    }, CONVERSATION_REQUEST_TIMEOUT_MS);
   }
 
   function frameMatchesTaskboardUrl(taskboardUrl) {

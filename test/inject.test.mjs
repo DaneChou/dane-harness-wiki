@@ -251,17 +251,33 @@ test("only a loopback Taskboard iframe can request native automation", () => {
 test("issues start a native Codex conversation in the confirmed workspace with the task title", () => {
   assert.match(source, /async function createThreadForTask\(payload\)/);
   assert.match(source, /async function nativeProjectContext\(\)/);
+  assert.match(source, /async function activeNativeWorkspaceRoots\(\)/);
+  assert.match(source, /requestNativeFetch\("active-workspace-roots", \{\}\)/);
+  assert.match(source, /function normalizeNativeRootPath\(value\)/);
   assert.match(source, /async function resolveNativeProject\(requestedProjectId, workspacePath\)/);
-  assert.match(source, /project\.rootPaths\.includes\(workspacePath\)/);
-  assert.match(source, /async function waitForNativeProject\(project, workspacePath\)/);
+  assert.match(source, /if \(targetRoot\) return \{ project, targetRoot \}/);
+  assert.match(source, /async function waitForNativeProject\(project, targetRoot\)/);
+  const waitStart = source.indexOf("async function waitForNativeProject");
+  const waitSource = source.slice(waitStart, source.indexOf("async function createThreadForTask", waitStart));
+  assert.match(waitSource, /selectedNativeProjectId\(\)/);
+  assert.match(waitSource, /activeNativeWorkspaceRoots\(\)/);
+  assert.match(waitSource, /projectId === project\.id/);
+  assert.match(waitSource, /normalizeNativeRootPath\(root\) === normalizedTargetRoot/);
   assert.match(
     source,
-    /type: "electron-set-active-workspace-root",\s*projectId: targetProject\.id,/,
+    /type: "electron-set-active-workspace-root",\s*projectId: target\.project\.id,/,
   );
-  assert.match(source, /await waitForNativeProject\(targetProject, workspacePath\)/);
+  assert.match(source, /await waitForNativeProject\(target\.project, target\.targetRoot\)/);
+  assert.match(source, /const HOST_REQUEST_TIMEOUT_MS = 12_000/);
+  assert.match(source, /const CONVERSATION_REQUEST_TIMEOUT_MS = 35_000/);
+  assert.match(source, /function requestHost\(action, payload = \{\}, timeoutMs = HOST_REQUEST_TIMEOUT_MS\)/);
+  assert.equal((source.match(/CONVERSATION_REQUEST_TIMEOUT_MS/g) ?? []).length, 2);
   assert.doesNotMatch(source, /prefillPrompt: prompt/);
   assert.match(source, /requestHostTaskConversationStart\(\{ instruction, title \}\)/);
-  assert.match(source, /requestHost\("start-task-conversation", \{\s*instruction,\s*title,/);
+  assert.match(
+    source,
+    /requestHost\("start-task-conversation", \{\s*instruction,\s*title,\s*\}, CONVERSATION_REQUEST_TIMEOUT_MS\)/,
+  );
   assert.match(source, /lastNativeThreadId = normalizeThreadId\(started\.threadId\)/);
   assert.match(source, /type: "taskboard:thread-prepared", payload: \{ taskId, threadId: started\.threadId \}/);
   assert.match(
