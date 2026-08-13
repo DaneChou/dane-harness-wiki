@@ -18,6 +18,7 @@ import {
 } from "../shared/domain.mjs";
 import { resolveCodexExecutable } from "../shared/codex-executable.mjs";
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
+import { executableCommand } from "../shared/executable-command.mjs";
 import { normalizeWorkflowSnapshot } from "../shared/workflow-control-flow.mjs";
 import { AiChatService } from "./ai-chat.mjs";
 import { resolveAiWorkspace, resolveMappedAiWorkspace } from "./ai-chat-catalog.mjs";
@@ -1146,7 +1147,8 @@ async function scanDevelopmentContexts(workspacePath, processEnv = process.env) 
 
 async function discoverSkills(codexExecutable, workspacePath, processEnv) {
   const entries = await new Promise((resolve, reject) => {
-    const child = spawn(codexExecutable, ["app-server", "--stdio"], {
+    const command = executableCommand(codexExecutable, ["app-server", "--stdio"]);
+    const child = spawn(command.executable, command.args, {
       cwd: workspacePath,
       env: processEnv,
       stdio: ["pipe", "pipe", "ignore"],
@@ -1260,7 +1262,8 @@ async function discoverSkills(codexExecutable, workspacePath, processEnv) {
 }
 
 async function discoverMcpServers(codexExecutable, processEnv) {
-  const result = await execFileAsync(codexExecutable, ["mcp", "list", "--json"], {
+  const command = executableCommand(codexExecutable, ["mcp", "list", "--json"]);
+  const result = await execFileAsync(command.executable, command.args, {
     env: processEnv,
     timeout: 8_000,
     maxBuffer: 2 * 1024 * 1024,

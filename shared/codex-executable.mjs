@@ -11,11 +11,27 @@ function executableFile(candidate) {
   }
 }
 
-function executableOnPath(env) {
+function executableOnPath(env, platform) {
   for (const directory of (env.PATH || "").split(path.delimiter)) {
     if (!directory) continue;
-    const candidate = executableFile(path.join(directory, "codex"));
-    if (candidate) return candidate;
+    if (platform === "win32") {
+      const nativeExecutable = executableFile(path.join(directory, "codex.exe"));
+      if (nativeExecutable) return nativeExecutable;
+
+      const npmEntry = executableFile(path.join(
+        directory,
+        "node_modules",
+        "@openai",
+        "codex",
+        "bin",
+        "codex.js",
+      ));
+      if (npmEntry) return npmEntry;
+      continue;
+    }
+
+    const executable = executableFile(path.join(directory, "codex"));
+    if (executable) return executable;
   }
   return null;
 }
@@ -41,7 +57,7 @@ export function resolveCodexExecutable({
     if (bundled) return bundled;
   }
 
-  const installedCli = executableOnPath(env);
+  const installedCli = executableOnPath(env, platform);
   if (installedCli) return installedCli;
 
   if (platform === "darwin") {

@@ -1053,6 +1053,17 @@ async fn offer_update(
     quit: &MenuItem<tauri::Wry>,
     show_current_version: bool,
 ) {
+    if cfg!(target_os = "windows") {
+        update_snapshot(app, state, |snapshot| {
+            snapshot.update_message = "Windows 版本暂不支持自动更新。".into();
+            snapshot.update_available = false;
+        });
+        check_update
+            .set_text("检查更新（Windows 暂不支持）")
+            .unwrap();
+        check_update.set_enabled(false).unwrap();
+        return;
+    }
     if state
         .update_flow_in_progress
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
