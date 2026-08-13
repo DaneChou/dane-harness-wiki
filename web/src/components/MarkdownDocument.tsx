@@ -22,7 +22,8 @@ interface MarkdownAstNode {
 
 const RAW_COMMENT = /<!--[\s\S]*?-->/g;
 const ENCODED_COMMENT = /&lt;!--[\s\S]*?--&gt;/gi;
-const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(['"])?(?!#)/i;
+const MERMAID_IMAGE_PROPERTY = /\bimg\s*:/i;
+const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
 
 export function remarkStripMarkdownComments() {
   return (tree: MarkdownAstNode) => {
@@ -95,6 +96,9 @@ export function MermaidDiagram({ source }: { source: string }) {
     void Promise.all([import("mermaid"), import("dompurify")])
       .then(async ([mermaidModule, purifierModule]) => {
         const mermaid = mermaidModule.default;
+        if (EXTERNAL_CSS_REFERENCE.test(source)) {
+          throw new Error("External Mermaid resources are not allowed.");
+        }
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
@@ -102,6 +106,15 @@ export function MermaidDiagram({ source }: { source: string }) {
           theme: theme === "dark" ? "dark" : "default",
           htmlLabels: false,
         });
+        if (MERMAID_IMAGE_PROPERTY.test(source)) {
+          const parsed = await mermaid.mermaidAPI.getDiagramFromText(source);
+          const vertices = (
+            parsed.db as { getVertices?: () => Map<string, { img?: string }> }
+          ).getVertices?.();
+          if ([...(vertices?.values() ?? [])].some((vertex) => vertex.img)) {
+            throw new Error("External Mermaid resources are not allowed.");
+          }
+        }
         const { svg } = await mermaid.render(renderId, source);
         const sanitizedSvg = purifierModule.default.sanitize(svg, {
           USE_PROFILES: { svg: true, svgFilters: true },
@@ -155,7 +168,7 @@ export function MarkdownDocument({ value }: { value: string }) {
   return (
     <div className="issue-description-document">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks, remarkStripMarkdownComments]}
+        remarkPlugins={[remarkGfm, remarkStripMarkdownComments, remarkBreaks]}
         urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
         components={{
           a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
