@@ -776,25 +776,10 @@
     }
   }
 
-  async function waitForPreparedComposer(identifier) {
-    const deadline = Date.now() + 8_000;
-    while (Date.now() < deadline) {
-      const editor = document.querySelector('[data-codex-composer="true"][contenteditable="true"]');
-      if (editor && editor.getClientRects().length > 0) {
-        const containsIdentifier = normalizedLabel(editor.textContent).includes(normalizedLabel(identifier));
-        if (containsIdentifier) return editor;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 80));
-    }
-    throw new Error(hostText(
-      "Codex 对话输入框没有写入任务编号",
-      "The issue identifier was not written to the Codex composer",
-    ));
-  }
-
   async function createThreadForTask(payload) {
     const taskId = typeof payload?.taskId === "string" ? payload.taskId.trim() : "";
     const identifier = typeof payload?.identifier === "string" ? payload.identifier.trim() : "";
+    const title = typeof payload?.title === "string" ? payload.title.trim() : "";
     const instruction = typeof payload?.instruction === "string" ? payload.instruction.trim() : "";
     const workspacePath = typeof payload?.workspacePath === "string"
       ? payload.workspacePath.trim()
@@ -802,6 +787,7 @@
     if (
       !taskId
       || !identifier
+      || !title
       || !instruction
       || pendingThreadCreation
     ) return;
@@ -847,9 +833,9 @@
           focusComposerNonce: Date.now(),
         },
       });
-      await requestHostTaskComposerPrefill({ instruction });
-      await waitForPreparedComposer(identifier);
-      postToFrame({ type: "taskboard:thread-prepared", payload: { taskId } });
+      const started = await requestHostTaskConversationStart({ instruction, title });
+      lastNativeThreadId = normalizeThreadId(started.threadId);
+      postToFrame({ type: "taskboard:thread-prepared", payload: { taskId, threadId: started.threadId } });
     } catch (error) {
       postToFrame({
         type: "taskboard:thread-create-error",
@@ -1273,9 +1259,10 @@
     return requestHost("load-frame", { frameName, frameCapability: capability });
   }
 
-  function requestHostTaskComposerPrefill({ instruction }) {
-    return requestHost("prefill-task-composer", {
+  function requestHostTaskConversationStart({ instruction, title }) {
+    return requestHost("start-task-conversation", {
       instruction,
+      title,
     });
   }
 

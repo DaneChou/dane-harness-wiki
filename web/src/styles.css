@@ -3969,7 +3969,21 @@ kbd {
   min-width: 0;
 }
 
-.composer-footer-leading > span {
+.comment-status-action {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.comment-status-action input {
+  margin: 0;
+}
+
+.comment-status-action span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

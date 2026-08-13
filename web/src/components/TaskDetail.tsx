@@ -400,6 +400,7 @@ export function TaskDetail({
     ),
   );
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
+  const [changeStatusToTodo, setChangeStatusToTodo] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -431,7 +432,10 @@ export function TaskDetail({
       setDescription(task.description);
       setDescriptionSegments(createInlineMediaSegments(task.description));
     }
-    if (taskChanged) setEditingDescription(false);
+    if (taskChanged) {
+      setEditingDescription(false);
+      setChangeStatusToTodo(false);
+    }
   }, [task]);
 
   useEffect(() => {
@@ -669,6 +673,11 @@ export function TaskDetail({
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
+      if (changeStatusToTodo) {
+        const saved = await onUpdate(currentTask, { status: "todo" });
+        setCurrentTask(saved);
+        setChangeStatusToTodo(false);
+      }
       const failed = results.length - uploaded.length;
       if (failed > 0) setCommentsError([
         `评论已发布，但有 ${failed} 个附件上传失败。`,
@@ -1364,7 +1373,15 @@ export function TaskDetail({
                     >
                       <LinearIcon name="attachment" />
                     </button>
-                    <span>{text("草稿会自动保存", "Drafts are saved automatically")}</span>
+                    <label className="comment-status-action">
+                      <input
+                        type="checkbox"
+                        checked={changeStatusToTodo}
+                        disabled={submitting}
+                        onChange={(event) => setChangeStatusToTodo(event.currentTarget.checked)}
+                      />
+                      <span>{text("改变状态为-等待认领", "Change status to Todo")}</span>
+                    </label>
                     <input
                       ref={commentAttachmentInputRef}
                       type="file"

@@ -910,10 +910,7 @@ async function openAttachment(request) {
   return { opened: true };
 }
 
-async function requestCodexAutomationViaCdp(cdp, executionContextId, method, params) {
-  if (!codexAutomationMethods.has(method)) {
-    throw new Error(`Unsupported Codex automation method: ${method}`);
-  }
+async function requestCodexMethodViaCdp(cdp, executionContextId, method, params) {
   const requestId = [
     "taskboard-automation",
     process.pid,
@@ -978,13 +975,13 @@ async function requestCodexAutomationViaCdp(cdp, executionContextId, method, par
   if (evaluation.exceptionDetails) {
     throw new Error(
       evaluation.exceptionDetails.exception?.description
-      || "Codex automation request failed",
+      || "Codex request failed",
     );
   }
   const response = evaluation.result.value;
-  if (!response?.ok) throw new Error(response?.error || "Codex automation request failed");
+  if (!response?.ok) throw new Error(response?.error || "Codex request failed");
   if (!Number.isInteger(response.status) || response.status < 200 || response.status >= 300) {
-    throw new Error(`Codex automation request returned HTTP ${response.status}`);
+    throw new Error(`Codex request returned HTTP ${response.status}`);
   }
   if (typeof response.bodyJsonString !== "string" || response.bodyJsonString.length === 0) {
     return {};
@@ -992,8 +989,15 @@ async function requestCodexAutomationViaCdp(cdp, executionContextId, method, par
   try {
     return JSON.parse(response.bodyJsonString);
   } catch {
-    throw new Error("Codex automation request returned invalid JSON");
+    throw new Error("Codex request returned invalid JSON");
   }
+}
+
+async function requestCodexAutomationViaCdp(cdp, executionContextId, method, params) {
+  if (!codexAutomationMethods.has(method)) {
+    throw new Error(`Unsupported Codex automation method: ${method}`);
+  }
+  return requestCodexMethodViaCdp(cdp, executionContextId, method, params);
 }
 
 async function applyTaskboardAutomationPolicy(
@@ -1264,9 +1268,10 @@ async function restoreQuotaPolicies(cdp) {
   }
 }
 
-async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
-  const { instruction } = request;
+async function startTaskConversationViaCdp(cdp, executionContextId, request) {
+  const { instruction, title } = request;
   const deadline = Date.now() + 8_000;
+  let previousThreadId = "";
   while (Date.now() < deadline) {
     const prepared = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
@@ -1275,16 +1280,23 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
           '[data-codex-composer="true"][contenteditable="true"]'
         )).find((candidate) => candidate.getClientRects().length > 0);
         if (!editor) return { ready: false };
-        if ((editor.textContent || "").includes(instruction)) {
-          return { ready: true, matches: true };
-        }
         editor.focus();
         const selection = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(editor);
         selection?.removeAllRanges();
         selection?.addRange(range);
-        return { ready: true, matches: false };
+        const activeRow = Array.from(document.querySelectorAll(
+          '[data-app-action-sidebar-thread-id]'
+        )).find((row) => (
+          row.getAttribute('data-app-action-sidebar-thread-active') === 'true'
+          || ['page', 'true'].includes(row.getAttribute('aria-current'))
+        ));
+        return {
+          ready: true,
+          matches: (editor.textContent || "").includes(instruction),
+          previousThreadId: activeRow?.getAttribute('data-app-action-sidebar-thread-id') || "",
+        };
       })()`,
       contextId: executionContextId,
       returnByValue: true,
@@ -1293,28 +1305,59 @@ async function prefillTaskComposerViaCdp(cdp, executionContextId, request) {
       await new Promise((resolve) => setTimeout(resolve, 80));
       continue;
     }
-    if (prepared.result.value.matches) return { prefilled: true };
-
-    await cdp.send("Input.insertText", { text: instruction });
+    previousThreadId = prepared.result.value.previousThreadId || "";
+    if (!prepared.result.value.matches) {
+      await cdp.send("Input.insertText", { text: instruction });
+    }
+    await cdp.send("Input.dispatchKeyEvent", {
+      type: "keyDown",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
+    await cdp.send("Input.dispatchKeyEvent", {
+      type: "keyUp",
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      nativeVirtualKeyCode: 13,
+    });
     break;
   }
 
-  while (Date.now() < deadline) {
-    const verified = await cdp.send("Runtime.evaluate", {
+  const threadDeadline = Date.now() + 12_000;
+  while (Date.now() < threadDeadline) {
+    const started = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
-        const instruction = ${JSON.stringify(instruction)};
-        const editor = Array.from(document.querySelectorAll(
-          '[data-codex-composer="true"][contenteditable="true"]'
-        )).find((candidate) => candidate.getClientRects().length > 0);
-        return Boolean(editor && (editor.textContent || "").includes(instruction));
+        const activeRow = Array.from(document.querySelectorAll(
+          '[data-app-action-sidebar-thread-id]'
+        )).find((row) => (
+          row.getAttribute('data-app-action-sidebar-thread-active') === 'true'
+          || ['page', 'true'].includes(row.getAttribute('aria-current'))
+        ));
+        const rowThreadId = activeRow?.getAttribute('data-app-action-sidebar-thread-id') || "";
+        const source = window.location.pathname + window.location.search + window.location.hash;
+        const match = source.match(/\\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:[/?#]|$)/)
+          || source.match(/\\/([A-Za-z0-9_-]{24,})(?:[/?#]|$)/);
+        return rowThreadId || (match ? decodeURIComponent(match[1]) : "");
       })()`,
       contextId: executionContextId,
       returnByValue: true,
     });
-    if (verified.result.value === true) return { prefilled: true };
+    const threadId = typeof started.result.value === "string" ? started.result.value : "";
+    if (threadId && threadId !== previousThreadId) {
+      await requestCodexMethodViaCdp(cdp, executionContextId, "set-thread-title", {
+        conversationId: threadId,
+        title,
+        requireAcknowledgement: true,
+        updateDescription: false,
+      });
+      return { threadId, title };
+    }
     await new Promise((resolve) => setTimeout(resolve, 80));
   }
-  throw new Error("Timed out while writing the issue instruction into the Codex composer");
+  throw new Error("Timed out while starting the Codex conversation");
 }
 
 async function sendHostResponse(cdp, executionContextId, response) {
@@ -1367,8 +1410,8 @@ function installTaskboardHostBinding(cdp, supervisor, startupToken) {
             : reconcileTaskboardAutomation(request, rpc);
         })()
       ),
-      prefill: (request) => (
-        prefillTaskComposerViaCdp(cdp, undefined, request)
+      startConversation: (request) => (
+        startTaskConversationViaCdp(cdp, undefined, request)
       ),
       sendResponse: (executionContextId, response) => (
         sendHostResponse(cdp, executionContextId, response)

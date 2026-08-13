@@ -2363,6 +2363,7 @@ export function App() {
       payload: {
         taskId: task.id,
         identifier: task.identifier,
+        title: task.title,
         instruction,
         codexProjectId: codexProject?.id ?? (
           selectedProject?.id === GLOBAL_PROJECT_ID ? hostContext?.projectId : selectedProject?.id
