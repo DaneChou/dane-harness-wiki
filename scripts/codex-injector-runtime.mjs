@@ -2,7 +2,7 @@ const HOST_REQUEST_ERROR = "自动认领配置暂时无法应用，请刷新后�
 const AUTOMATION_SCHEMA_DIAGNOSTIC = "AUTOMATION_SCHEMA_MISMATCH";
 
 function parseHostRequest(payload, parseAutomationRequest) {
-  if (typeof payload !== "string" || payload.length > 4_096) {
+  if (typeof payload !== "string" || payload.length > 16_384) {
     return { id: null, request: null, error: HOST_REQUEST_ERROR };
   }
 
@@ -58,10 +58,22 @@ function parseHostRequest(payload, parseAutomationRequest) {
         };
   }
   if (
-    request.action === "prefill-task-composer"
+    request.action === "start-task-conversation"
+    && typeof request.taskId === "string"
+    && request.taskId.length > 0
+    && request.taskId.length <= 128
+    && !/[\u0000-\u001f\u007f]/.test(request.taskId)
+    && typeof request.previousThreadId === "string"
+    && request.previousThreadId.length <= 240
+    && typeof request.targetRoot === "string"
+    && request.targetRoot.length > 0
+    && request.targetRoot.length <= 4_096
     && typeof request.instruction === "string"
     && request.instruction.length > 0
     && request.instruction.length <= 1_024
+    && typeof request.title === "string"
+    && request.title.length > 0
+    && request.title.length <= 240
   ) {
     return { id, request, error: null };
   }
@@ -101,7 +113,7 @@ export async function handleHostBindingPayload(params, handlers) {
     } else if (parsed.request.action === "automation") {
       result = await handlers.runAutomation(parsed.request, params.executionContextId);
     } else {
-      result = await handlers.prefill(parsed.request, params.executionContextId);
+      result = await handlers.startConversation(parsed.request, params.executionContextId);
     }
     await handlers.sendResponse(params.executionContextId, {
       id: parsed.request.id,

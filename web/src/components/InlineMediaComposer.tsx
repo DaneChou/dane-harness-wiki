@@ -1,21 +1,25 @@
 import {
   forwardRef,
+  useEffect,
   useImperativeHandle,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ClipboardEvent,
+  type KeyboardEvent,
   type KeyboardEventHandler,
 } from "react";
 import { definitions } from "mdast-util-definitions";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
-import type { Attachment } from "../types";
+import type { Attachment, Task } from "../types";
 import { attachmentContentUrl, resolvePersistedAttachmentUrl } from "../api";
 import { useTaskboardI18n } from "../i18n";
 import { clipboardImages, fileKey, MAX_ATTACHMENT_SIZE } from "./PendingAttachments";
 import { LinearIcon } from "./LinearIcon";
+import { IssueMentionMenu } from "./IssueMentionMenu";
 
 interface InlineTextSegment {
   id: string;
@@ -61,6 +65,7 @@ export interface InlineMediaComposerHandle {
 
 interface InlineMediaComposerProps {
   segments: InlineMediaSegment[];
+  mentionTasks?: readonly Task[];
   placeholder: string;
   ariaLabel: string;
   disabled?: boolean;
@@ -70,8 +75,17 @@ interface InlineMediaComposerProps {
   onKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>;
 }
 
+interface IssueMention {
+  segmentId: string;
+  start: number;
+  end: number;
+  query: string;
+  anchor: HTMLTextAreaElement;
+}
+
 let segmentSequence = 0;
 const inlineMediaMarkdownParser = unified().use(remarkParse).use(remarkGfm);
+const EMPTY_MENTION_TASKS: readonly Task[] = [];
 
 function segmentId(prefix: string): string {
   segmentSequence += 1;
@@ -265,6 +279,7 @@ function PersistedImageBlock({
 export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineMediaComposerProps>(
   function InlineMediaComposer({
     segments,
+    mentionTasks = EMPTY_MENTION_TASKS,
     placeholder,
     ariaLabel,
     disabled = false,
@@ -276,6 +291,21 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const textareas = useRef(new Map<string, HTMLTextAreaElement>());
     const pendingFocus = useRef<{ id: string; offset: number } | null>(null);
     const { text } = useTaskboardI18n();
+    const [mention, setMention] = useState<IssueMention | null>(null);
+    const [activeMentionIndex, setActiveMentionIndex] = useState(0);
+    const mentionResults = useMemo(() => {
+      if (!mention) return [];
+      const query = mention.query.toLocaleLowerCase();
+      return mentionTasks.filter((task) => (
+        !query
+        || (task.externalKey ?? task.identifier).toLocaleLowerCase().includes(query)
+        || task.title.toLocaleLowerCase().includes(query)
+      ));
+    }, [mention, mentionTasks]);
+    const selectedMentionIndex = Math.min(
+      activeMentionIndex,
+      Math.max(mentionResults.length - 1, 0),
+    );
 
     useLayoutEffect(() => {
       for (const element of textareas.current.values()) resizeTextarea(element);
@@ -287,6 +317,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       target.setSelectionRange(focus.offset, focus.offset);
       pendingFocus.current = null;
     }, [segments]);
+
+    useEffect(() => {
+      setActiveMentionIndex(0);
+    }, [mention?.query]);
+
+    useEffect(() => {
+      if (disabled || mentionTasks.length === 0) setMention(null);
+    }, [disabled, mentionTasks.length]);
 
     useImperativeHandle(ref, () => ({
       focus() {
@@ -323,6 +361,79 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       onChange(segments.map((segment) => (
         segment.id === id && segment.type === "text" ? { ...segment, text } : segment
       )));
+    }
+
+    function updateMention(
+      segment: InlineTextSegment,
+      value: string,
+      textarea: HTMLTextAreaElement,
+    ) {
+      if (mentionTasks.length === 0 || textarea.selectionStart !== textarea.selectionEnd) {
+        setMention(null);
+        return;
+      }
+      const end = textarea.selectionStart;
+      const prefix = value.slice(0, end);
+      const match = /(?:^|\s)@([^\s@]*)$/.exec(prefix);
+      if (!match) {
+        setMention(null);
+        return;
+      }
+      setMention({
+        segmentId: segment.id,
+        start: prefix.lastIndexOf("@"),
+        end,
+        query: match[1],
+        anchor: textarea,
+      });
+    }
+
+    function selectMention(task: Task) {
+      if (!mention) return;
+      const segment = segments.find((candidate): candidate is InlineTextSegment => (
+        candidate.id === mention.segmentId && candidate.type === "text"
+      ));
+      if (!segment) return;
+      const displayIdentifier = task.externalKey ?? task.identifier;
+      const route = new URLSearchParams({ project: task.projectId, issue: task.identifier });
+      const suffix = segment.text.slice(mention.end);
+      const reference = `[@${displayIdentifier}](?${route})${/^\s/.test(suffix) ? "" : " "}`;
+      const nextText = `${segment.text.slice(0, mention.start)}${reference}${suffix}`;
+      pendingFocus.current = { id: segment.id, offset: mention.start + reference.length };
+      setMention(null);
+      onChange(segments.map((candidate) => (
+        candidate.id === segment.id ? { ...segment, text: nextText } : candidate
+      )));
+    }
+
+    function handleTextareaKeyDown(
+      event: KeyboardEvent<HTMLTextAreaElement>,
+    ) {
+      if (event.nativeEvent.isComposing || event.keyCode === 229) {
+        onKeyDown?.(event);
+        return;
+      }
+      if (mention && event.key === "ArrowDown" && mentionResults.length > 0) {
+        event.preventDefault();
+        setActiveMentionIndex((index) => (index + 1) % mentionResults.length);
+        return;
+      }
+      if (mention && event.key === "ArrowUp" && mentionResults.length > 0) {
+        event.preventDefault();
+        setActiveMentionIndex((index) => (index - 1 + mentionResults.length) % mentionResults.length);
+        return;
+      }
+      if (mention && event.key === "Enter" && mentionResults[selectedMentionIndex]) {
+        event.preventDefault();
+        selectMention(mentionResults[selectedMentionIndex]);
+        return;
+      }
+      if (mention && event.key === "Escape") {
+        event.preventDefault();
+        setMention(null);
+        return;
+      }
+      onKeyDown?.(event);
     }
 
     function pasteImages(
@@ -391,9 +502,17 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
               onChange={(event) => {
                 changeText(segment.id, event.target.value);
                 resizeTextarea(event.currentTarget);
+                updateMention(segment, event.target.value, event.currentTarget);
               }}
               onPaste={(event) => pasteImages(event, segment)}
-              onKeyDown={onKeyDown}
+              onKeyDown={handleTextareaKeyDown}
+              onKeyUp={(event) => {
+                if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+                  updateMention(segment, event.currentTarget.value, event.currentTarget);
+                }
+              }}
+              onClick={(event) => updateMention(segment, event.currentTarget.value, event.currentTarget)}
+              onBlur={() => setMention(null)}
             />
           ) : segment.type === "pending-image" ? (
             <PendingImageBlock
@@ -411,6 +530,17 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             />
           )
         ))}
+        {mention && (
+          <IssueMentionMenu
+            anchor={mention.anchor}
+            anchorOffset={mention.start}
+            tasks={mentionResults}
+            activeIndex={selectedMentionIndex}
+            onActiveIndexChange={setActiveMentionIndex}
+            onSelect={selectMention}
+            onClose={() => setMention(null)}
+          />
+        )}
       </div>
     );
   },

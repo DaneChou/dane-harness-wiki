@@ -5,6 +5,7 @@ import {
   useId,
   useState,
   type ComponentPropsWithoutRef,
+  type MouseEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -312,14 +313,28 @@ function MarkdownPre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
   return <pre {...props}>{children}</pre>;
 }
 
-export function MarkdownDocument({ value }: { value: string }) {
+export function MarkdownDocument({
+  value,
+  onLinkClick,
+}: {
+  value: string;
+  onLinkClick?: (event: MouseEvent<HTMLAnchorElement>, href?: string) => void;
+}) {
   return (
     <div className="issue-description-document">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkStripMarkdownComments, remarkBreaks]}
         urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
         components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          a: ({ node: _node, href, ...props }) => (
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(event) => onLinkClick?.(event, href)}
+            />
+          ),
           pre: MarkdownPre,
         }}
       >
