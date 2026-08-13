@@ -67,6 +67,14 @@ test("frame loading and external links require bounded authenticated values", as
   }, handlers);
   await handleHostBindingPayload({
     payload: JSON.stringify({
+      id: "external-request-http",
+      action: "open-external",
+      url: "http://10.0.203.86:30842/projects",
+    }),
+    executionContextId: 12,
+  }, handlers);
+  await handleHostBindingPayload({
+    payload: JSON.stringify({
       id: "external-request-1",
       action: "open-external",
       url: "https://example.com/review",
@@ -77,13 +85,15 @@ test("frame loading and external links require bounded authenticated values", as
     payload: JSON.stringify({
       id: "external-request-2",
       action: "open-external",
-      url: "http://example.com/not-allowed",
+      url: "javascript:alert(1)",
     }),
     executionContextId: 12,
   }, handlers);
 
   assert.deepEqual(calls, [
     ["load", "30c3d0c4-aa0f-4169-93c0-bb3da20bc654"],
+    ["response", true],
+    ["open", "http://10.0.203.86:30842/projects"],
     ["response", true],
     ["open", "https://example.com/review"],
     ["response", true],

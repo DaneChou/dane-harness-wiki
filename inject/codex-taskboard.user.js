@@ -932,7 +932,7 @@
   function handleExternalOpen(payload) {
     try {
       const url = new URL(payload?.url);
-      if (url.protocol !== "https:") return;
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
       void requestHost("open-external", { url: url.href }).catch(() => {});
     } catch (_) {}
   }
@@ -948,8 +948,8 @@
         type: "taskboard:attachment-open-error",
         payload: {
           error: hostText(
-            "无法用系统默认应用打开附件，请重试。",
-            "Could not open the attachment in its default app. Try again.",
+            "无法在 Finder 中显示附件，请重试。",
+            "Could not reveal the attachment in Finder. Try again.",
           ),
         },
       });
