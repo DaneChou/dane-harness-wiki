@@ -169,14 +169,15 @@ test("opaque iframe messages require the current document capability", () => {
   assert.match(source, /postMessage\(message, frameOrigin === "null" \? "\*" : frameOrigin\)/);
 });
 
-test("packaged HTTPS links are opened by the authenticated host instead of a sandbox popup", () => {
+test("HTTP and HTTPS links are opened by the authenticated host instead of a sandbox popup", () => {
   assert.match(embeddedHost, /a\[target="_blank"\]/);
-  assert.match(embeddedHost, /url\.protocol !== "https:"/);
+  assert.match(embeddedHost, /url\.protocol !== "http:" && url\.protocol !== "https:"/);
   assert.match(embeddedHost, /event\.preventDefault\(\)/);
   assert.match(embeddedHost, /type: "taskboard:open-external"/);
   assert.match(embeddedHost, /challenge: activeFrameChallenge/);
   assert.match(source, /message\.type === "taskboard:open-external"/);
   assert.match(source, /requestHost\("open-external", \{ url: url\.href \}\)/);
+  assert.match(source, /url\.protocol !== "http:" && url\.protocol !== "https:"/);
 });
 
 test("the iframe automation contract is forwarded through the fixed host binding", () => {
