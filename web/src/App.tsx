@@ -2935,6 +2935,8 @@ export function App() {
         ) : hasLoadedTasks
           && tasks.length === 0
           && selectedProject
+          && selectedProject.id !== GLOBAL_PROJECT_ID
+          && Boolean(selectedDeviceWorkspacePath ?? selectedProject.workspacePath)
           && !isJiraProject
           && localAiChatAvailable ? (
           <div className="page-empty">
