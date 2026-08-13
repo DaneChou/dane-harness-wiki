@@ -33,14 +33,43 @@ test("the resident injector authenticates its launcher-managed Taskboard service
   assert.match(runtimeSource, /request\.frameCapability/);
 });
 
-test("the CDP bridge accepts service ensure and native instruction composer prefill actions", () => {
+test("the CDP bridge accepts service ensure and native task conversation start actions", () => {
   assert.match(source, /const hostBindingName = "__codexTaskboardHostV1"/);
   assert.match(runtimeSource, /request\.action === "ensure"/);
-  assert.match(runtimeSource, /request\.action === "prefill-task-composer"/);
+  assert.match(runtimeSource, /request\.action === "start-task-conversation"/);
   assert.match(runtimeSource, /request\.action === "open-external"/);
+  assert.match(runtimeSource, /request\.taskId/);
+  assert.match(runtimeSource, /request\.previousThreadId\.length <= 240/);
+  assert.match(runtimeSource, /request\.targetRoot\.length <= 4_096/);
   assert.match(runtimeSource, /request\.instruction\.length <= 1_024/);
-  assert.match(source, /function prefillTaskComposerViaCdp/);
-  assert.match(source, /cdp\.send\("Input\.insertText", \{ text: instruction \}\)/);
+  assert.match(runtimeSource, /request\.title\.length <= 240/);
+  assert.match(source, /async function startTaskConversationViaCdp/);
+  assert.match(source, /data-composer-placement="home"/);
+  assert.match(source, /\(editor\.textContent \|\| ""\) !== \$\{JSON\.stringify\(instruction\)\}/);
+  assert.doesNotMatch(source, /cdp\.send\("Input\.insertText", \{ text: instruction \}\)/);
+  assert.match(
+    source,
+    /cdp\.send\("Input\.dispatchKeyEvent", \{\s*type: "keyDown",\s*key: "Enter"/,
+  );
+  assert.match(
+    source,
+    /cdp\.send\("Input\.dispatchKeyEvent", \{\s*type: "keyUp",\s*key: "Enter"/,
+  );
+  assert.match(source, /submitted = true/);
+  assert.match(source, /if \(!submitted\) throw new Error/);
+  assert.match(source, /const threadId = typeof started\.result\.value === "string"/);
+  assert.match(source, /threadId && threadId !== previousThreadId/);
+  assert.match(source, /function requestCodexAppServerViaCdp/);
+  assert.match(source, /type: "mcp-request"/);
+  assert.match(source, /"thread\/read"/);
+  assert.match(source, /normalizeWorkspaceRoot\(result\.thread\.cwd\) === normalizedTargetRoot/);
+  assert.match(source, /"thread\/name\/set"/);
+  assert.match(source, /result\.thread\.name === title/);
+  assert.match(source, /const taskConversationOperations = new Map\(\)/);
+  assert.match(source, /taskConversationOperations\.get\(request\.taskId\)/);
+  assert.match(source, /const taskConversationAppServerTimeoutMs = 30_000/);
+  assert.doesNotMatch(source, /window\.postMessage\(\{ type: "rename-thread" \}/);
+  assert.match(source, /return \{ threadId, title \}/);
   assert.match(source, /Runtime\.bindingCalled/);
   assert.match(source, /Page\.createIsolatedWorld/);
   assert.match(source, /Runtime\.addBinding", \{\s*name: hostBindingName,\s*executionContextId:/);

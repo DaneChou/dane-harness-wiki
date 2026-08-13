@@ -3969,15 +3969,28 @@ kbd {
   min-width: 0;
 }
 
-.composer-footer-leading > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.comment-status-action {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
 }
 
-.composer-footer kbd {
-  color: var(--text-tertiary);
-  font-size: 9px;
+.comment-status-action .board-setting-switch {
+  width: 30px;
+  height: 18px;
+}
+
+.comment-status-action .board-setting-switch > span:first-child {
+  top: 3px;
+  width: 12px;
+  height: 12px;
+}
+
+.comment-status-action .board-setting-switch.is-on > span:first-child {
+  transform: translateX(12px);
 }
 
 .issue-properties {
