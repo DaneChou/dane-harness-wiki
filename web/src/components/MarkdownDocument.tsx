@@ -101,7 +101,6 @@ export function MermaidDiagram({ source }: { source: string }) {
           suppressErrorRendering: true,
           theme: theme === "dark" ? "dark" : "default",
           htmlLabels: false,
-          flowchart: { htmlLabels: false },
         });
         const { svg } = await mermaid.render(renderId, source);
         const sanitizedSvg = purifierModule.default.sanitize(svg, {
