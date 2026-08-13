@@ -1000,7 +1000,10 @@
         const codexHostId = typeof payload?.codexHostId === "string"
           ? payload.codexHostId.trim()
           : "";
-        await waitForRemoteProject(codexProjectId, codexHostId, workspacePath);
+        const codexProjectWorkspacePath = typeof payload?.codexProjectWorkspacePath === "string"
+          ? payload.codexProjectWorkspacePath.trim()
+          : "";
+        await waitForRemoteProject(codexProjectId, codexHostId, codexProjectWorkspacePath);
       } else if (workspacePath) {
         await bridge.sendMessageFromView({
           type: "electron-set-active-workspace-root",

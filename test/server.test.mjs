@@ -893,6 +893,15 @@ test("existing task and comment thread attribution remains content-specific", as
   const result = await request(baseUrl, "/api/tasks/legacy-task");
   assert.equal(result.response.status, 200);
   assert.equal(result.body.task.threadId, "legacy-thread");
+  assert.equal(result.body.task.threadBinding, null);
+  assert.equal(result.body.task.legacyLocalThreadId, "legacy-thread");
+  assert.deepEqual(result.body.task.conversationRefs.map((ref) => ({
+    threadId: ref.threadId,
+    legacyLocal: ref.legacyLocal,
+  })), [
+    { threadId: "legacy-thread", legacyLocal: true },
+    { threadId: "legacy-comment-thread", legacyLocal: true },
+  ]);
   assert.equal(result.body.task.creatorType, "agent");
   assert.equal(result.body.task.creatorId, "codex-agent");
   assert.equal(result.body.task.creatorName, "Codex Agent");
@@ -918,6 +927,8 @@ test("existing task and comment thread attribution remains content-specific", as
   assert.equal(taskThreads, undefined);
   const comments = await request(baseUrl, "/api/tasks/legacy-task/comments");
   assert.equal(comments.body.comments[0].threadId, "legacy-comment-thread");
+  assert.equal(comments.body.comments[0].threadBinding, null);
+  assert.equal(comments.body.comments[0].legacyLocalThreadId, "legacy-comment-thread");
   assert.equal(comments.body.comments[0].authorType, "agent");
   assert.equal(comments.body.comments[0].authorId, "codex-agent");
   assert.equal(comments.body.comments[0].authorName, "Codex Agent");
@@ -1252,7 +1263,11 @@ test("remote task bindings keep their own identity and can be cleared independen
   })).body.task;
   assert.equal(legacy.threadId, "legacy-thread");
   assert.equal(legacy.threadBinding, null);
-  assert.deepEqual(legacy.conversationRefs, []);
+  assert.equal(legacy.legacyLocalThreadId, "legacy-thread");
+  assert.deepEqual(legacy.conversationRefs.map((ref) => ({
+    threadId: ref.threadId,
+    legacyLocal: ref.legacyLocal,
+  })), [{ threadId: "legacy-thread", legacyLocal: true }]);
   const binding = {
     threadId: "remote-thread-a",
     codexProjectId: "remote-project-a",
@@ -1272,6 +1287,7 @@ test("remote task bindings keep their own identity and can be cleared independen
     body: { body: "Controller note", threadId: "controller-thread" },
   })).body.comment;
   assert.equal(controllerComment.threadBinding, null);
+  assert.equal(controllerComment.legacyLocalThreadId, "controller-thread");
 
   const blocked = (await request(baseUrl, `/api/tasks/${created.id}/move`, {
     method: "POST",
@@ -1284,7 +1300,13 @@ test("remote task bindings keep their own identity and can be cleared independen
   })).body.task;
   assert.equal(blocked.threadId, binding.threadId);
   assert.deepEqual(blocked.threadBinding, binding);
-  assert.equal(blocked.conversationRefs.length, 1);
+  assert.deepEqual(blocked.conversationRefs.map((ref) => ({
+    threadId: ref.threadId,
+    legacyLocal: ref.legacyLocal ?? false,
+  })), [
+    { threadId: binding.threadId, legacyLocal: false },
+    { threadId: "controller-thread", legacyLocal: true },
+  ]);
 
   const restored = (await request(baseUrl, `/api/tasks/${created.id}/move`, {
     method: "POST",
@@ -1297,7 +1319,7 @@ test("remote task bindings keep their own identity and can be cleared independen
   })).body.task;
   assert.equal(restored.threadId, null);
   assert.equal(restored.threadBinding, null);
-  assert.deepEqual(restored.conversationRefs, []);
+  assert.deepEqual(restored.conversationRefs.map((ref) => ref.threadId), ["controller-thread"]);
 });
 
 test("the active local Codex conversation supplies its exact task binding identity", async () => {

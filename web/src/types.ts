@@ -222,12 +222,17 @@ export interface TaskRelations {
   related: TaskRelationSummary[];
 }
 
-export interface TaskConversationRef extends CodexThreadBinding {
+interface TaskConversationRefBase {
   source: "task" | "comment";
   sourceId: string;
   title: string;
   updatedAt: string;
 }
+
+export type TaskConversationRef = TaskConversationRefBase & (
+  | (CodexThreadBinding & { legacyLocal?: false })
+  | { threadId: string; legacyLocal: true }
+);
 
 export interface Task {
   id: string;
@@ -241,6 +246,7 @@ export interface Task {
   sortOrder: number;
   threadId: string | null;
   threadBinding: CodexThreadBinding | null;
+  legacyLocalThreadId: string | null;
   conversationRefs: TaskConversationRef[];
   participants: ActorIdentity[];
   previewImage: Attachment | null;
@@ -288,6 +294,7 @@ export interface Comment {
   authorAvatarUrl: string | null;
   threadId: string | null;
   threadBinding: CodexThreadBinding | null;
+  legacyLocalThreadId: string | null;
   attachments: Attachment[];
   version: number;
   createdAt: string;

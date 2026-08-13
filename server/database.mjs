@@ -48,6 +48,18 @@ function threadBindingFromRow(row) {
   };
 }
 
+function legacyLocalThreadIdFromRow(row) {
+  if (!row.thread_id) return null;
+  return [
+    row.thread_codex_project_id,
+    row.thread_codex_project_kind,
+    row.thread_codex_host_id,
+    row.thread_workspace_path,
+  ].every((value) => value == null)
+    ? row.thread_id
+    : null;
+}
+
 function storedThreadBinding(threadBinding, threadId) {
   if (threadBinding === undefined && (threadId === undefined || threadId === null)) return undefined;
   const binding = threadBinding === undefined ? { threadId } : threadBinding;
@@ -107,17 +119,28 @@ function attachTaskActivity(task, comments, activities, previewImage = null) {
       title: task.title,
       updatedAt: task.updatedAt,
     });
+  } else if (task.legacyLocalThreadId) {
+    conversationRefs.push({
+      threadId: task.legacyLocalThreadId,
+      legacyLocal: true,
+      source: "task",
+      sourceId: task.id,
+      title: task.title,
+      updatedAt: task.updatedAt,
+    });
   }
   for (const comment of orderedComments) {
     const threadBinding = threadBindingFromRow(comment);
-    if (!threadBinding) continue;
-    conversationRefs.push({
-      ...threadBinding,
-      source: "comment",
-      sourceId: comment.id,
-      title: commentConversationTitle(comment.body),
-      updatedAt: comment.updated_at,
-    });
+    const legacyLocalThreadId = legacyLocalThreadIdFromRow(comment);
+    if (threadBinding || legacyLocalThreadId) {
+      conversationRefs.push({
+        ...(threadBinding ?? { threadId: legacyLocalThreadId, legacyLocal: true }),
+        source: "comment",
+        sourceId: comment.id,
+        title: commentConversationTitle(comment.body),
+        updatedAt: comment.updated_at,
+      });
+    }
   }
 
   task.conversationRefs = conversationRefs;
@@ -208,6 +231,7 @@ function taskFromRow(row) {
     sortOrder: row.sort_order,
     threadId: row.thread_id,
     threadBinding: threadBindingFromRow(row),
+    legacyLocalThreadId: legacyLocalThreadIdFromRow(row),
     creatorType: row.creator_type,
     creatorId: row.creator_id,
     creatorName: row.creator_name,
@@ -262,6 +286,7 @@ function commentFromRow(row) {
     body: row.body,
     threadId: row.thread_id,
     threadBinding: threadBindingFromRow(row),
+    legacyLocalThreadId: legacyLocalThreadIdFromRow(row),
     authorType: row.author_type,
     authorId: row.author_id,
     authorName: row.author_name,

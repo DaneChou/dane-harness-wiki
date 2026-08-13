@@ -262,6 +262,12 @@ test("PATCH moves an issue to an existing project and records the change", async
 
 test("remote thread identity survives controller moves and clears after create failure", async () => {
   await createProject("remote-binding");
+  const legacy = await createTask("remote-binding", "Legacy local binding", alice, {
+    threadId: "legacy-local-thread",
+  });
+  assert.equal(legacy.body.task.threadBinding, null);
+  assert.equal(legacy.body.task.legacyLocalThreadId, "legacy-local-thread");
+  assert.equal(legacy.body.task.conversationRefs[0].legacyLocal, true);
   const binding = {
     threadId: "remote-thread-a",
     codexProjectId: "remote-project-a",
@@ -284,6 +290,7 @@ test("remote thread identity survives controller moves and clears after create f
     json: { body: "Controller note", threadId: "controller-thread" },
   });
   assert.equal(comment.body.comment.threadBinding, null);
+  assert.equal(comment.body.comment.legacyLocalThreadId, "controller-thread");
 
   const blocked = await cloud.request(`/api/tasks/${created.body.task.id}/move`, {
     method: "POST",
@@ -298,7 +305,10 @@ test("remote thread identity survives controller moves and clears after create f
   });
   assert.equal(blocked.response.status, 200, JSON.stringify(blocked.body));
   assert.deepEqual(blocked.body.task.threadBinding, binding);
-  assert.equal(blocked.body.task.conversationRefs.length, 1);
+  assert.deepEqual(blocked.body.task.conversationRefs.map((ref) => ref.threadId), [
+    binding.threadId,
+    "controller-thread",
+  ]);
 
   const todo = await cloud.request(`/api/tasks/${created.body.task.id}/move`, {
     method: "POST",
@@ -314,7 +324,7 @@ test("remote thread identity survives controller moves and clears after create f
   assert.equal(todo.response.status, 200, JSON.stringify(todo.body));
   assert.equal(todo.body.task.threadId, null);
   assert.equal(todo.body.task.threadBinding, null);
-  assert.deepEqual(todo.body.task.conversationRefs, []);
+  assert.deepEqual(todo.body.task.conversationRefs.map((ref) => ref.threadId), ["controller-thread"]);
 });
 
 test("PATCH rejects moving an issue that still has relations", async () => {

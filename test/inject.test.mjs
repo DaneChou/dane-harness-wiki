@@ -263,7 +263,7 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.match(source, /data-codex-composer/);
   assert.match(source, /type: "electron-set-active-workspace-root"/);
   assert.match(source, /root: workspacePath/);
-  assert.match(createThreadSource, /if \(codexProjectKind === "remote"\) \{[\s\S]*?await waitForRemoteProject\(codexProjectId, codexHostId, workspacePath\)/);
+  assert.match(createThreadSource, /if \(codexProjectKind === "remote"\) \{[\s\S]*?await waitForRemoteProject\(codexProjectId, codexHostId, codexProjectWorkspacePath\)/);
   assert.doesNotMatch(source, /prefillPrompt: prompt/);
   assert.match(source, /requestHostTaskComposerPrefill\(\{/);
   assert.match(source, /requestHost\("prefill-task-composer"/);
@@ -283,6 +283,7 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.doesNotMatch(webApp, /skillName: "manage-taskboard"/);
   assert.match(webApp, /instruction,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
+  assert.match(webApp, /codexProjectWorkspacePath: codexProjectContext\?\.workspacePath/);
   assert.match(webApp, /type: "taskboard:open-thread",[\s\S]*?payload: binding/);
 });
 
@@ -300,6 +301,8 @@ test("the injected app opens an existing local Codex task instead of a new compo
   assert.match(source, /return `\/local\/\$\{encodeURIComponent\(threadId\)\}`/);
   assert.doesNotMatch(source, /return `\/thread\/\$\{encodeURIComponent\(threadId\)\}`/);
   assert.doesNotMatch(openThreadSource, /focusComposerNonce/);
+  assert.match(webApp, /payload: \{ threadId, legacyLocal: true \}/);
+  assert.doesNotMatch(webApp, /payload: \{ threadId, legacyLocal: true, [^}]*codexProject/);
 });
 
 test("remote Codex tasks wait for the exact project and host without a local route fallback", () => {

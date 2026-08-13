@@ -2528,6 +2528,17 @@ export function App() {
     window.location.assign(`codex://threads/${encodeURIComponent(binding.threadId.trim())}`);
   }
 
+  function openLegacyLocalThread(threadId: string) {
+    if (embedded && window.parent !== window) {
+      postEmbeddedHostMessage({
+        type: "taskboard:open-thread",
+        payload: { threadId, legacyLocal: true },
+      });
+      return;
+    }
+    window.location.assign(`codex://threads/${encodeURIComponent(threadId.trim())}`);
+  }
+
   function openTaskConversation(conversation: TaskConversationItem) {
     if (conversation.kind === "local-ai" && conversation.aiThreadId) {
       setAiOpenThreadRequest((current) => ({
@@ -2538,6 +2549,8 @@ export function App() {
     }
     if (conversation.threadBinding) {
       openThread(conversation.threadBinding);
+    } else if (conversation.legacyLocalThreadId) {
+      openLegacyLocalThread(conversation.legacyLocalThreadId);
     }
   }
 
@@ -2587,6 +2600,7 @@ export function App() {
         codexProjectId: codexProjectContext?.codexProjectId,
         codexProjectKind: codexProjectContext?.codexProjectKind ?? "local",
         codexHostId: codexProjectContext?.codexHostId ?? "local",
+        codexProjectWorkspacePath: codexProjectContext?.workspacePath,
         projectName: projects.find((project) => project.id === task.projectId)?.name
           ?? selectedProject?.name,
         workspacePath,
@@ -3159,6 +3173,7 @@ export function App() {
               mutateTaskRelation("remove", current, type, relatedTaskId)
             )}
             onOpenThread={openThread}
+            onOpenLegacyLocalThread={openLegacyLocalThread}
             onOpenInThread={openTaskInThread}
             onCopy={(text, message) => void copyText(text, message)}
             openingThread={openingThreadTaskId === detailTask.id}
