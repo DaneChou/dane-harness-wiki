@@ -60,7 +60,7 @@ test("new issues stage attachments in the composer and upload them after creatio
   assert.match(pendingAttachmentsSource, /className="composer-attachment-list"/);
   assert.match(appSource, /Promise\.allSettled/);
   assert.match(appSource, /uploadAttachment\(saved\.id, file\)/);
-  assert.match(appSource, /附件上传失败，可在详情页重试/);
+  assert.match(appSource, /zh: `\$\{failedAttachments\} 个附件`[\s\S]*?以下内容写入失败/);
 });
 
 test("the issue composer includes Linear-style labels and scheduling", () => {

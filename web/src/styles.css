@@ -6242,7 +6242,7 @@ kbd {
 .property-priority.priority-none { color: var(--priority-none); }
 
 .property-thread input { width: 178px; }
-.property-development select { max-width: 190px; }
+.property-development .task-property-trigger-label { max-width: 190px; }
 .property-more { width: 28px; padding: 0; justify-content: center; letter-spacing: 1px; }
 
 .composer-attachment-button {
@@ -6489,6 +6489,30 @@ kbd {
   gap: 8px;
 }
 
+.create-more-control {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.create-more-control .board-setting-switch {
+  width: 30px;
+  height: 18px;
+}
+
+.create-more-control .board-setting-switch > span:first-child {
+  top: 3px;
+  width: 12px;
+  height: 12px;
+}
+
+.create-more-control .board-setting-switch.is-on > span:first-child {
+  transform: translateX(12px);
+}
+
 .keyboard-note,
 .dialog-updated {
   color: var(--text-tertiary);
@@ -6657,7 +6681,7 @@ kbd {
 }
 
 .label-options button,
-.more-popover button,
+.more-popover > button,
 .due-popover button {
   display: flex;
   align-items: center;
@@ -6674,7 +6698,7 @@ kbd {
 }
 
 .label-options button:hover,
-.more-popover button:hover,
+.more-popover > button:hover,
 .due-popover button:hover {
   background: var(--surface-hover);
 }
@@ -6687,7 +6711,7 @@ kbd {
 }
 
 .label-options button span,
-.more-popover button strong,
+.more-popover > button strong,
 .due-popover button strong {
   flex: 1;
   overflow: hidden;
@@ -6697,17 +6721,39 @@ kbd {
 }
 
 .label-options button b,
-.more-popover button b {
+.more-popover > button b {
   color: var(--text-tertiary);
   font-weight: 500;
 }
 
 .more-popover {
-  width: 238px;
+  right: 0;
+  left: auto;
+  overflow: visible;
+  width: 260px;
   padding: 6px;
 }
 
-.more-popover button > span {
+.more-popover-divider {
+  height: var(--border-hairline);
+  margin: 5px -6px;
+  background: var(--border);
+}
+
+.more-popover > button.is-open {
+  background: var(--surface-hover);
+}
+
+.more-popover > button small {
+  max-width: 76px;
+  overflow: hidden;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more-popover > button > span {
   width: 18px;
   color: var(--text-tertiary);
   font-size: 16px;
@@ -6717,6 +6763,61 @@ kbd {
 .more-popover kbd {
   color: var(--text-tertiary);
   font-size: 11px;
+}
+
+.task-create-relation-submenu {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  left: calc(100% + 4px);
+  width: min(360px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  padding: 6px;
+  overflow-y: auto;
+  border: var(--border-hairline) solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.14), 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.task-create-relation-submenu > button {
+  display: grid;
+  grid-template-columns: 16px max-content minmax(0, 1fr) 16px;
+  align-items: center;
+  width: 100%;
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
+.task-create-relation-submenu > button:hover,
+.task-create-relation-submenu > button.is-selected {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.task-create-relation-submenu > button > svg,
+.task-create-relation-submenu > button > .taskboard-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.task-create-relation-check {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-tertiary);
+}
+
+.task-create-relation-check svg {
+  width: 12px;
+  height: 12px;
 }
 
 .due-popover {
@@ -8007,6 +8108,23 @@ kbd {
   font-size: 14px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.issue-mention-menu {
+  right: auto;
+  bottom: auto;
+  left: auto;
+  width: min(460px, calc(100vw - 16px));
+  max-height: min(360px, calc(100vh - 16px));
+  border-radius: 13px;
+}
+
+.issue-mention-empty {
+  margin: 0;
+  padding: 18px 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
 }
 
 .ai-chat-composer-toolbar {
