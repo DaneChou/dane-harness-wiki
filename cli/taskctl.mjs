@@ -743,7 +743,7 @@ function threadBindingFromOptions(options) {
   ) {
     throw usageError("--binding-codex-host-id does not match the project kind");
   }
-  if (!path.isAbsolute(workspacePath)) {
+  if (!path.posix.isAbsolute(workspacePath) && !path.win32.isAbsolute(workspacePath)) {
     throw usageError("--binding-workspace-path must be absolute");
   }
   return { threadId, codexProjectId, codexProjectKind, codexHostId, workspacePath };

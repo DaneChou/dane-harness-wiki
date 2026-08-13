@@ -304,13 +304,14 @@ test("issue move fetches the current version when --if-version is omitted", asyn
 
 test("issue move separates controller attribution from the task thread binding", async () => {
   let requestBody;
+  const windowsWorkspacePath = String.raw`C:\Users\admin\Documents\dashi-taskboard`;
   const result = await run([
     "issue", "move", "TASK-1", "--status", "blocked", "--if-version", "3",
     "--binding-thread-id", "remote-thread",
     "--binding-codex-project-id", "remote-project",
     "--binding-codex-project-kind", "remote",
     "--binding-codex-host-id", "remote-host",
-    "--binding-workspace-path", "/remote/workspace",
+    "--binding-workspace-path", windowsWorkspacePath,
   ], async (_url, init) => {
     requestBody = JSON.parse(init.body);
     return response({ task: { id: "TASK-1", version: 4 } });
@@ -324,7 +325,7 @@ test("issue move separates controller attribution from the task thread binding",
       codexProjectId: "remote-project",
       codexProjectKind: "remote",
       codexHostId: "remote-host",
-      workspacePath: "/remote/workspace",
+      workspacePath: windowsWorkspacePath,
     },
     version: 3,
   });
