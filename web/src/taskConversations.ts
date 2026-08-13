@@ -7,6 +7,7 @@ import type {
 
 export interface TaskConversationItem {
   key: string;
+  projectId: string;
   kind: "native" | "local-ai";
   title: string;
   source: "task" | "comment" | "local-ai";
@@ -49,6 +50,7 @@ export function taskConversations(task: Task, aiThreads: AiChatThread[]) {
     const current = items.get(key);
     const next: TaskConversationItem = {
       key,
+      projectId: task.projectId,
       kind: "native",
       title: ref.title || task.title,
       source: ref.source,
@@ -73,6 +75,7 @@ export function taskConversations(task: Task, aiThreads: AiChatThread[]) {
     ].reduce(newerTimestamp);
     const candidate: TaskConversationItem = {
       key,
+      projectId: task.projectId,
       kind: "local-ai",
       title: thread.title || thread.origin.issueIdentifier || task.title,
       source: "local-ai",

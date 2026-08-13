@@ -808,8 +808,11 @@ export function App() {
       return { unavailableReason: text("请先选择项目", "Select a project first") };
     }
 
+    const effectiveCodexProjectId = selectedProject.id === GLOBAL_PROJECT_ID
+      ? hostContext?.projectId
+      : selectedProject.id;
     const directCodexProject = hostContext?.projects?.find(
-      (project) => project.id === selectedProject.id,
+      (project) => project.id === effectiveCodexProjectId,
     );
     const workspacePath = (
       directCodexProject?.projectKind === "remote"
@@ -820,8 +823,8 @@ export function App() {
       ?? selectedProject.workspacePath
       ?? directCodexProject?.workspacePath
       ?? (
-        directCodexProject && hostContext?.projectId === selectedProject.id
-          ? hostContext.workspacePath
+        directCodexProject && hostContext?.projectId === effectiveCodexProjectId
+          ? hostContext?.workspacePath
           : undefined
       );
     const codexProjectId = directCodexProject
@@ -1414,6 +1417,14 @@ export function App() {
         setActionError(typeof payload.error === "string"
           ? payload.error
           : textRef.current("无法在 Codex 中创建对话。", "Could not create the conversation in Codex."));
+        return;
+      }
+
+      if (message.type === "taskboard:thread-open-error" && message.payload) {
+        const payload = message.payload as { error?: unknown };
+        setActionError(typeof payload.error === "string"
+          ? payload.error
+          : textRef.current("无法打开 Codex 对话。", "Could not open the Codex conversation."));
         return;
       }
 
@@ -2331,9 +2342,43 @@ export function App() {
     }
   }
 
-  function openThread(threadId: string) {
+  function codexProjectContextForTaskProject(taskboardProjectId: string) {
+    const taskboardProject = projects.find((project) => project.id === taskboardProjectId);
+    const effectiveCodexProjectId = taskboardProjectId === GLOBAL_PROJECT_ID
+      ? hostContext?.projectId
+      : taskboardProjectId;
+    const directCodexProject = hostContext?.projects?.find(
+      (project) => project.id === effectiveCodexProjectId,
+    );
+    const mappedWorkspacePath = taskboardProjectId === GLOBAL_PROJECT_ID
+      ? directCodexProject?.workspacePath ?? hostContext?.workspacePath
+      : deviceWorkspacePaths[taskboardProjectId]
+        ?? taskboardProject?.workspacePath
+        ?? directCodexProject?.workspacePath;
+    const codexProject = directCodexProject ?? hostContext?.projects?.find(
+      (project) => project.workspacePath === mappedWorkspacePath,
+    );
+    if (!codexProject) return null;
+    return {
+      codexProjectId: codexProject.id,
+      codexProjectKind: codexProject.projectKind ?? "local" as const,
+      codexHostId: codexProject.hostId ?? "local",
+      workspacePath: mappedWorkspacePath ?? codexProject.workspacePath,
+    };
+  }
+
+  function openThread(threadId: string, taskboardProjectId?: string) {
     if (embedded && window.parent !== window) {
-      postEmbeddedHostMessage({ type: "taskboard:open-thread", payload: { threadId } });
+      const codexProjectContext = taskboardProjectId
+        ? codexProjectContextForTaskProject(taskboardProjectId)
+        : null;
+      postEmbeddedHostMessage({
+        type: "taskboard:open-thread",
+        payload: {
+          threadId,
+          ...(codexProjectContext ?? {}),
+        },
+      });
       return;
     }
 
@@ -2348,7 +2393,9 @@ export function App() {
       }));
       return;
     }
-    if (conversation.nativeThreadId) openThread(conversation.nativeThreadId);
+    if (conversation.nativeThreadId) {
+      openThread(conversation.nativeThreadId, conversation.projectId);
+    }
   }
 
   function expandCodexSidebar() {
@@ -2360,7 +2407,9 @@ export function App() {
     const worktreePath = task.developmentContext?.type === "worktree"
       ? task.developmentContext.path
       : null;
+    const codexProjectContext = codexProjectContextForTaskProject(task.projectId);
     const workspacePath = worktreePath
+      ?? codexProjectContext?.workspacePath
       ?? selectedDeviceWorkspacePath
       ?? developmentScan.workspacePath
       ?? hostContext?.workspacePath;
@@ -2374,10 +2423,6 @@ export function App() {
       return;
     }
     if (openingThreadTaskId) return;
-    const codexProjectId = selectedProject?.id === GLOBAL_PROJECT_ID
-      ? hostContext?.projectId
-      : selectedProject?.id;
-    const codexProject = hostContext?.projects?.find((project) => project.id === codexProjectId);
     setOpeningThreadTaskId(task.id);
     setActionError(null);
     postEmbeddedHostMessage({
@@ -2386,10 +2431,11 @@ export function App() {
         taskId: task.id,
         identifier: task.identifier,
         instruction,
-        codexProjectId,
-        codexProjectKind: codexProject?.projectKind ?? "local",
-        codexHostId: codexProject?.hostId ?? "local",
-        projectName: selectedProject?.name,
+        codexProjectId: codexProjectContext?.codexProjectId,
+        codexProjectKind: codexProjectContext?.codexProjectKind ?? "local",
+        codexHostId: codexProjectContext?.codexHostId ?? "local",
+        projectName: projects.find((project) => project.id === task.projectId)?.name
+          ?? selectedProject?.name,
         workspacePath,
         workspaceLabel: worktreePath ? workspaceName(worktreePath) : undefined,
       },
@@ -2945,7 +2991,7 @@ export function App() {
             onRemoveRelation={(current, type, relatedTaskId) => (
               mutateTaskRelation("remove", current, type, relatedTaskId)
             )}
-            onOpenThread={openThread}
+            onOpenThread={(threadId) => openThread(threadId, detailTask.projectId)}
             onOpenInThread={openTaskInThread}
             onCopy={(text, message) => void copyText(text, message)}
             openingThread={openingThreadTaskId === detailTask.id}

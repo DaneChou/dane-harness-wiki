@@ -776,9 +776,123 @@
     return `/local/${encodeURIComponent(threadId)}`;
   }
 
-  async function openThread(threadId) {
+  function threadRowProjectId(row) {
+    return row?.closest?.("[data-app-action-sidebar-project-list-id]")
+      ?.getAttribute("data-app-action-sidebar-project-list-id")
+      || row?.closest?.("[data-app-action-sidebar-project-id]")
+        ?.getAttribute("data-app-action-sidebar-project-id")
+      || "";
+  }
+
+  function findThreadRowInProject(threadId, projectId) {
+    return Array.from(document.querySelectorAll("[data-app-action-sidebar-thread-id]"))
+      .find((row) => (
+        normalizeThreadId(row.getAttribute("data-app-action-sidebar-thread-id")) === normalizeThreadId(threadId)
+        && threadRowProjectId(row) === projectId
+      )) || null;
+  }
+
+  async function waitForRemoteProject(projectId, hostId) {
+    if (!projectId || !hostId || hostId === "local") {
+      throw new Error(hostText(
+        "SSH 远程项目缺少精确的项目或主机标识",
+        "The SSH remote project is missing its exact project or host identity",
+      ));
+    }
+    await ensureProjectRows();
+    const deadline = Date.now() + 8_000;
+    let row = null;
+    while (!row && Date.now() < deadline) {
+      row = projectRowById(projectId);
+      if (!row) await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+    if (!row) {
+      throw new Error(hostText(
+        "Codex 中找不到精确的 SSH 远程项目",
+        "The exact SSH remote project is not available in Codex",
+      ));
+    }
+    if (row.getAttribute("data-app-action-sidebar-project-collapsed") === "true") {
+      row.click?.();
+      await new Promise((resolve) => window.setTimeout(resolve, 120));
+    }
+    const selectProject = row.querySelector("[data-app-action-sidebar-select-project]");
+    if (!selectProject) {
+      throw new Error(hostText(
+        "Codex 中找不到对应的 SSH 远程项目",
+        "The SSH remote project is not available in Codex",
+      ));
+    }
+    selectProject.click?.();
+    while (Date.now() < deadline) {
+      const [selectedProjectId, metadata] = await Promise.all([
+        selectedNativeProjectId(),
+        readCodexProjectMetadata(),
+      ]);
+      const selectedProject = metadata.get(projectId);
+      if (
+        selectedProjectId === projectId
+        && selectedProject?.projectKind === "remote"
+        && selectedProject.hostId === hostId
+      ) {
+        codexProjectMetadata = metadata;
+        lastNativeProjectId = projectId;
+        return row;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+    throw new Error(hostText(
+      "Codex 没有确认目标 SSH 远程项目和主机",
+      "Codex did not confirm the target SSH remote project and host",
+    ));
+  }
+
+  async function waitForRemoteThreadRow(threadId, projectId) {
+    const deadline = Date.now() + 8_000;
+    let row = findThreadRowInProject(threadId, projectId);
+    while (!row && Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+      row = findThreadRowInProject(threadId, projectId);
+    }
+    return row;
+  }
+
+  async function openThread(payload) {
+    const threadId = typeof payload?.threadId === "string" ? payload.threadId : "";
     if (typeof threadId !== "string" || !threadId.trim()) return;
     const normalizedThreadId = normalizeThreadId(threadId);
+    const remoteProject = payload?.codexProjectKind === "remote";
+    if (remoteProject) {
+      try {
+        const projectId = typeof payload?.codexProjectId === "string"
+          ? payload.codexProjectId.trim()
+          : "";
+        const hostId = typeof payload?.codexHostId === "string"
+          ? payload.codexHostId.trim()
+          : "";
+        await waitForRemoteProject(projectId, hostId);
+        const row = await waitForRemoteThreadRow(normalizedThreadId, projectId);
+        if (!row?.isConnected) {
+          throw new Error(hostText(
+            "目标 SSH 远程项目中找不到该对话",
+            "The conversation is not available in the target SSH remote project",
+          ));
+        }
+        lastNativeThreadId = normalizedThreadId;
+        closeTaskboard(false);
+        row.click?.();
+      } catch (error) {
+        postToFrame({
+          type: "taskboard:thread-open-error",
+          payload: {
+            error: error instanceof Error
+              ? error.message
+              : hostText("无法打开 Codex 对话", "Could not open the Codex conversation"),
+          },
+        });
+      }
+      return;
+    }
     lastNativeThreadId = normalizedThreadId;
     const row = findThreadRow(normalizedThreadId);
     closeTaskboard(false);
@@ -813,6 +927,7 @@
     const requestedProjectId = typeof payload.codexProjectId === "string"
       ? payload.codexProjectId.trim()
       : "";
+    if (payload.codexProjectKind === "remote") return projectRowById(requestedProjectId);
     return projectRowById(requestedProjectId)
       || projectRowByLabel(payload.workspaceLabel)
       || projectRowById(snapshotProjectId)
@@ -874,7 +989,15 @@
         ));
       }
 
-      if (workspacePath && codexProjectKind !== "remote") {
+      if (codexProjectKind === "remote") {
+        const codexProjectId = typeof payload?.codexProjectId === "string"
+          ? payload.codexProjectId.trim()
+          : "";
+        const codexHostId = typeof payload?.codexHostId === "string"
+          ? payload.codexHostId.trim()
+          : "";
+        await waitForRemoteProject(codexProjectId, codexHostId);
+      } else if (workspacePath) {
         await bridge.sendMessageFromView({
           type: "electron-set-active-workspace-root",
           root: workspacePath,
@@ -888,9 +1011,6 @@
           await new Promise((resolve) => window.setTimeout(resolve, 120));
         }
         const selectProject = row?.querySelector("[data-app-action-sidebar-select-project]");
-        if (codexProjectKind === "remote" && !selectProject) {
-          throw new Error("Codex 中找不到对应的 SSH 远程项目");
-        }
         selectProject?.click?.();
         if (selectProject) await new Promise((resolve) => window.setTimeout(resolve, 120));
       }
@@ -1053,7 +1173,7 @@
       return;
     }
     if (message.type === "taskboard:open-thread") {
-      void openThread(message.payload?.threadId);
+      void openThread(message.payload);
       return;
     }
     if (message.type === "taskboard:expand-sidebar") {

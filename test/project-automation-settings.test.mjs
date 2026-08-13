@@ -53,7 +53,15 @@ test("automation requests use the exact Codex host message contract", () => {
 });
 
 test("project mapping is based on exact ids and workspace paths, never project names", () => {
-  assert.match(appSource, /hostContext\?\.projects\?\.find\([\s\S]*?project\.id === selectedProject\.id/);
+  const automationContextSource = appSource.slice(
+    appSource.indexOf("const automationProjectContext"),
+    appSource.indexOf("const automationRequestContext"),
+  );
+  assert.match(
+    automationContextSource,
+    /const effectiveCodexProjectId = selectedProject\.id === GLOBAL_PROJECT_ID\s*\? hostContext\?\.projectId\s*: selectedProject\.id/,
+  );
+  assert.match(automationContextSource, /project\.id === effectiveCodexProjectId/);
   assert.match(appSource, /directCodexProject\?\.workspacePath/);
   assert.match(appSource, /\(deviceWorkspacePaths\[project\.id\] \?\? project\.workspacePath\) === workspacePath/);
   assert.match(appSource, /请先在 Codex 中添加并映射该项目目录/);
@@ -62,18 +70,20 @@ test("project mapping is based on exact ids and workspace paths, never project n
 
 test("global tasks resolve thread metadata from the active Codex project", () => {
   const openTaskSource = appSource.slice(
-    appSource.indexOf("function openTaskInThread"),
+    appSource.indexOf("function codexProjectContextForTaskProject"),
     appSource.indexOf("function changeProject"),
   );
   assert.match(
     openTaskSource,
-    /const codexProjectId = selectedProject\?\.id === GLOBAL_PROJECT_ID\s*\? hostContext\?\.projectId\s*: selectedProject\?\.id/,
+    /const effectiveCodexProjectId = taskboardProjectId === GLOBAL_PROJECT_ID\s*\? hostContext\?\.projectId\s*: taskboardProjectId/,
   );
   assert.match(
     openTaskSource,
-    /hostContext\?\.projects\?\.find\(\(project\) => project\.id === codexProjectId\)/,
+    /hostContext\?\.projects\?\.find\(\s*\(project\) => project\.id === effectiveCodexProjectId/,
   );
-  assert.match(openTaskSource, /codexProjectId,\s*codexProjectKind: codexProject\?\.projectKind/);
+  assert.match(openTaskSource, /codexProjectId: codexProject\.id,\s*codexProjectKind: codexProject\.projectKind/);
+  assert.match(openTaskSource, /const codexProjectContext = codexProjectContextForTaskProject\(task\.projectId\)/);
+  assert.match(openTaskSource, /codexProjectId: codexProjectContext\?\.codexProjectId/);
 });
 
 test("the project navigation automation menu owns the icon, fields, and accessible popover", () => {

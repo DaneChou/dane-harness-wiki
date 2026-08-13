@@ -252,13 +252,16 @@ test("only a loopback Taskboard iframe can request native automation", () => {
 });
 
 test("issues open an unsent native Codex composer in the exact workspace with the task instruction", () => {
+  const createThreadSource = source.slice(
+    source.indexOf("async function createThreadForTask"),
+    source.indexOf("async function handleAutomationRequest"),
+  );
   assert.match(source, /function createThreadForTask\(payload\)/);
   assert.match(source, /\[data-app-action-sidebar-select-project\]/);
   assert.match(source, /data-codex-composer/);
   assert.match(source, /type: "electron-set-active-workspace-root"/);
   assert.match(source, /root: workspacePath/);
-  assert.match(source, /workspacePath && codexProjectKind !== "remote"/);
-  assert.match(source, /codexProjectKind === "remote" && !selectProject/);
+  assert.match(createThreadSource, /if \(codexProjectKind === "remote"\) \{[\s\S]*?await waitForRemoteProject\(codexProjectId, codexHostId\)/);
   assert.doesNotMatch(source, /prefillPrompt: prompt/);
   assert.match(source, /requestHostTaskComposerPrefill\(\{/);
   assert.match(source, /requestHost\("prefill-task-composer"/);
@@ -278,7 +281,7 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.doesNotMatch(webApp, /skillName: "manage-taskboard"/);
   assert.match(webApp, /instruction,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
-  assert.match(webApp, /type: "taskboard:open-thread", payload: \{ threadId \}/);
+  assert.match(webApp, /type: "taskboard:open-thread",[\s\S]*?threadId,[\s\S]*?codexProjectContext/);
 });
 
 test("the standalone web page opens linked Codex tasks through the app deep link", () => {
@@ -295,6 +298,34 @@ test("the injected app opens an existing local Codex task instead of a new compo
   assert.match(source, /return `\/local\/\$\{encodeURIComponent\(threadId\)\}`/);
   assert.doesNotMatch(source, /return `\/thread\/\$\{encodeURIComponent\(threadId\)\}`/);
   assert.doesNotMatch(openThreadSource, /focusComposerNonce/);
+});
+
+test("remote Codex tasks wait for the exact project and host without a local route fallback", () => {
+  const remoteProjectSource = source.slice(
+    source.indexOf("async function waitForRemoteProject"),
+    source.indexOf("async function waitForRemoteThreadRow"),
+  );
+  const openThreadSource = source.slice(
+    source.indexOf("async function openThread"),
+    source.indexOf("function projectRowById"),
+  );
+  const remoteOpenSource = openThreadSource.slice(
+    openThreadSource.indexOf("if (remoteProject)"),
+    openThreadSource.indexOf("\n    lastNativeThreadId = normalizedThreadId;"),
+  );
+  assert.match(remoteProjectSource, /if \(!projectId \|\| !hostId \|\| hostId === "local"\)/);
+  assert.match(remoteProjectSource, /row = projectRowById\(projectId\)/);
+  assert.match(remoteProjectSource, /selectedNativeProjectId\(\)/);
+  assert.match(remoteProjectSource, /readCodexProjectMetadata\(\)/);
+  assert.match(remoteProjectSource, /selectedProjectId === projectId/);
+  assert.match(remoteProjectSource, /selectedProject\?\.projectKind === "remote"/);
+  assert.match(remoteProjectSource, /selectedProject\.hostId === hostId/);
+  assert.match(remoteOpenSource, /waitForRemoteThreadRow\(normalizedThreadId, projectId\)/);
+  assert.match(remoteOpenSource, /type: "taskboard:thread-open-error"/);
+  assert.doesNotMatch(remoteOpenSource, /routeForThread/);
+  assert.match(webApp, /openThread\(conversation\.nativeThreadId, conversation\.projectId\)/);
+  assert.match(webApp, /openThread\(threadId, detailTask\.projectId\)/);
+  assert.match(webApp, /message\.type === "taskboard:thread-open-error"/);
 });
 
 test("host navigation follows Codex's renderer message bus", () => {
@@ -379,7 +410,7 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
   );
 });
 
-test("SSH task project selection prefers its stable ID and falls back to the worktree label", () => {
+test("SSH task project selection requires its stable ID while local selection keeps label fallback", () => {
   const functionSource = source.slice(
     source.indexOf("function projectRowForTask"),
     source.indexOf("\n\n  async function ensureProjectRows"),
@@ -395,6 +426,7 @@ test("SSH task project selection prefers its stable ID and falls back to the wor
   assert.equal(
     projectRowForTask({
       codexProjectId: "remote-project",
+      codexProjectKind: "remote",
       workspaceLabel: "shared-worktree",
     }, ""),
     requestedProject,
@@ -404,6 +436,15 @@ test("SSH task project selection prefers its stable ID and falls back to the wor
   assert.equal(
     projectRowForTask({
       codexProjectId: "missing-project",
+      codexProjectKind: "remote",
+      workspaceLabel: "shared-worktree",
+    }, ""),
+    null,
+  );
+  assert.equal(
+    projectRowForTask({
+      codexProjectId: "missing-project",
+      codexProjectKind: "local",
       workspaceLabel: "shared-worktree",
     }, ""),
     sameNameProject,
