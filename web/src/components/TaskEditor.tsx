@@ -261,7 +261,7 @@ export function TaskEditor({
   }, []);
 
   useEffect(() => {
-    if (menu !== "more") return;
+    if (menu !== "more" && menu !== "due" && menu !== "recurrence") return;
     const closeFromOutside = (event: PointerEvent) => {
       if (!moreMenuRef.current?.contains(event.target as Node)) setMenu(null);
     };
