@@ -193,7 +193,6 @@ interface ProjectContextMenuState {
 
 interface UndoOperation {
   id: number;
-  message: string;
   undo: () => Promise<void>;
 }
 
@@ -1735,9 +1734,10 @@ export function App() {
     refreshWorkflowOptions,
   ]);
 
-  function pushUndo(message: string, undo: () => Promise<void>) {
-    const operation = { id: ++undoSequenceRef.current, message, undo };
+  function pushUndo(message: string | null, undo: () => Promise<void>) {
+    const operation = { id: ++undoSequenceRef.current, undo };
     undoStackRef.current = [...undoStackRef.current.slice(-19), operation];
+    if (!message) return;
     setAnnouncementValue("");
     setUndoNotice({ id: operation.id, message });
   }
@@ -2005,12 +2005,7 @@ export function App() {
         ));
       }
       if (creating) {
-        const totalUploaded = uploadedAttachments + inlineImages.length;
-        const message = text(
-          `${saved.identifier} 已创建${totalUploaded > 0 ? `，已上传 ${totalUploaded} 个附件` : ""}。`,
-          `${saved.identifier} was created${totalUploaded > 0 ? ` with ${totalUploaded} attachments uploaded` : ""}.`,
-        );
-        pushUndo(message, async () => {
+        pushUndo(null, async () => {
           const candidate = tasksRef.current.find((task) => task.id === saved.id);
           const current = candidate && candidate.version >= saved.version ? candidate : saved;
           await archiveTaskRequest(current);
@@ -2020,9 +2015,8 @@ export function App() {
         const previous = editor.task;
         const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
         if (!draft.assigneeTarget || previousAssigneeTarget) {
-          const displayIdentifier = saved.externalKey ?? saved.identifier;
           pushUndo(
-            text(`${displayIdentifier} 已更新。`, `${displayIdentifier} was updated.`),
+            null,
             () => restoreTaskDetails(previous, saved, previousAssigneeTarget),
           );
         }
@@ -2090,14 +2084,7 @@ export function App() {
       setTasks((current) => sortTasks(current.map((candidate) =>
         candidate.id === moved.id ? moved : candidate,
       )));
-      const displayIdentifier = task.externalKey ?? task.identifier;
-      const message = task.status === status
-        ? text(`${displayIdentifier} 排序已调整。`, `${displayIdentifier} was reordered.`)
-        : text(
-          `${displayIdentifier} 已移至${taskStatusLabel(language, status)}。`,
-          `${displayIdentifier} was moved to ${taskStatusLabel(language, status)}.`,
-        );
-      pushUndo(message, async () => {
+      pushUndo(null, async () => {
         const candidate = tasksRef.current.find((current) => current.id === moved.id);
         const current = candidate && candidate.version >= moved.version ? candidate : moved;
         const restored = await moveTaskRequest(current, previous.status, previous.sortOrder);
@@ -2171,9 +2158,8 @@ export function App() {
       )));
       const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
       if (!assigneeTarget || previousAssigneeTarget) {
-        const displayIdentifier = task.externalKey ?? task.identifier;
         pushUndo(
-          text(`${displayIdentifier} 已更新。`, `${displayIdentifier} was updated.`),
+          null,
           () => restoreTaskDetails(previous, updated, previousAssigneeTarget),
         );
       }
