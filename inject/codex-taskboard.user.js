@@ -25,7 +25,6 @@
   const REATTACH_DELAY_MS = 160;
   const FRAME_READY_TIMEOUT_MS = 12_000;
   const HOST_REQUEST_TIMEOUT_MS = 12_000;
-  const CONVERSATION_REQUEST_TIMEOUT_MS = 35_000;
   const HOST_HEARTBEAT_MAX_AGE_MS = 8_000;
   const MACOS_TITLEBAR_SAFE_LEFT = 80;
   const FRAME_REFRESH_PARAM = "__codex_taskboard_refresh";
@@ -823,26 +822,18 @@
   }
 
   async function resolveNativeProject(requestedProjectId, workspacePath) {
-    const context = await nativeProjectContext();
     if (workspacePath) {
-      const normalizedWorkspacePath = normalizeNativeRootPath(workspacePath);
-      for (const project of context.projects) {
-        const targetRoot = project.rootPaths.find((root) => (
-          typeof root === "string"
-          && normalizeNativeRootPath(root) === normalizedWorkspacePath
-        ));
-        if (targetRoot) return { project, targetRoot };
-      }
-      return null;
+      return normalizeNativeRootPath(workspacePath) ? { targetRoot: workspacePath } : null;
     }
+    const context = await nativeProjectContext();
     const project = context.projects.find((candidate) => candidate.id === requestedProjectId) ?? null;
     const targetRoot = project?.rootPaths[0];
     return typeof targetRoot === "string" && normalizeNativeRootPath(targetRoot)
-      ? { project, targetRoot }
+      ? { targetRoot }
       : null;
   }
 
-  async function waitForNativeProject(project, targetRoot) {
+  async function waitForNativeProject(targetRoot) {
     const deadline = Date.now() + 8_000;
     const normalizedTargetRoot = normalizeNativeRootPath(targetRoot);
     while (Date.now() < deadline) {
@@ -851,9 +842,9 @@
         activeNativeWorkspaceRoots(),
       ]);
       if (
-        projectId === project.id
-        && activeRoots.some((root) => normalizeNativeRootPath(root) === normalizedTargetRoot)
-      ) return;
+        projectId
+        && normalizeNativeRootPath(activeRoots[0]) === normalizedTargetRoot
+      ) return projectId;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     throw new Error(hostText(
@@ -897,23 +888,60 @@
           "The target project or worktree is not mapped in Codex",
         ));
       }
-      bridge.sendMessageFromView({
-        type: "electron-set-active-workspace-root",
-        projectId: target.project.id,
+      const previousComposerRoot = Array.from(document.querySelectorAll(
+        '[data-codex-composer-root][data-composer-placement="thread"]',
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      const previousThreadId = normalizeThreadId(
+        previousComposerRoot
+          ?.querySelector("[data-above-composer-conversation-id]")
+          ?.getAttribute("data-above-composer-conversation-id"),
+      );
+      const switched = await requestNativeFetch("add-workspace-root-option", {
+        root: target.targetRoot,
+        setActive: true,
+        origin: window.location.origin,
       });
-      await waitForNativeProject(target.project, target.targetRoot);
-      lastNativeProjectId = target.project.id;
+      if (switched?.success !== true) {
+        throw new Error(hostText(
+          "Codex 未在限定时间内切换到目标项目或 worktree",
+          "Codex did not switch to the target project or worktree in time",
+        ));
+      }
+      lastNativeProjectId = await waitForNativeProject(target.targetRoot);
 
       closeTaskboard(false);
+      const focusComposerNonce = crypto.randomUUID();
       await dispatchHostMessage({
         type: "navigate-to-route",
         path: "/",
         state: {
-          focusComposerNonce: Date.now(),
+          focusComposerNonce,
+          prefillPrompt: instruction,
         },
       });
-      const started = await requestHostTaskConversationStart({ instruction, title });
-      lastNativeThreadId = normalizeThreadId(started.threadId);
+      const started = await requestHostTaskConversationStart({
+        taskId,
+        previousThreadId,
+        targetRoot: target.targetRoot,
+        instruction,
+        title,
+      });
+      const startedThreadId = normalizeThreadId(started.threadId);
+      const visibleThreadComposer = Array.from(document.querySelectorAll(
+        '[data-codex-composer-root][data-composer-placement="thread"]',
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      const visibleThreadId = normalizeThreadId(
+        visibleThreadComposer
+          ?.querySelector("[data-above-composer-conversation-id]")
+          ?.getAttribute("data-above-composer-conversation-id"),
+      );
+      if (visibleThreadId !== startedThreadId) {
+        await dispatchHostMessage({
+          type: "navigate-to-route",
+          path: routeForThread(startedThreadId),
+        });
+      }
+      lastNativeThreadId = startedThreadId;
       postToFrame({ type: "taskboard:thread-prepared", payload: { taskId, threadId: started.threadId } });
     } catch (error) {
       postToFrame({
@@ -1308,10 +1336,12 @@
 
     const id = `${Date.now().toString(36)}-${(++hostRequestSequence).toString(36)}`;
     return new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        hostRequests.delete(id);
-        reject(hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond"));
-      }, timeoutMs);
+      const timeout = timeoutMs === null
+        ? null
+        : window.setTimeout(() => {
+          hostRequests.delete(id);
+          reject(hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond"));
+        }, timeoutMs);
       hostRequests.set(id, { resolve, reject, timeout });
       try {
         window.postMessage({
@@ -1320,7 +1350,7 @@
           payload: { ...payload, id, action },
         }, window.location.origin);
       } catch (error) {
-        window.clearTimeout(timeout);
+        if (timeout !== null) window.clearTimeout(timeout);
         hostRequests.delete(id);
         reject(error);
       }
@@ -1338,11 +1368,20 @@
     return requestHost("load-frame", { frameName, frameCapability: capability });
   }
 
-  function requestHostTaskConversationStart({ instruction, title }) {
+  function requestHostTaskConversationStart({
+    taskId,
+    previousThreadId,
+    targetRoot,
+    instruction,
+    title,
+  }) {
     return requestHost("start-task-conversation", {
+      taskId,
+      previousThreadId,
+      targetRoot,
       instruction,
       title,
-    }, CONVERSATION_REQUEST_TIMEOUT_MS);
+    }, null);
   }
 
   function frameMatchesTaskboardUrl(taskboardUrl) {
@@ -1362,7 +1401,7 @@
     if (!response || typeof response !== "object" || typeof response.id !== "string") return;
     const pending = hostRequests.get(response.id);
     if (!pending) return;
-    window.clearTimeout(pending.timeout);
+    if (pending.timeout !== null) window.clearTimeout(pending.timeout);
     hostRequests.delete(response.id);
     if (response.ok) pending.resolve(response);
     else pending.reject(response.error
@@ -1592,7 +1631,7 @@
     observer = null;
     cancelFrameReadyWaiters(hostError("任务面板已关闭", "Taskboard was closed"));
     hostRequests.forEach(({ reject, timeout }) => {
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
       reject(hostError("任务面板已关闭", "Taskboard was closed"));
     });
     hostRequests.clear();

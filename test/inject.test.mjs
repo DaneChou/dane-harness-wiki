@@ -255,30 +255,32 @@ test("issues start a native Codex conversation in the confirmed workspace with t
   assert.match(source, /requestNativeFetch\("active-workspace-roots", \{\}\)/);
   assert.match(source, /function normalizeNativeRootPath\(value\)/);
   assert.match(source, /async function resolveNativeProject\(requestedProjectId, workspacePath\)/);
-  assert.match(source, /if \(targetRoot\) return \{ project, targetRoot \}/);
-  assert.match(source, /async function waitForNativeProject\(project, targetRoot\)/);
+  assert.match(source, /workspacePath\) \{\s*return normalizeNativeRootPath\(workspacePath\) \? \{ targetRoot: workspacePath \} : null/);
+  assert.match(source, /const targetRoot = project\?\.rootPaths\[0\]/);
+  assert.match(source, /async function waitForNativeProject\(targetRoot\)/);
   const waitStart = source.indexOf("async function waitForNativeProject");
   const waitSource = source.slice(waitStart, source.indexOf("async function createThreadForTask", waitStart));
   assert.match(waitSource, /selectedNativeProjectId\(\)/);
   assert.match(waitSource, /activeNativeWorkspaceRoots\(\)/);
-  assert.match(waitSource, /projectId === project\.id/);
-  assert.match(waitSource, /normalizeNativeRootPath\(root\) === normalizedTargetRoot/);
+  assert.match(waitSource, /projectId\s*&&\s*normalizeNativeRootPath\(activeRoots\[0\]\) === normalizedTargetRoot/);
   assert.match(
     source,
-    /type: "electron-set-active-workspace-root",\s*projectId: target\.project\.id,/,
+    /requestNativeFetch\("add-workspace-root-option", \{\s*root: target\.targetRoot,\s*setActive: true,\s*origin: window\.location\.origin,/,
   );
-  assert.match(source, /await waitForNativeProject\(target\.project, target\.targetRoot\)/);
+  assert.match(source, /if \(switched\?\.success !== true\)/);
+  assert.match(source, /await waitForNativeProject\(target\.targetRoot\)/);
+  assert.match(source, /const previousThreadId = normalizeThreadId/);
+  assert.match(source, /const focusComposerNonce = crypto\.randomUUID\(\)/);
+  assert.match(source, /state: \{\s*focusComposerNonce,\s*prefillPrompt: instruction,/);
   assert.match(source, /const HOST_REQUEST_TIMEOUT_MS = 12_000/);
-  assert.match(source, /const CONVERSATION_REQUEST_TIMEOUT_MS = 35_000/);
   assert.match(source, /function requestHost\(action, payload = \{\}, timeoutMs = HOST_REQUEST_TIMEOUT_MS\)/);
-  assert.equal((source.match(/CONVERSATION_REQUEST_TIMEOUT_MS/g) ?? []).length, 2);
-  assert.doesNotMatch(source, /prefillPrompt: prompt/);
-  assert.match(source, /requestHostTaskConversationStart\(\{ instruction, title \}\)/);
+  assert.doesNotMatch(source, /CONVERSATION_REQUEST_TIMEOUT_MS/);
+  assert.match(source, /requestHostTaskConversationStart\(\{\s*taskId,\s*previousThreadId,\s*targetRoot: target\.targetRoot,\s*instruction,\s*title,/);
   assert.match(
     source,
-    /requestHost\("start-task-conversation", \{\s*instruction,\s*title,\s*\}, CONVERSATION_REQUEST_TIMEOUT_MS\)/,
+    /requestHost\("start-task-conversation", \{\s*taskId,\s*previousThreadId,\s*targetRoot,\s*instruction,\s*title,\s*\}, null\)/,
   );
-  assert.match(source, /lastNativeThreadId = normalizeThreadId\(started\.threadId\)/);
+  assert.match(source, /lastNativeThreadId = startedThreadId/);
   assert.match(source, /type: "taskboard:thread-prepared", payload: \{ taskId, threadId: started\.threadId \}/);
   assert.match(
     webApp,

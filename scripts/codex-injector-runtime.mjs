@@ -59,6 +59,13 @@ function parseHostRequest(payload, parseAutomationRequest) {
   }
   if (
     request.action === "start-task-conversation"
+    && typeof request.taskId === "string"
+    && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(request.taskId)
+    && typeof request.previousThreadId === "string"
+    && request.previousThreadId.length <= 240
+    && typeof request.targetRoot === "string"
+    && request.targetRoot.length > 0
+    && request.targetRoot.length <= 4_096
     && typeof request.instruction === "string"
     && request.instruction.length > 0
     && request.instruction.length <= 1_024
