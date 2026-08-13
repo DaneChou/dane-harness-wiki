@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
+import { decodeString } from "micromark-util-decode-string";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { resolvePersistedAttachmentUrl } from "../api";
@@ -26,7 +27,8 @@ interface MarkdownAstNode {
 
 const RAW_COMMENT = /<!--[\s\S]*?-->/g;
 const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
-const MERMAID_EXTERNAL_RESOURCE = /@\{[^}]*\b["']?img["']?\s*:\s*["']?\s*(?:https?:)?\/\/|\bproperties\s+[^:\r\n]+\s*:\s*\{[^}]*["']?icon["']?\s*:\s*["']?\s*(?:https?:)?\/\/|^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
+const MERMAID_EXTERNAL_RESOURCE = /@\{[^}]*\b["']?img["']?\s*:\s*(?:"[^"]+"|'[^']+'|[^,}\s"'][^,}]*)|^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
+const MERMAID_SEQUENCE_PROPERTIES = /(?:^|[;\r\n])\s*properties\s+[^:\r\n;]+\s*:\s*(\{[^}\r\n]*\})/gim;
 
 interface EncodedCommentMarker {
   kind: "open" | "close";
@@ -54,10 +56,45 @@ function hasExternalMermaidCss(source: string) {
     if (themeCssOffset >= 0 && EXTERNAL_CSS_REFERENCE.test(directive[1].slice(themeCssOffset))) return true;
   }
 
-  return source.split(/\r?\n/).some((line) => (
-    /^\s*(?:style\s+\S+|classDef\s+\S+|linkStyle\s+\S+|rect\b|UpdateElementStyle\s*\(|UpdateRelStyle\s*\()/i.test(line)
-    && EXTERNAL_CSS_REFERENCE.test(line)
+  const statements: string[] = [];
+  let start = 0;
+  let quote: '"' | "'" | "`" | null = null;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (quote) {
+      if (character === quote) quote = null;
+    } else if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+    } else if (character === ";" || character === "\r" || character === "\n") {
+      statements.push(source.slice(start, index));
+      if (character === "\r" && source[index + 1] === "\n") index += 1;
+      start = index + 1;
+    }
+  }
+  statements.push(source.slice(start));
+
+  return statements.some((statement) => (
+    /^\s*(?:style\s+\S+|classDef\s+\S+|linkStyle\s+\S+|rect\b|UpdateElementStyle\s*\(|UpdateRelStyle\s*\()/i.test(statement)
+    && EXTERNAL_CSS_REFERENCE.test(statement)
   ));
+}
+
+function hasExternalMermaidResource(source: string) {
+  if (MERMAID_EXTERNAL_RESOURCE.test(source)) return true;
+  for (const match of source.matchAll(MERMAID_SEQUENCE_PROPERTIES)) {
+    try {
+      const properties = JSON.parse(match[1]) as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(properties, "icon")) return true;
+    } catch {
+      continue;
+    }
+  }
+  return false;
 }
 
 export function remarkStripMarkdownComments() {
@@ -69,7 +106,6 @@ export function remarkStripMarkdownComments() {
       if (node.type === "text" && node.value && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
         const sourceStart = node.position.start.offset;
         const sourceValue = source.slice(sourceStart, node.position.end.offset);
-        const valueOpenMarkers = [...node.value.matchAll(/<!--/g)];
         const sourceOpenMarkers = [...sourceValue.matchAll(/&lt;!--|<!--/gi)].filter((match) => {
           if (!match[0].toLowerCase().startsWith("&lt;")) return true;
           let backslashes = 0;
@@ -78,29 +114,32 @@ export function remarkStripMarkdownComments() {
           }
           return backslashes % 2 === 0;
         });
-        sourceOpenMarkers.forEach((match, index) => {
-          if (!match[0].toLowerCase().startsWith("&lt;") || !valueOpenMarkers[index]) return;
+        sourceOpenMarkers.forEach((match) => {
+          if (!match[0].toLowerCase().startsWith("&lt;")) return;
+          const valueOffset = decodeString(sourceValue.slice(0, match.index ?? 0)).length;
+          if (!node.value!.startsWith("<!--", valueOffset)) return;
           markers.push({
             kind: "open",
             node,
             sourceOffset: sourceStart + (match.index ?? 0),
             sourceEndOffset: sourceStart + (match.index ?? 0) + match[0].length,
-            valueOffset: valueOpenMarkers[index].index,
-            valueEndOffset: valueOpenMarkers[index].index + valueOpenMarkers[index][0].length,
+            valueOffset,
+            valueEndOffset: valueOffset + "<!--".length,
           });
         });
 
-        const valueCloseMarkers = [...node.value.matchAll(/-->/g)];
         const sourceCloseMarkers = [...sourceValue.matchAll(/--&gt;|-->/gi)];
-        sourceCloseMarkers.forEach((match, index) => {
-          if (!match[0].toLowerCase().endsWith("&gt;") || !valueCloseMarkers[index]) return;
+        sourceCloseMarkers.forEach((match) => {
+          if (!match[0].toLowerCase().endsWith("&gt;")) return;
+          const valueOffset = decodeString(sourceValue.slice(0, match.index ?? 0)).length;
+          if (!node.value!.startsWith("-->", valueOffset)) return;
           markers.push({
             kind: "close",
             node,
             sourceOffset: sourceStart + (match.index ?? 0),
             sourceEndOffset: sourceStart + (match.index ?? 0) + match[0].length,
-            valueOffset: valueCloseMarkers[index].index,
-            valueEndOffset: valueCloseMarkers[index].index + valueCloseMarkers[index][0].length,
+            valueOffset,
+            valueEndOffset: valueOffset + "-->".length,
           });
         });
       }
@@ -209,7 +248,7 @@ export function MermaidDiagram({ source }: { source: string }) {
   useEffect(() => {
     let cancelled = false;
     setDiagram(null);
-    if (MERMAID_EXTERNAL_RESOURCE.test(source) || hasExternalMermaidCss(source)) {
+    if (hasExternalMermaidResource(source) || hasExternalMermaidCss(source)) {
       setDiagram({ source, theme, error: true });
       return undefined;
     }
