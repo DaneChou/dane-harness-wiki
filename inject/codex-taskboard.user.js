@@ -430,10 +430,47 @@
   }
 
   async function selectedNativeProjectId() {
-    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
-    const selectedProject = bootstrap?.globalStateEntries
-      ?.find((entry) => entry.key === "selected-project")?.value;
-    return typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "";
+    const bridge = window.electronBridge;
+    if (!bridge || typeof bridge.sendMessageFromView !== "function") return "";
+    return new Promise((resolve) => {
+      const requestId = `taskboard-project-context-${crypto.randomUUID()}`;
+      let settled = false;
+      const finish = (projectId = "") => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        resolve(projectId);
+      };
+      const onMessage = (event) => {
+        const message = event.data;
+        if (
+          !message
+          || typeof message !== "object"
+          || message.type !== "fetch-response"
+          || message.requestId !== requestId
+        ) return;
+        try {
+          const selectedProject = JSON.parse(message.bodyJsonString || "null")?.value;
+          finish(typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "");
+        } catch (_) {
+          finish();
+        }
+      };
+      const timeout = window.setTimeout(finish, 1_000);
+      window.addEventListener("message", onMessage);
+      try {
+        bridge.sendMessageFromView({
+          type: "fetch",
+          requestId,
+          method: "POST",
+          url: "vscode://codex/get-global-state",
+          body: JSON.stringify({ key: "selected-project" }),
+        });
+      } catch (_) {
+        finish();
+      }
+    });
   }
 
   function readCodexProjects() {
@@ -749,12 +786,14 @@
   }
 
   async function nativeProjectContext() {
-    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
+    const [bootstrap, projectId] = await Promise.all([
+      window.electronBridge?.getInitialSidebarBootstrap?.(),
+      selectedNativeProjectId(),
+    ]);
     const entries = bootstrap?.globalStateEntries ?? [];
-    const selectedProject = entries.find((entry) => entry.key === "selected-project")?.value;
     const localProjects = entries.find((entry) => entry.key === "local-projects")?.value ?? {};
     return {
-      projectId: typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "",
+      projectId,
       projects: Object.values(localProjects).filter((project) => (
         project
         && typeof project.id === "string"
@@ -823,7 +862,7 @@
           "The target project or worktree is not mapped in Codex",
         ));
       }
-      await bridge.sendMessageFromView({
+      bridge.sendMessageFromView({
         type: "electron-set-active-workspace-root",
         projectId: targetProject.id,
       });
