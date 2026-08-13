@@ -686,7 +686,10 @@ export function App() {
   const [pendingArchivedTaskDelete, setPendingArchivedTaskDelete] = useState<Task | null>(null);
   const [deletingArchivedTaskId, setDeletingArchivedTaskId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
-  const [newTaskDraft, setNewTaskDraft] = useState<NewTaskEditorDraft | null>(null);
+  const [newTaskDraft, setNewTaskDraft] = useState<{
+    projectId: string;
+    draft: NewTaskEditorDraft;
+  } | null>(null);
   const [detailTaskIdentifier, setDetailTaskIdentifier] = useState<string | null>(
     () => readIssueIdentifier(window.location.search),
   );
@@ -3419,18 +3422,22 @@ export function App() {
 
       {editor && (
         <TaskEditor
-          key={editor.task?.id ?? `new-${editor.status}`}
+          key={editor.task?.id ?? `new-${selectedProjectId}-${editor.status}`}
           task={editor.task}
-          tasks={tasks}
+          tasks={tasks.filter((task) => task.projectId === selectedProjectId)}
           initialStatus={editor.status}
-          initialDraft={editor.task ? null : newTaskDraft}
+          initialDraft={editor.task || newTaskDraft?.projectId !== selectedProjectId
+            ? null
+            : newTaskDraft.draft}
           labels={availableLabels}
           currentUser={currentUser}
           developmentScan={developmentScan}
           developmentScanLoading={developmentScanLoading}
           onCreateLabel={persistProjectLabel}
           onCancel={(draft) => {
-            if (!editor.task) setNewTaskDraft(draft);
+            if (!editor.task) {
+              setNewTaskDraft(draft ? { projectId: selectedProjectId, draft } : null);
+            }
             setEditor(null);
           }}
           onSave={saveEditor}
