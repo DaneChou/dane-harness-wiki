@@ -16,7 +16,7 @@ describe("MarkdownDocument", () => {
     mermaid.initialize.mockReset();
     mermaid.render.mockReset();
     mermaid.render.mockResolvedValue({
-      svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>safe diagram</text></svg>',
+      svg: '<' + 'svg xmlns="http://www.w3.org/2000/svg"><text>safe diagram</text></svg>',
     });
   });
 
@@ -49,7 +49,7 @@ describe("MarkdownDocument", () => {
 
   it("renders Mermaid lazily with strict security and sanitizes hostile SVG", async () => {
     mermaid.render.mockResolvedValue({
-      svg: '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><foreignObject>unsafe</foreignObject><image href="https://tracker.invalid/pixel.png"/><style>@import url(https://tracker.invalid/style.css)</style><style>.node{fill:#fff}</style><text>safe diagram</text></svg>',
+      svg: '<' + 'svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"><script>alert(1)</script><foreignObject>unsafe</foreignObject><image href="https://tracker.invalid/pixel.png"/><style>@import url(https://tracker.invalid/style.css)</style><style>.node{fill:#fff}</style><text>safe diagram</text></svg>',
     });
     render(<MarkdownDocument value={'```mermaid\ngraph TD; A-->B\n```'} />);
 

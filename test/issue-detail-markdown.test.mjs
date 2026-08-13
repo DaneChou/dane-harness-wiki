@@ -29,7 +29,7 @@ test("issue detail renders descriptions and comments with GFM markdown", () => {
   assert.match(markdownSource, /import remarkGfm from "remark-gfm";/);
   assert.match(
     markdownSource,
-    /<ReactMarkdown[\s\S]*remarkPlugins=\{\[remarkGfm, remarkBreaks, remarkStripMarkdownComments\]\}[\s\S]*>\s*\{value\}\s*<\/ReactMarkdown>/,
+    /<ReactMarkdown[\s\S]*remarkPlugins=\{\[remarkGfm, remarkStripMarkdownComments, remarkBreaks\]\}[\s\S]*>\s*\{value\}\s*<\/ReactMarkdown>/,
   );
   assert.match(
     detailSource,
@@ -46,7 +46,7 @@ test("issue detail safely hides Markdown comments and renders Mermaid diagrams l
   assert.equal(typeof packageJson.dependencies.mermaid, "string");
   assert.equal(typeof packageJson.dependencies.dompurify, "string");
   assert.match(markdownSource, /function remarkStripMarkdownComments/);
-  assert.match(markdownSource, /remarkPlugins=\{\[remarkGfm, remarkBreaks, remarkStripMarkdownComments\]\}/);
+  assert.match(markdownSource, /remarkPlugins=\{\[remarkGfm, remarkStripMarkdownComments, remarkBreaks\]\}/);
   assert.match(markdownSource, /function MarkdownPre/);
   assert.match(markdownSource, /function MermaidDiagram/);
   assert.match(markdownSource, /import\("mermaid"\)/);
