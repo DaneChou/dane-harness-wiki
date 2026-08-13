@@ -109,6 +109,7 @@ import {
   TASK_STATUSES,
   type ActorIdentity,
   type AiChatThread,
+  type CodexProjectIdentity,
   type DevelopmentScan,
   type HostContext,
   type IssueRelationType,
@@ -179,6 +180,7 @@ interface ProjectChoice {
   issueCount: number;
   inCodex: boolean;
   persisted: boolean;
+  codexIdentity: CodexProjectIdentity | null;
 }
 
 interface ProjectContextMenuState {
@@ -293,6 +295,7 @@ const GLOBAL_PROJECT_ID = "local";
 const RECENT_PROJECT_IDS_KEY = "taskboard.recentProjectIds.v1";
 const PROJECT_VIEW_KEY_PREFIX = "taskboard.project-view.v1.";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
+const PROJECT_CODEX_IDENTITIES_KEY = "taskboard.projectCodexIdentities.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
 const ISSUE_READ_KEY_PREFIX = "taskboard.issue-read.v1";
 const FIRST_USE_COMPLETE_KEY = "taskboard.first-use-complete.v1";
@@ -371,6 +374,25 @@ function readDeviceWorkspacePaths(): Record<string, string> {
     return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => (
       typeof entry[1] === "string" && entry[1].trim().length > 0
     )));
+  } catch {
+    return {};
+  }
+}
+
+function readProjectCodexIdentities(): Record<string, CodexProjectIdentity> {
+  try {
+    const value = JSON.parse(taskboardStorage.getItem(PROJECT_CODEX_IDENTITIES_KEY) ?? "{}");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, CodexProjectIdentity] => {
+      const identity = entry[1] as Partial<CodexProjectIdentity> | null;
+      return Boolean(
+        identity
+        && typeof identity.codexProjectId === "string"
+        && (identity.codexProjectKind === "local" || identity.codexProjectKind === "remote")
+        && typeof identity.codexHostId === "string"
+        && typeof identity.workspacePath === "string",
+      );
+    }));
   } catch {
     return {};
   }
@@ -733,6 +755,7 @@ export function App() {
   const [projectDeleteIssueCount, setProjectDeleteIssueCount] = useState<number | null>(null);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deviceWorkspacePaths, setDeviceWorkspacePaths] = useState(readDeviceWorkspacePaths);
+  const [projectCodexIdentities, setProjectCodexIdentities] = useState(readProjectCodexIdentities);
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
   const [automationPending, setAutomationPending] = useState(false);
   const [automationError, setAutomationError] = useState<string | null>(null);
@@ -838,7 +861,9 @@ export function App() {
     ? undefined
     : deviceWorkspacePaths[selectedProjectId];
   const selectedProjectAutomation = projectAutomations[selectedProjectId];
-  const automationProjectContext = useMemo(() => {
+  const automationProjectContext = useMemo<Partial<CodexProjectIdentity> & {
+    unavailableReason: string | null;
+  }>(() => {
     if (!embedded || window.parent === window) {
       return { unavailableReason: text("仅可在 Codex App 中使用", "Available only in the Codex app") };
     }
@@ -847,6 +872,30 @@ export function App() {
     }
     if (!selectedProject) {
       return { unavailableReason: text("请先选择项目", "Select a project first") };
+    }
+
+    const savedIdentity = projectCodexIdentities[selectedProject.id];
+    if (savedIdentity?.codexProjectKind === "remote") {
+      const liveProject = hostContext?.projects?.find(
+        (project) => project.id === savedIdentity.codexProjectId,
+      );
+      if (
+        liveProject?.projectKind !== "remote"
+        || liveProject.hostId !== savedIdentity.codexHostId
+        || liveProject.workspacePath !== savedIdentity.workspacePath
+      ) {
+        return { unavailableReason: text(
+          "已保存的 SSH 远程项目或主机当前不可用",
+          "The saved SSH remote project or host is not available",
+        ) };
+      }
+      if (!manageTaskboardSkillPath) {
+        return { unavailableReason: text(
+          "任务面板还没有读取到 Skill 路径",
+          "Taskboard has not received the Skill path",
+        ) };
+      }
+      return { ...savedIdentity, unavailableReason: null };
     }
 
     const effectiveCodexProjectId = selectedProject.id === GLOBAL_PROJECT_ID
@@ -899,6 +948,7 @@ export function App() {
     embedded,
     hostContext,
     manageTaskboardSkillPath,
+    projectCodexIdentities,
     selectedProject,
     text,
   ]);
@@ -906,6 +956,8 @@ export function App() {
     if (
       !selectedProject
       || !automationProjectContext.codexProjectId
+      || !automationProjectContext.codexProjectKind
+      || !automationProjectContext.codexHostId
       || !automationProjectContext.workspacePath
       || !manageTaskboardSkillPath
     ) return null;
@@ -942,6 +994,14 @@ export function App() {
         issueCount: persistedById.get(project.id)?.issueCount ?? 0,
         inCodex: true,
         persisted: persistedById.has(project.id),
+        codexIdentity: project.workspacePath && project.projectKind && project.hostId
+          ? {
+              codexProjectId: project.id,
+              codexProjectKind: project.projectKind,
+              codexHostId: project.hostId,
+              workspacePath: project.workspacePath,
+            }
+          : null,
       });
     }
     for (const project of projects) {
@@ -952,6 +1012,7 @@ export function App() {
         issueCount: project.issueCount,
         inCodex: false,
         persisted: true,
+        codexIdentity: projectCodexIdentities[project.id] ?? null,
       });
     }
     const recentOrder = new Map(recentProjectIds.map((projectId, index) => [projectId, index]));
@@ -959,7 +1020,7 @@ export function App() {
       (recentOrder.get(left.id) ?? recentProjectIds.length)
       - (recentOrder.get(right.id) ?? recentProjectIds.length)
     ));
-  }, [hostContext?.projects, projects, recentProjectIds, text]);
+  }, [hostContext?.projects, projectCodexIdentities, projects, recentProjectIds, text]);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const issueReadStorageKey = selectedProjectId
     ? `${ISSUE_READ_KEY_PREFIX}:${taskboardMetadata?.mode ?? "local"}:${selectedProjectId}`
@@ -2412,6 +2473,17 @@ export function App() {
 
   function codexProjectContextForTaskProject(taskboardProjectId: string) {
     const taskboardProject = projects.find((project) => project.id === taskboardProjectId);
+    const savedIdentity = projectCodexIdentities[taskboardProjectId];
+    if (savedIdentity?.codexProjectKind === "remote") {
+      const liveProject = hostContext?.projects?.find(
+        (project) => project.id === savedIdentity.codexProjectId,
+      );
+      return liveProject?.projectKind === "remote"
+        && liveProject.hostId === savedIdentity.codexHostId
+        && liveProject.workspacePath === savedIdentity.workspacePath
+        ? savedIdentity
+        : null;
+    }
     const effectiveCodexProjectId = taskboardProjectId === GLOBAL_PROJECT_ID
       ? hostContext?.projectId
       : taskboardProjectId;
@@ -2476,6 +2548,16 @@ export function App() {
       ? task.developmentContext.path
       : null;
     const codexProjectContext = codexProjectContextForTaskProject(task.projectId);
+    if (
+      projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
+      && !codexProjectContext
+    ) {
+      setActionError(text(
+        "已保存的 SSH 远程项目或主机当前不可用。",
+        "The saved SSH remote project or host is not available.",
+      ));
+      return;
+    }
     const workspacePath = worktreePath
       ?? codexProjectContext?.workspacePath
       ?? selectedDeviceWorkspacePath
@@ -2548,6 +2630,14 @@ export function App() {
           project = nextProjects.find((candidate) => candidate.id === choice.id) ?? null;
           if (!project) throw error;
         }
+      }
+      if (choice.codexIdentity) {
+        setProjectCodexIdentities((current) => {
+          const next = { ...current, [project!.id]: choice.codexIdentity! };
+          taskboardStorage.setItem(PROJECT_CODEX_IDENTITIES_KEY, JSON.stringify(next));
+          return next;
+        });
+        rememberDeviceWorkspacePath(project.id, choice.codexIdentity.workspacePath);
       }
       changeProject(project.id);
     } catch (error) {
@@ -2672,6 +2762,12 @@ export function App() {
       setRecentProjectIds((current) => {
         const next = current.filter((candidate) => candidate !== project.id);
         taskboardStorage.setItem(RECENT_PROJECT_IDS_KEY, JSON.stringify(next));
+        return next;
+      });
+      setProjectCodexIdentities((current) => {
+        const next = { ...current };
+        delete next[project.id];
+        taskboardStorage.setItem(PROJECT_CODEX_IDENTITIES_KEY, JSON.stringify(next));
         return next;
       });
       setPendingProjectDelete(null);

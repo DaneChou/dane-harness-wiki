@@ -172,6 +172,13 @@ export interface WorkflowWorkspaceRecord<T = unknown> {
   updatedAt: string | null;
 }
 
+export interface CodexProjectIdentity {
+  codexProjectId: string;
+  codexProjectKind: "local" | "remote";
+  codexHostId: string;
+  workspacePath: string;
+}
+
 export interface Project {
   id: string;
   name: string;

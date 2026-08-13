@@ -65,6 +65,10 @@ test("project mapping is based on exact ids and workspace paths, never project n
     /const effectiveCodexProjectId = selectedProject\.id === GLOBAL_PROJECT_ID\s*\? hostContext\?\.projectId\s*: selectedProject\.id/,
   );
   assert.match(automationContextSource, /project\.id === effectiveCodexProjectId/);
+  assert.match(automationContextSource, /savedIdentity\?\.codexProjectKind === "remote"/);
+  assert.match(automationContextSource, /project\.id === savedIdentity\.codexProjectId/);
+  assert.match(automationContextSource, /liveProject\.hostId !== savedIdentity\.codexHostId/);
+  assert.match(automationContextSource, /liveProject\.workspacePath !== savedIdentity\.workspacePath/);
   assert.match(appSource, /directCodexProject\?\.workspacePath/);
   assert.match(appSource, /\(deviceWorkspacePaths\[project\.id\] \?\? project\.workspacePath\) === workspacePath/);
   assert.match(appSource, /请先在 Codex 中添加并映射该项目目录/);

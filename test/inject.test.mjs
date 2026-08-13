@@ -263,7 +263,7 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.match(source, /data-codex-composer/);
   assert.match(source, /type: "electron-set-active-workspace-root"/);
   assert.match(source, /root: workspacePath/);
-  assert.match(createThreadSource, /if \(codexProjectKind === "remote"\) \{[\s\S]*?await waitForRemoteProject\(codexProjectId, codexHostId\)/);
+  assert.match(createThreadSource, /if \(codexProjectKind === "remote"\) \{[\s\S]*?await waitForRemoteProject\(codexProjectId, codexHostId, workspacePath\)/);
   assert.doesNotMatch(source, /prefillPrompt: prompt/);
   assert.match(source, /requestHostTaskComposerPrefill\(\{/);
   assert.match(source, /requestHost\("prefill-task-composer"/);
@@ -322,6 +322,7 @@ test("remote Codex tasks wait for the exact project and host without a local rou
   assert.match(remoteProjectSource, /selectedProjectId === projectId/);
   assert.match(remoteProjectSource, /selectedProject\?\.projectKind === "remote"/);
   assert.match(remoteProjectSource, /selectedProject\.hostId === hostId/);
+  assert.match(remoteProjectSource, /!workspacePath \|\| selectedProject\.workspacePath === workspacePath/);
   assert.match(remoteOpenSource, /waitForRemoteThreadRow\(normalizedThreadId, projectId\)/);
   assert.match(remoteOpenSource, /type: "taskboard:thread-open-error"/);
   assert.doesNotMatch(remoteOpenSource, /routeForThread/);

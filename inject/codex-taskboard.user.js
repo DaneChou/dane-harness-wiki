@@ -792,7 +792,7 @@
       )) || null;
   }
 
-  async function waitForRemoteProject(projectId, hostId) {
+  async function waitForRemoteProject(projectId, hostId, workspacePath) {
     if (!projectId || !hostId || hostId === "local") {
       throw new Error(hostText(
         "SSH 远程项目缺少精确的项目或主机标识",
@@ -834,6 +834,7 @@
         selectedProjectId === projectId
         && selectedProject?.projectKind === "remote"
         && selectedProject.hostId === hostId
+        && (!workspacePath || selectedProject.workspacePath === workspacePath)
       ) {
         codexProjectMetadata = metadata;
         lastNativeProjectId = projectId;
@@ -870,7 +871,10 @@
         const hostId = typeof payload?.codexHostId === "string"
           ? payload.codexHostId.trim()
           : "";
-        await waitForRemoteProject(projectId, hostId);
+        const workspacePath = typeof payload?.workspacePath === "string"
+          ? payload.workspacePath.trim()
+          : "";
+        await waitForRemoteProject(projectId, hostId, workspacePath);
         const row = await waitForRemoteThreadRow(normalizedThreadId, projectId);
         if (!row?.isConnected) {
           throw new Error(hostText(
@@ -996,7 +1000,7 @@
         const codexHostId = typeof payload?.codexHostId === "string"
           ? payload.codexHostId.trim()
           : "";
-        await waitForRemoteProject(codexProjectId, codexHostId);
+        await waitForRemoteProject(codexProjectId, codexHostId, workspacePath);
       } else if (workspacePath) {
         await bridge.sendMessageFromView({
           type: "electron-set-active-workspace-root",
