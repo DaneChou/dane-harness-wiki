@@ -28,8 +28,8 @@ interface MarkdownAstNode {
 
 const RAW_COMMENT = /<!--[\s\S]*?-->/g;
 const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
-const MERMAID_EXTERNAL_RESOURCE = /@\{[^}]*\b["']?img["']?\s*:\s*(?:"[^"]+"|'[^']+'|[^,}\s"'][^,}]*)|^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
-const MERMAID_SEQUENCE_PROPERTIES = /(?:^|[;\r\n])\s*properties\s+[^:\r\n;]+\s*:\s*(\{[^}\r\n]*\})/gim;
+const MERMAID_EXTERNAL_RESOURCE = /^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
+const MERMAID_SEQUENCE_PROPERTIES = /(?:^|[;\r\n])\s*properties\s+[^:\r\n;]+\s*:\s*/gim;
 
 interface EncodedCommentMarker {
   kind: "open" | "close";
@@ -43,6 +43,105 @@ interface EncodedCommentMarker {
 interface EncodedCommentRange {
   open: EncodedCommentMarker;
   close: EncodedCommentMarker;
+}
+
+function mermaidObjectEnd(source: string, start: number) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === '"') {
+        inString = false;
+      }
+    } else if (character === '"') {
+      inString = true;
+    } else if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return index;
+    }
+  }
+  return -1;
+}
+
+function mermaidPropertyName(source: string) {
+  const value = source.trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(value) as unknown;
+      return typeof decoded === "string" ? decoded : value;
+    } catch {
+      return value;
+    }
+  }
+  if (value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1).replace(/''/g, "'");
+  }
+  return value;
+}
+
+function hasFlowchartImageResource(source: string) {
+  for (const shape of source.matchAll(/@\{/g)) {
+    const objectStart = (shape.index ?? 0) + 1;
+    const objectEnd = mermaidObjectEnd(source, objectStart);
+    if (objectEnd < 0) return false;
+    const objectSource = source.slice(objectStart + 1, objectEnd);
+    let entryStart = 0;
+    let colon = -1;
+    let depth = 0;
+    let quote: '"' | "'" | null = null;
+    let escaped = false;
+    let canStartScalar = true;
+
+    for (let index = 0; index <= objectSource.length; index += 1) {
+      const character = objectSource[index];
+      if (quote === '"') {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === '"') {
+          quote = null;
+        }
+      } else if (quote === "'") {
+        if (character === "'" && objectSource[index + 1] === "'") {
+          index += 1;
+        } else if (character === "'") {
+          quote = null;
+        }
+      } else if (canStartScalar && (character === '"' || character === "'")) {
+        quote = character;
+      } else if (character === "{" || character === "[" || character === "(") {
+        depth += 1;
+        canStartScalar = true;
+      } else if (character === "}" || character === "]" || character === ")") {
+        depth -= 1;
+      } else if (depth === 0 && colon < entryStart && character === ":") {
+        colon = index;
+        canStartScalar = true;
+      } else if (depth === 0 && (character === "," || character === "\r" || character === "\n" || character === undefined)) {
+        if (colon >= entryStart) {
+          const name = mermaidPropertyName(objectSource.slice(entryStart, colon));
+          const value = objectSource.slice(colon + 1, index).trim();
+          if (name === "img" && value !== "" && value !== '""' && value !== "''") return true;
+        }
+        if (character === "\r" && objectSource[index + 1] === "\n") index += 1;
+        entryStart = index + 1;
+        colon = -1;
+        canStartScalar = true;
+      } else if (character !== " " && character !== "\t") {
+        canStartScalar = false;
+      }
+    }
+  }
+  return false;
 }
 
 function hasExternalMermaidCss(source: string) {
@@ -86,10 +185,14 @@ function hasExternalMermaidCss(source: string) {
 }
 
 function hasExternalMermaidResource(source: string) {
-  if (MERMAID_EXTERNAL_RESOURCE.test(source)) return true;
+  if (MERMAID_EXTERNAL_RESOURCE.test(source) || hasFlowchartImageResource(source)) return true;
   for (const match of source.matchAll(MERMAID_SEQUENCE_PROPERTIES)) {
+    const objectStart = match.index + match[0].length;
+    if (source[objectStart] !== "{") continue;
+    const objectEnd = mermaidObjectEnd(source, objectStart);
+    if (objectEnd < 0) continue;
     try {
-      const properties = JSON.parse(match[1]) as Record<string, unknown>;
+      const properties = JSON.parse(source.slice(objectStart, objectEnd + 1)) as Record<string, unknown>;
       if (Object.prototype.hasOwnProperty.call(properties, "icon")) return true;
     } catch {
       continue;
@@ -107,8 +210,7 @@ export function remarkStripMarkdownComments() {
       if (node.type === "text" && node.value && node.position?.start.offset !== undefined && node.position.end.offset !== undefined) {
         const sourceStart = node.position.start.offset;
         const sourceValue = source.slice(sourceStart, node.position.end.offset);
-        const sourceOpenMarkers = [...sourceValue.matchAll(/&lt;!--|<!--/gi)].filter((match) => {
-          if (!match[0].toLowerCase().startsWith("&lt;")) return true;
+        const sourceOpenMarkers = [...sourceValue.matchAll(/&(?:#(?:\d{1,7}|x[\da-f]{1,6})|[\da-z]{1,31});!--/gi)].filter((match) => {
           let backslashes = 0;
           for (let index = (match.index ?? 0) - 1; index >= 0 && sourceValue[index] === "\\"; index -= 1) {
             backslashes += 1;
@@ -116,7 +218,7 @@ export function remarkStripMarkdownComments() {
           return backslashes % 2 === 0;
         });
         sourceOpenMarkers.forEach((match) => {
-          if (!match[0].toLowerCase().startsWith("&lt;")) return;
+          if (decodeString(match[0]) !== "<!--") return;
           const valueOffset = decodeString(sourceValue.slice(0, match.index ?? 0)).length;
           if (!node.value!.startsWith("<!--", valueOffset)) return;
           markers.push({
@@ -129,9 +231,9 @@ export function remarkStripMarkdownComments() {
           });
         });
 
-        const sourceCloseMarkers = [...sourceValue.matchAll(/--&gt;|-->/gi)];
+        const sourceCloseMarkers = [...sourceValue.matchAll(/--&(?:#(?:\d{1,7}|x[\da-f]{1,6})|[\da-z]{1,31});/gi)];
         sourceCloseMarkers.forEach((match) => {
-          if (!match[0].toLowerCase().endsWith("&gt;")) return;
+          if (decodeString(match[0]) !== "-->") return;
           const valueOffset = decodeString(sourceValue.slice(0, match.index ?? 0)).length;
           if (!node.value!.startsWith("-->", valueOffset)) return;
           markers.push({
@@ -262,6 +364,7 @@ export function MermaidDiagram({ source }: { source: string }) {
           suppressErrorRendering: true,
           theme: theme === "dark" ? "dark" : "default",
           htmlLabels: false,
+          secure: ["htmlLabels"],
         });
         const { svg } = await mermaid.render(renderId, source);
         const sanitizedSvg = purifierModule.default.sanitize(svg, {
