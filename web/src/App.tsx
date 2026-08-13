@@ -72,7 +72,11 @@ import { ProjectAutomationMenu } from "./components/ProjectAutomationMenu";
 import { TaskboardIcon } from "./components/TaskboardIcon";
 import { TaskContextMenu } from "./components/TaskContextMenu";
 import { TaskDetail } from "./components/TaskDetail";
-import { TaskEditor, type NewTaskEditorDraft } from "./components/TaskEditor";
+import {
+  TaskEditor,
+  type NewTaskCreateOptions,
+  type NewTaskEditorDraft,
+} from "./components/TaskEditor";
 import { TaskFilterMenu } from "./components/TaskFilterMenu";
 import { taskboardStorage } from "./storage";
 import {
@@ -489,12 +493,6 @@ function intervalMinutesFromRrule(value: string): AutomationIntervalMinutes | nu
   return match ? Number(match[1]) as AutomationIntervalMinutes : null;
 }
 
-function workspaceName(path?: string): string | null {
-  if (!path) return null;
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.at(-1) ?? path;
-}
-
 function isAutomationHostItem(value: unknown): value is AutomationHostItem {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Partial<AutomationHostItem>;
@@ -724,7 +722,10 @@ export function App() {
   const [pendingArchivedTaskDelete, setPendingArchivedTaskDelete] = useState<Task | null>(null);
   const [deletingArchivedTaskId, setDeletingArchivedTaskId] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
-  const [newTaskDraft, setNewTaskDraft] = useState<NewTaskEditorDraft | null>(null);
+  const [newTaskDraft, setNewTaskDraft] = useState<{
+    projectId: string;
+    draft: NewTaskEditorDraft;
+  } | null>(null);
   const [detailTaskIdentifier, setDetailTaskIdentifier] = useState<string | null>(
     () => readIssueIdentifier(window.location.search),
   );
@@ -2064,77 +2065,161 @@ export function App() {
     draft: TaskDraft,
     attachments: File[],
     inlineImages: PendingInlineImage[],
+    createOptions?: NewTaskCreateOptions,
   ) {
     if (!selectedProjectId || !editor) return;
     setActionError(null);
+    const creating = editor.task === null;
+    let saved: Task;
     try {
-      const creating = editor.task === null;
-      let saved = editor.task
+      saved = editor.task
         ? await updateTaskRequest(editor.task, draft)
         : await createTaskRequest(selectedProjectId, draft);
-      if (creating) {
-        setProjects((current) => current.map((project) => (
-          project.id === selectedProjectId
-            ? { ...project, issueCount: project.issueCount + 1 }
-            : project
-        )));
+    } catch (error) {
+      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
+        void refreshTasks(selectedProjectId, { quiet: true });
       }
-      let uploadedAttachments = 0;
-      let failedAttachments = 0;
-      if (creating && (attachments.length > 0 || inlineImages.length > 0)) {
-        const [results, inlineAttachments] = await Promise.all([
+      throw error;
+    }
+    if (creating) {
+      setProjects((current) => current.map((project) => (
+        project.id === selectedProjectId
+          ? { ...project, issueCount: project.issueCount + 1 }
+          : project
+      )));
+    }
+    let failedAttachments = 0;
+    let postCreateWriteFailed = false;
+    if (creating && (attachments.length > 0 || inlineImages.length > 0)) {
+      const [results, inlineResults] = await Promise.all([
           Promise.allSettled(
             attachments.map((file) => uploadAttachment(saved.id, file)),
           ),
-          Promise.all(
+          Promise.allSettled(
             inlineImages.map((image) => uploadAttachment(saved.id, image.file)),
           ),
-        ]);
-        uploadedAttachments = results.filter((result) => result.status === "fulfilled").length;
-        failedAttachments = results.length - uploadedAttachments;
-        if (inlineImages.length > 0) {
+      ]);
+      failedAttachments = results.filter((result) => result.status === "rejected").length;
+      const inlineAttachments = inlineResults.flatMap((result) => (
+        result.status === "fulfilled" ? [result.value] : []
+      ));
+      if (inlineAttachments.length !== inlineImages.length) {
+        postCreateWriteFailed = true;
+      } else if (inlineImages.length > 0) {
+        try {
           const description = resolveInlineMediaMarkdown(
             draft.description,
             inlineImages,
             inlineAttachments,
           );
           saved = await updateTaskRequest(saved, { ...draft, description });
+        } catch {
+          postCreateWriteFailed = true;
         }
       }
-      setTasks((current) => sortTasks([
-        ...current.filter((task) => task.id !== saved.id),
-        saved,
-      ]));
-      if (creating) setNewTaskDraft(null);
-      setEditor(null);
-      if (failedAttachments > 0) {
-        setActionError(text(
-          `${saved.identifier} 已创建，但有 ${failedAttachments} 个附件上传失败，可在详情页重试。`,
-          `${saved.identifier} was created, but ${failedAttachments} attachments failed to upload. Try again from the details page.`,
-        ));
-      }
-      if (creating) {
-        pushUndo(null, async () => {
-          const candidate = tasksRef.current.find((task) => task.id === saved.id);
-          const current = candidate && candidate.version >= saved.version ? candidate : saved;
-          await archiveTaskRequest(current);
-          setTasks((tasks) => tasks.filter((task) => task.id !== saved.id));
-        });
-      } else if (editor.task) {
-        const previous = editor.task;
-        const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
-        if (!draft.assigneeTarget || previousAssigneeTarget) {
-          pushUndo(
-            null,
-            () => restoreTaskDetails(previous, saved, previousAssigneeTarget),
-          );
+    }
+    const relationUpdates = new Map<string, Task>();
+    const movedSubIssues: Array<{ task: Task; previousParentId: string | null }> = [];
+    let addedParentId: string | null = null;
+    const addedRelatedIds: string[] = [];
+    let relationWriteFailed = false;
+    if (creating && createOptions) {
+      const { parentId, relatedIds, subIssueIds } = createOptions.relations;
+      try {
+        if (parentId) {
+          const result = await addTaskRelation(saved, "parent", parentId);
+          saved = result.task;
+          addedParentId = parentId;
+          relationUpdates.set(result.relatedTask.id, result.relatedTask);
         }
+        for (const relatedId of relatedIds) {
+          const result = await addTaskRelation(saved, "related", relatedId);
+          saved = result.task;
+          addedRelatedIds.push(relatedId);
+          relationUpdates.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const subIssueId of subIssueIds) {
+          const child = relationUpdates.get(subIssueId)
+            ?? tasksRef.current.find((candidate) => candidate.id === subIssueId)!;
+          const previousParentId = child.relations.parent?.id ?? null;
+          const result = await addTaskRelation(child, "parent", saved.id);
+          movedSubIssues.push({ task: result.task, previousParentId });
+          relationUpdates.set(result.task.id, result.task);
+          saved = result.relatedTask;
+        }
+      } catch {
+        relationWriteFailed = true;
       }
-    } catch (error) {
-      if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        void refreshTasks(selectedProjectId, { quiet: true });
+    }
+    relationUpdates.set(saved.id, saved);
+    setTasks((current) => sortTasks([
+      ...current.filter((task) => !relationUpdates.has(task.id)),
+      ...relationUpdates.values(),
+    ]));
+    if (creating) setNewTaskDraft(null);
+    const failedWrites = [
+      ...(relationWriteFailed ? [{ zh: "关系", en: "relations" }] : []),
+      ...(postCreateWriteFailed ? [{ zh: "正文或图片", en: "description or images" }] : []),
+      ...(failedAttachments > 0 ? [{
+        zh: `${failedAttachments} 个附件`,
+        en: `${failedAttachments} attachment${failedAttachments === 1 ? "" : "s"}`,
+      }] : []),
+    ];
+    if (!creating || !createOptions?.keepOpen || failedWrites.length > 0) setEditor(null);
+    if (failedWrites.length > 0) {
+      setActionError(text(
+        `${saved.identifier} 已创建，但以下内容写入失败：${failedWrites.map((failure) => failure.zh).join("、")}。`,
+        `${saved.identifier} was created, but these follow-up writes failed: ${failedWrites.map((failure) => failure.en).join(", ")}.`,
+      ));
+    }
+    if (creating) {
+      pushUndo(null, async () => {
+        const restoredRelations = new Map<string, Task>();
+        const candidate = tasksRef.current.find((task) => task.id === saved.id);
+        let current = candidate && candidate.version >= saved.version ? candidate : saved;
+        if (addedParentId) {
+          const result = await removeTaskRelation(current, "parent", addedParentId);
+          current = result.task;
+          restoredRelations.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const relatedId of [...addedRelatedIds].reverse()) {
+          const result = await removeTaskRelation(current, "related", relatedId);
+          current = result.task;
+          restoredRelations.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const movedSubIssue of [...movedSubIssues].reverse()) {
+          const latestChild = tasksRef.current.find((task) => task.id === movedSubIssue.task.id);
+          const child = latestChild && latestChild.version >= movedSubIssue.task.version
+            ? latestChild
+            : movedSubIssue.task;
+          const removed = await removeTaskRelation(child, "parent", saved.id);
+          restoredRelations.set(removed.task.id, removed.task);
+          current = removed.relatedTask;
+          if (movedSubIssue.previousParentId) {
+            const restored = await addTaskRelation(
+              removed.task,
+              "parent",
+              movedSubIssue.previousParentId,
+            );
+            restoredRelations.set(restored.task.id, restored.task);
+            restoredRelations.set(restored.relatedTask.id, restored.relatedTask);
+          }
+        }
+        await archiveTaskRequest(current);
+        setTasks((tasks) => sortTasks([
+          ...tasks.filter((task) => task.id !== saved.id && !restoredRelations.has(task.id)),
+          ...[...restoredRelations.values()].filter((task) => task.id !== saved.id),
+        ]));
+      });
+    } else if (editor.task) {
+      const previous = editor.task;
+      const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
+      if (!draft.assigneeTarget || previousAssigneeTarget) {
+        pushUndo(
+          null,
+          () => restoreTaskDetails(previous, saved, previousAssigneeTarget),
+        );
       }
-      throw error;
     }
   }
 
@@ -2577,15 +2662,20 @@ export function App() {
     const workspacePath = worktreePath
       ?? codexProjectContext?.workspacePath
       ?? selectedDeviceWorkspacePath
-      ?? developmentScan.workspacePath
-      ?? hostContext?.workspacePath;
+      ?? selectedProject?.workspacePath
+      ?? (
+        selectedProject?.id === GLOBAL_PROJECT_ID
+        || hostContext?.projectId === selectedProject?.id
+          ? hostContext?.workspacePath
+          : undefined
+      );
     const instruction = `e-taskboard 处理任务面板任务 ${task.identifier}，并同步进度状态。`;
 
     if (!embedded || window.parent === window) {
-      const query = new URLSearchParams();
-      if (workspacePath) query.set("path", workspacePath);
-      query.set("prompt", instruction);
-      window.location.assign(`codex://new?${query.toString().replace(/\+/g, "%20")}`);
+      setActionError([
+        "在对话中打开仅可在 Codex 内嵌任务面板中使用。请从 Codex 侧栏打开任务面板后重试。",
+        "Open in conversation is available only in the embedded Codex Taskboard. Open Taskboard from the Codex sidebar and try again.",
+      ]);
       return;
     }
     if (openingThreadTaskId) return;
@@ -2596,15 +2686,13 @@ export function App() {
       payload: {
         taskId: task.id,
         identifier: task.identifier,
+        title: task.title,
         instruction,
         codexProjectId: codexProjectContext?.codexProjectId,
         codexProjectKind: codexProjectContext?.codexProjectKind ?? "local",
         codexHostId: codexProjectContext?.codexHostId ?? "local",
         codexProjectWorkspacePath: codexProjectContext?.workspacePath,
-        projectName: projects.find((project) => project.id === task.projectId)?.name
-          ?? selectedProject?.name,
         workspacePath,
-        workspaceLabel: worktreePath ? workspaceName(worktreePath) : undefined,
       },
     });
   }
@@ -3571,17 +3659,22 @@ export function App() {
 
       {editor && (
         <TaskEditor
-          key={editor.task?.id ?? `new-${editor.status}`}
+          key={editor.task?.id ?? `new-${selectedProjectId}-${editor.status}`}
           task={editor.task}
+          tasks={tasks.filter((task) => task.projectId === selectedProjectId)}
           initialStatus={editor.status}
-          initialDraft={editor.task ? null : newTaskDraft}
+          initialDraft={editor.task || newTaskDraft?.projectId !== selectedProjectId
+            ? null
+            : newTaskDraft.draft}
           labels={availableLabels}
           currentUser={currentUser}
           developmentScan={developmentScan}
           developmentScanLoading={developmentScanLoading}
           onCreateLabel={persistProjectLabel}
           onCancel={(draft) => {
-            if (!editor.task) setNewTaskDraft(draft);
+            if (!editor.task) {
+              setNewTaskDraft(draft ? { projectId: selectedProjectId, draft } : null);
+            }
             setEditor(null);
           }}
           onSave={saveEditor}

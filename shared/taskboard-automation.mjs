@@ -75,7 +75,9 @@ export function buildTaskboardAutomationPrompt(request) {
   const executionInstructions = remoteProject
     ? [
         `本自动化仅在本机作为任务面板控制器运行；实际开发必须派发到 Codex SSH 远程项目 ${JSON.stringify(request.codexProjectId)}，主机 ID ${JSON.stringify(request.codexHostId)}，远程目录 ${JSON.stringify(request.workspacePath)}。不要在当前本地自动化会话修改项目文件。`,
-        "每次仅处理一个 todo：选定后先用 issue get 读取最新议题内容，并用 comment list 读取全部评论。根据描述和最新评论判断是否允许开始；若其中写明等待、暂不执行或当前不应开始，立即跳过并报告，不改状态。评论也包含已完成后被打回的返工要求。",
+        "从返回的 todo 中只选择依赖已完成的议题：relations.blockedBy 为空，或其中每个依赖的 status 都严格等于 done。无依赖的 todo 仍可并行处理。若有 todo 但全部被未完成依赖阻塞，本轮直接结束，不暂停自动化，也不创建或打开新的任务会话。",
+        "每次仅处理一个符合依赖条件的 todo：选定后先用 issue get 读取最新议题内容，并用 comment list 读取全部评论。根据描述和最新评论判断是否允许开始；若其中写明等待、暂不执行或当前不应开始，立即跳过并报告，不改状态。评论也包含已完成后被打回的返工要求。",
+        "完成 issue get 和 comment list 后、移动状态前，必须再次运行 issue get，并复核 relations.blockedBy 仍为空或其中每个依赖的 status 都严格等于 done。若依赖条件不再满足，立即跳过并结束本轮，不改状态，也不暂停自动化。",
         "先检查 issue get 的 projectId、version、threadId 和 threadBinding。完整 threadBinding 包含 threadId、codexProjectId、codexProjectKind、codexHostId、workspacePath，且它是该议题后续 send、wait 和状态写回的唯一目标；当前自动化的项目和主机只能作为未绑定议题的首次目标，不能替换已有绑定。若存在 threadId 但没有完整 threadBinding，这是只能由 UI 打开的 legacy local 绑定：使用 comment add 说明自动化无法确认项目和主机，再使用首次读取的 version 作为 --if-version、用 --binding-thread-id 保留原 threadId 将议题移动到 blocked；若冲突立即停止。不得 send、create 或覆盖该绑定。",
         "确认允许开始后，必须在读取代码、下载附件、分析或实施前，由当前本地控制器使用刚读取的 version 将仍可认领的 todo 移到 in_progress。已有完整 threadBinding 时，issue move 必须同时传 --binding-thread-id、--binding-codex-project-id、--binding-codex-project-kind、--binding-codex-host-id、--binding-workspace-path 的保存值；未绑定时必须传 --clear-binding-thread，避免把本地控制器 CODEX_THREAD_ID 写成任务绑定。写入成功后记录响应 task 的 version 为 ownedVersion、projectId 为 ownedProjectId，并记录本轮 binding；以后本轮每次 issue move 都必须显式传 --if-version ownedVersion，成功后再用响应 version 更新 ownedVersion。不得省略 --if-version 后让 taskctl 自动读取最新 version。写入成功前不得继续。所有认领、评论和状态写入只由当前本地控制器完成，不得要求远程会话运行 taskctl。",
         "若因 version 陈旧发生版本冲突，重新运行 issue get 和 comment list；仅当仍为可认领 todo、绑定身份未变化、未归档且描述和最新评论未变化时，用最新 version 重试一次。若已被认领、绑定、状态或要求已变、已归档、服务或永久 API 错误，或重试仍失败，立即跳过该议题、退出并报告；不得抢占或循环重试。",
@@ -85,7 +87,9 @@ export function buildTaskboardAutomationPrompt(request) {
         "使用 Codex wait_threads 等待远程会话时，目标必须使用任务保存的 threadBinding.threadId 和 threadBinding.codexHostId。wait_threads 失败、远程会话明确需要用户输入或无法继续时，使用 comment add 记录原因，再用 ownedVersion、显式 --if-version 和完整保存 binding 将议题移动到 blocked；409 时立即停止。远程会话完成后，使用 comment add 写入改动、验证结果、执行结果和剩余风险，再用 ownedVersion、显式 --if-version 和完整保存 binding 将议题移动到 in_review。worker 确认后的每一次 issue move 都必须显式传完整远程 binding；不要把未完成工作标记为 in_review。",
       ]
     : [
-        "每次仅处理一个 todo：选定后先用 issue get 读取最新议题内容，并用 comment list 读取全部评论。根据描述和最新评论判断是否允许开始；若其中写明等待、暂不执行或当前不应开始，立即跳过并报告，不改状态。评论也包含已完成后被打回的返工要求。",
+        "从返回的 todo 中只选择依赖已完成的议题：relations.blockedBy 为空，或其中每个依赖的 status 都严格等于 done。无依赖的 todo 仍可并行处理。若有 todo 但全部被未完成依赖阻塞，本轮直接结束，不暂停自动化，也不创建或打开新的任务会话。",
+        "每次仅处理一个符合依赖条件的 todo：选定后先用 issue get 读取最新议题内容，并用 comment list 读取全部评论。根据描述和最新评论判断是否允许开始；若其中写明等待、暂不执行或当前不应开始，立即跳过并报告，不改状态。评论也包含已完成后被打回的返工要求。",
+        "完成 issue get 和 comment list 后、移动状态前，必须再次运行 issue get，并复核 relations.blockedBy 仍为空或其中每个依赖的 status 都严格等于 done。若依赖条件不再满足，立即跳过并结束本轮，不改状态，也不暂停自动化。",
         "确认允许开始后，必须在读取代码、下载附件、分析或实施前，使用刚读取的 version 将仍可认领的 todo 移到 in_progress；写入成功前不得继续。不得认领已被其他会话绑定或其他 Agent 领取的议题。",
         "若因 version 陈旧发生版本冲突，重新运行 issue get 和 comment list；仅当仍为可认领 todo、未绑定其他会话、未归档且描述和最新评论未变化时，用最新 version 重试一次。若已被认领、状态或要求已变、已归档、服务或永久 API 错误，或重试仍失败，立即跳过该议题、退出并报告；不得抢占或循环重试。",
         "若首次 issue get 返回 threadId，议题已绑定原会话：不要在当前自动化会话认领；使用 Codex send_message_to_thread 向原会话发送继续处理指令，由原会话按上述协议判断和认领，然后结束当前自动化会话。若没有 threadId，则在当前自动化会话处理。",

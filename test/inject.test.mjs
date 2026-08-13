@@ -253,28 +253,48 @@ test("only a loopback Taskboard iframe can request native automation", () => {
   );
 });
 
-test("issues open an unsent native Codex composer in the exact workspace with the task instruction", () => {
+test("issues start a native Codex conversation in the confirmed project with the task title", () => {
   const createThreadSource = source.slice(
     source.indexOf("async function createThreadForTask"),
     source.indexOf("async function handleAutomationRequest"),
   );
-  assert.match(source, /function createThreadForTask\(payload\)/);
-  assert.match(source, /\[data-app-action-sidebar-select-project\]/);
-  assert.match(source, /data-codex-composer/);
-  assert.match(source, /type: "electron-set-active-workspace-root"/);
-  assert.match(source, /root: workspacePath/);
-  assert.match(createThreadSource, /if \(codexProjectKind === "remote"\) \{[\s\S]*?await waitForRemoteProject\(codexProjectId, codexHostId, codexProjectWorkspacePath\)/);
-  assert.doesNotMatch(source, /prefillPrompt: prompt/);
-  assert.match(source, /requestHostTaskComposerPrefill\(\{/);
-  assert.match(source, /requestHost\("prefill-task-composer"/);
-  assert.match(source, /function waitForPreparedComposer\(identifier\)/);
-  assert.match(source, /requestHostTaskComposerPrefill\(\{ instruction \}\)/);
-  assert.match(source, /normalizedLabel\(editor\.textContent\)\.includes\(normalizedLabel\(identifier\)\)/);
-  assert.doesNotMatch(source, /submit\.click\(\)/);
-  assert.match(source, /type: "taskboard:thread-prepared"/);
-  assert.doesNotMatch(source, /function waitForCreatedThread/);
-  assert.doesNotMatch(source, /type: "taskboard:thread-created"/);
-  assert.doesNotMatch(webApp, /taskboard:thread-created/);
+  assert.match(source, /async function createThreadForTask\(payload\)/);
+  assert.match(source, /async function nativeProjectContext\(\)/);
+  assert.match(source, /async function activeNativeWorkspaceRoots\(\)/);
+  assert.match(source, /requestNativeFetch\("active-workspace-roots", \{\}\)/);
+  assert.match(source, /function normalizeNativeRootPath\(value\)/);
+  assert.match(source, /async function resolveNativeProject\(requestedProjectId, workspacePath\)/);
+  assert.match(source, /workspacePath\) \{\s*return normalizeNativeRootPath\(workspacePath\) \? \{ targetRoot: workspacePath \} : null/);
+  assert.match(source, /const targetRoot = project\?\.rootPaths\[0\]/);
+  assert.match(source, /async function waitForNativeProject\(targetRoot\)/);
+  const waitStart = source.indexOf("async function waitForNativeProject");
+  const waitSource = source.slice(waitStart, source.indexOf("async function createThreadForTask", waitStart));
+  assert.match(waitSource, /selectedNativeProjectId\(\)/);
+  assert.match(waitSource, /activeNativeWorkspaceRoots\(\)/);
+  assert.match(waitSource, /projectId\s*&&\s*normalizeNativeRootPath\(activeRoots\[0\]\) === normalizedTargetRoot/);
+  assert.match(
+    source,
+    /requestNativeFetch\("add-workspace-root-option", \{\s*root: targetRoot,\s*setActive: true,\s*origin: window\.location\.origin,/,
+  );
+  assert.match(source, /if \(switched\?\.success !== true\)/);
+  assert.match(source, /await waitForNativeProject\(targetRoot\)/);
+  assert.match(
+    createThreadSource,
+    /if \(codexProjectKind === "remote"\) \{[\s\S]*?codexHostId = typeof payload\?\.codexHostId[\s\S]*?codexProjectWorkspacePath[\s\S]*?await waitForRemoteProject\(requestedProjectId, codexHostId, codexProjectWorkspacePath\);\s*targetRoot = codexProjectWorkspacePath;/,
+  );
+  assert.match(source, /const previousThreadId = normalizeThreadId/);
+  assert.match(source, /const focusComposerNonce = crypto\.randomUUID\(\)/);
+  assert.match(source, /state: \{\s*focusComposerNonce,\s*prefillPrompt: instruction,/);
+  assert.match(source, /const HOST_REQUEST_TIMEOUT_MS = 12_000/);
+  assert.match(source, /function requestHost\(action, payload = \{\}, timeoutMs = HOST_REQUEST_TIMEOUT_MS\)/);
+  assert.doesNotMatch(source, /CONVERSATION_REQUEST_TIMEOUT_MS/);
+  assert.match(source, /requestHostTaskConversationStart\(\{\s*taskId,\s*previousThreadId,\s*codexHostId,\s*targetRoot,\s*instruction,\s*title,/);
+  assert.match(
+    source,
+    /requestHost\("start-task-conversation", \{\s*taskId,\s*previousThreadId,\s*codexHostId,\s*targetRoot,\s*instruction,\s*title,\s*\}, null\)/,
+  );
+  assert.match(source, /lastNativeThreadId = startedThreadId/);
+  assert.match(source, /type: "taskboard:thread-prepared", payload: \{ taskId, threadId: started\.threadId \}/);
   assert.match(
     webApp,
     /const instruction = `e-taskboard 处理任务面板任务 \$\{task\.identifier\}，并同步进度状态。`/,
@@ -282,6 +302,7 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.doesNotMatch(webApp, /const prompt =/);
   assert.doesNotMatch(webApp, /skillName: "manage-taskboard"/);
   assert.match(webApp, /instruction,/);
+  assert.match(webApp, /title: task\.title,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
   assert.match(webApp, /codexProjectWorkspacePath: codexProjectContext\?\.workspacePath/);
   assert.match(webApp, /type: "taskboard:open-thread",[\s\S]*?payload: binding/);
@@ -292,9 +313,10 @@ test("the standalone web page opens linked Codex tasks through the app deep link
 });
 
 test("the injected app opens an existing local Codex task instead of a new composer", () => {
+  const openThreadStart = source.indexOf("async function openThread");
   const openThreadSource = source.slice(
-    source.indexOf("async function openThread"),
-    source.indexOf("function projectRowById"),
+    openThreadStart,
+    source.indexOf("async function nativeProjectContext", openThreadStart),
   );
   assert.match(openThreadSource, /if \(row\?\.isConnected\) \{\s*row\.click\?\.\(\);\s*return;/);
   assert.match(openThreadSource, /await dispatchHostMessage\(\{\s*type: "navigate-to-route",\s*path: routeForThread\(normalizedThreadId\)/);
@@ -312,7 +334,7 @@ test("remote Codex tasks wait for the exact project and host without a local rou
   );
   const openThreadSource = source.slice(
     source.indexOf("async function openThread"),
-    source.indexOf("function projectRowById"),
+    source.indexOf("async function nativeProjectContext"),
   );
   const remoteOpenSource = openThreadSource.slice(
     openThreadSource.indexOf("if (remoteProject)"),
@@ -341,11 +363,16 @@ test("host navigation follows Codex's renderer message bus", () => {
   assert.doesNotMatch(source, /new CustomEvent\("codex-message-from-view"/);
 });
 
-test("the standalone web page opens unlinked issues as prefilled empty Codex tasks", () => {
-  assert.match(webApp, /const query = new URLSearchParams\(\)/);
-  assert.match(webApp, /query\.set\("path", workspacePath\)/);
-  assert.match(webApp, /query\.set\("prompt", instruction\)/);
-  assert.match(webApp, /window\.location\.assign\(`codex:\/\/new\?/);
+test("the standalone web page reports that new Codex conversations require the embedded Taskboard", () => {
+  assert.match(
+    webApp,
+    /setActionError\(\[\s*"在对话中打开仅可在 Codex 内嵌任务面板中使用。请从 Codex 侧栏打开任务面板后重试。",/,
+  );
+  assert.match(
+    webApp,
+    /"Open in conversation is available only in the embedded Codex Taskboard\. Open Taskboard from the Codex sidebar and try again\.",/,
+  );
+  assert.doesNotMatch(webApp, /codex:\/\/new/);
 });
 
 test("host context captures all Codex projects even when the sidebar section is collapsed", () => {
@@ -374,7 +401,7 @@ test("host context captures all Codex projects even when the sidebar section is 
 test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchronously", async () => {
   const functionSource = source.slice(
     source.indexOf("async function readCodexProjectMetadata"),
-    source.indexOf("\n\n  function readCodexProjects"),
+    source.indexOf("\n\n  async function activeNativeWorkspaceRoots"),
   );
   const readCodexProjectMetadata = vm.runInNewContext(`(${functionSource})`, {
     window: {
@@ -417,45 +444,11 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
   );
 });
 
-test("SSH task project selection requires its stable ID while local selection keeps label fallback", () => {
-  const functionSource = source.slice(
-    source.indexOf("function projectRowForTask"),
-    source.indexOf("\n\n  async function ensureProjectRows"),
-  );
-  const sameNameProject = { id: "unrelated-project" };
-  const requestedProject = { id: "remote-project" };
-  const rowsById = new Map([["remote-project", requestedProject]]);
-  const projectRowForTask = vm.runInNewContext(`(${functionSource})`, {
-    projectRowById: (projectId) => rowsById.get(projectId) || null,
-    projectRowByLabel: (label) => label === "shared-worktree" ? sameNameProject : null,
-  });
-
-  assert.equal(
-    projectRowForTask({
-      codexProjectId: "remote-project",
-      codexProjectKind: "remote",
-      workspaceLabel: "shared-worktree",
-    }, ""),
-    requestedProject,
-  );
-
-  rowsById.clear();
-  assert.equal(
-    projectRowForTask({
-      codexProjectId: "missing-project",
-      codexProjectKind: "remote",
-      workspaceLabel: "shared-worktree",
-    }, ""),
-    null,
-  );
-  assert.equal(
-    projectRowForTask({
-      codexProjectId: "missing-project",
-      codexProjectKind: "local",
-      workspaceLabel: "shared-worktree",
-    }, ""),
-    sameNameProject,
-  );
+test("SSH task project selection uses its stable ID and local project IDs use bootstrap keys", () => {
+  assert.match(source, /row = projectRowById\(projectId\)/);
+  assert.doesNotMatch(source, /projectRowForTask|projectRowByLabel/);
+  assert.match(source, /Object\.entries\(localProjects\)/);
+  assert.match(source, /\[\{ \.\.\.project, id \}\]/);
 });
 
 test("cleanup removes observers, listeners, timers and owned DOM", () => {

@@ -38,7 +38,7 @@ interface RelationActions {
   ) => Promise<RelationMutationResult>;
 }
 
-function IssuePicker({
+export function IssuePicker({
   label,
   candidates,
   disabled,

@@ -430,10 +430,54 @@
       || null;
   }
 
+  function requestNativeFetch(path, body) {
+    const bridge = window.electronBridge;
+    if (!bridge || typeof bridge.sendMessageFromView !== "function") return Promise.resolve(null);
+    return new Promise((resolve) => {
+      const requestId = `taskboard-native-fetch-${crypto.randomUUID()}`;
+      let settled = false;
+      const finish = (value = null) => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+        resolve(value);
+      };
+      const onMessage = (event) => {
+        const message = event.data;
+        if (
+          !message
+          || typeof message !== "object"
+          || message.type !== "fetch-response"
+          || message.requestId !== requestId
+        ) return;
+        try {
+          finish(JSON.parse(message.bodyJsonString || "null"));
+        } catch (_) {
+          finish();
+        }
+      };
+      const timeout = window.setTimeout(finish, 1_000);
+      window.addEventListener("message", onMessage);
+      try {
+        bridge.sendMessageFromView({
+          type: "fetch",
+          requestId,
+          method: "POST",
+          url: `vscode://codex/${path}`,
+          body: JSON.stringify(body),
+        });
+      } catch (_) {
+        finish();
+      }
+    });
+  }
+
   async function selectedNativeProjectId() {
-    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
-    const selectedProject = bootstrap?.globalStateEntries
-      ?.find((entry) => entry.key === "selected-project")?.value;
+    const selectedProject = (await requestNativeFetch(
+      "get-global-state",
+      { key: "selected-project" },
+    ))?.value;
     return typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "";
   }
 
@@ -476,6 +520,22 @@
       });
     }
     return metadata;
+  }
+
+  async function activeNativeWorkspaceRoots() {
+    const roots = (await requestNativeFetch("active-workspace-roots", {}))?.roots;
+    return Array.isArray(roots) ? roots.filter((root) => typeof root === "string") : [];
+  }
+
+  function normalizeNativeRootPath(value) {
+    const path = String(value || "").trim();
+    if (!path) return "";
+    const windowsPath = /^[A-Za-z]:[\\/]/.test(path) || path.includes("\\");
+    const normalizedSlashes = windowsPath ? path.replace(/\\/g, "/") : path;
+    const withoutTrailingSlash = normalizedSlashes.replace(/\/+$/, "")
+      || (normalizedSlashes.startsWith("/") ? "/" : normalizedSlashes);
+    if (!windowsPath || !/^[A-Za-z]:/.test(withoutTrailingSlash)) return withoutTrailingSlash;
+    return `${withoutTrailingSlash[0].toLowerCase()}${withoutTrailingSlash.slice(1)}`;
   }
 
   function readCodexProjects(metadata = codexProjectMetadata) {
@@ -792,6 +852,12 @@
       )) || null;
   }
 
+  function projectRowById(projectId) {
+    if (typeof projectId !== "string" || !projectId.trim()) return null;
+    return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
+      .find((row) => row.getAttribute("data-app-action-sidebar-project-id") === projectId.trim()) || null;
+  }
+
   async function waitForRemoteProject(projectId, hostId, workspacePath) {
     if (!projectId || !hostId || hostId === "local") {
       throw new Error(hostText(
@@ -914,28 +980,29 @@
     } catch (_) {}
   }
 
-  function projectRowById(projectId) {
-    if (typeof projectId !== "string" || !projectId.trim()) return null;
-    return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
-      .find((row) => row.getAttribute("data-app-action-sidebar-project-id") === projectId.trim()) || null;
+  async function nativeProjectContext() {
+    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
+    const entries = bootstrap?.globalStateEntries ?? [];
+    const localProjects = entries.find((entry) => entry.key === "local-projects")?.value ?? {};
+    return {
+      projects: Object.entries(localProjects).flatMap(([id, project]) => (
+        project && Array.isArray(project.rootPaths)
+          ? [{ ...project, id }]
+          : []
+      )),
+    };
   }
 
-  function projectRowByLabel(label) {
-    if (typeof label !== "string" || !label.trim()) return null;
-    const expected = normalizedLabel(label);
-    return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
-      .find((row) => normalizedLabel(row.getAttribute("data-app-action-sidebar-project-label")) === expected) || null;
-  }
-
-  function projectRowForTask(payload, snapshotProjectId) {
-    const requestedProjectId = typeof payload.codexProjectId === "string"
-      ? payload.codexProjectId.trim()
-      : "";
-    if (payload.codexProjectKind === "remote") return projectRowById(requestedProjectId);
-    return projectRowById(requestedProjectId)
-      || projectRowByLabel(payload.workspaceLabel)
-      || projectRowById(snapshotProjectId)
-      || projectRowByLabel(payload.projectName);
+  async function resolveNativeProject(requestedProjectId, workspacePath) {
+    if (workspacePath) {
+      return normalizeNativeRootPath(workspacePath) ? { targetRoot: workspacePath } : null;
+    }
+    const context = await nativeProjectContext();
+    const project = context.projects.find((candidate) => candidate.id === requestedProjectId) ?? null;
+    const targetRoot = project?.rootPaths[0];
+    return typeof targetRoot === "string" && normalizeNativeRootPath(targetRoot)
+      ? { targetRoot }
+      : null;
   }
 
   async function ensureProjectRows() {
@@ -953,33 +1020,42 @@
     }
   }
 
-  async function waitForPreparedComposer(identifier) {
+  async function waitForNativeProject(targetRoot) {
     const deadline = Date.now() + 8_000;
+    const normalizedTargetRoot = normalizeNativeRootPath(targetRoot);
     while (Date.now() < deadline) {
-      const editor = document.querySelector('[data-codex-composer="true"][contenteditable="true"]');
-      if (editor && editor.getClientRects().length > 0) {
-        const containsIdentifier = normalizedLabel(editor.textContent).includes(normalizedLabel(identifier));
-        if (containsIdentifier) return editor;
-      }
+      const [projectId, activeRoots] = await Promise.all([
+        selectedNativeProjectId(),
+        activeNativeWorkspaceRoots(),
+      ]);
+      if (
+        projectId
+        && normalizeNativeRootPath(activeRoots[0]) === normalizedTargetRoot
+      ) return projectId;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     throw new Error(hostText(
-      "Codex 对话输入框没有写入任务编号",
-      "The issue identifier was not written to the Codex composer",
+      "Codex 未在限定时间内切换到目标项目或 worktree",
+      "Codex did not switch to the target project or worktree in time",
     ));
   }
 
   async function createThreadForTask(payload) {
     const taskId = typeof payload?.taskId === "string" ? payload.taskId.trim() : "";
     const identifier = typeof payload?.identifier === "string" ? payload.identifier.trim() : "";
+    const title = typeof payload?.title === "string" ? payload.title.trim() : "";
     const instruction = typeof payload?.instruction === "string" ? payload.instruction.trim() : "";
     const workspacePath = typeof payload?.workspacePath === "string"
       ? payload.workspacePath.trim()
       : "";
     const codexProjectKind = payload?.codexProjectKind === "remote" ? "remote" : "local";
+    const requestedProjectId = typeof payload?.codexProjectId === "string"
+      ? payload.codexProjectId.trim()
+      : "";
     if (
       !taskId
       || !identifier
+      || !title
       || !instruction
       || pendingThreadCreation
     ) return;
@@ -993,46 +1069,83 @@
         ));
       }
 
+      const previousComposerRoot = Array.from(document.querySelectorAll(
+        '[data-codex-composer-root][data-composer-placement="thread"]',
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      const previousThreadId = normalizeThreadId(
+        previousComposerRoot
+          ?.querySelector("[data-above-composer-conversation-id]")
+          ?.getAttribute("data-above-composer-conversation-id"),
+      );
+      let codexHostId = "local";
+      let targetRoot;
       if (codexProjectKind === "remote") {
-        const codexProjectId = typeof payload?.codexProjectId === "string"
-          ? payload.codexProjectId.trim()
-          : "";
-        const codexHostId = typeof payload?.codexHostId === "string"
+        codexHostId = typeof payload?.codexHostId === "string"
           ? payload.codexHostId.trim()
           : "";
         const codexProjectWorkspacePath = typeof payload?.codexProjectWorkspacePath === "string"
           ? payload.codexProjectWorkspacePath.trim()
           : "";
-        await waitForRemoteProject(codexProjectId, codexHostId, codexProjectWorkspacePath);
-      } else if (workspacePath) {
-        await bridge.sendMessageFromView({
-          type: "electron-set-active-workspace-root",
-          root: workspacePath,
-        });
+        await waitForRemoteProject(requestedProjectId, codexHostId, codexProjectWorkspacePath);
+        targetRoot = codexProjectWorkspacePath;
       } else {
-        await ensureProjectRows();
-        const snapshotProjectId = hostContextSnapshot?.projectId || "";
-        const row = projectRowForTask(payload, snapshotProjectId);
-        if (row?.getAttribute("data-app-action-sidebar-project-collapsed") === "true") {
-          row.click?.();
-          await new Promise((resolve) => window.setTimeout(resolve, 120));
+        const target = await resolveNativeProject(requestedProjectId, workspacePath);
+        if (!target) {
+          throw new Error(hostText(
+            "Codex 中没有映射目标项目或 worktree",
+            "The target project or worktree is not mapped in Codex",
+          ));
         }
-        const selectProject = row?.querySelector("[data-app-action-sidebar-select-project]");
-        selectProject?.click?.();
-        if (selectProject) await new Promise((resolve) => window.setTimeout(resolve, 120));
+        targetRoot = target.targetRoot;
+        const switched = await requestNativeFetch("add-workspace-root-option", {
+          root: targetRoot,
+          setActive: true,
+          origin: window.location.origin,
+        });
+        if (switched?.success !== true) {
+          throw new Error(hostText(
+            "Codex 未在限定时间内切换到目标项目或 worktree",
+            "Codex did not switch to the target project or worktree in time",
+          ));
+        }
+        lastNativeProjectId = await waitForNativeProject(targetRoot);
       }
 
       closeTaskboard(false);
+      const focusComposerNonce = crypto.randomUUID();
       await dispatchHostMessage({
         type: "navigate-to-route",
         path: "/",
         state: {
-          focusComposerNonce: Date.now(),
+          focusComposerNonce,
+          prefillPrompt: instruction,
         },
       });
-      await requestHostTaskComposerPrefill({ instruction });
-      await waitForPreparedComposer(identifier);
-      postToFrame({ type: "taskboard:thread-prepared", payload: { taskId } });
+      const started = await requestHostTaskConversationStart({
+        taskId,
+        previousThreadId,
+        codexHostId,
+        targetRoot,
+        instruction,
+        title,
+      });
+      const startedThreadId = normalizeThreadId(started.threadId);
+      const visibleThreadComposer = Array.from(document.querySelectorAll(
+        '[data-codex-composer-root][data-composer-placement="thread"]',
+      )).find((candidate) => candidate.getClientRects().length > 0);
+      const visibleThreadId = normalizeThreadId(
+        visibleThreadComposer
+          ?.querySelector("[data-above-composer-conversation-id]")
+          ?.getAttribute("data-above-composer-conversation-id"),
+      );
+      if (visibleThreadId !== startedThreadId) {
+        await dispatchHostMessage({
+          type: "navigate-to-route",
+          path: routeForThread(startedThreadId),
+        });
+      }
+      lastNativeThreadId = startedThreadId;
+      postToFrame({ type: "taskboard:thread-prepared", payload: { taskId, threadId: started.threadId } });
     } catch (error) {
       postToFrame({
         type: "taskboard:thread-create-error",
@@ -1418,7 +1531,7 @@
       && Date.now() - hostHeartbeatAt <= HOST_HEARTBEAT_MAX_AGE_MS;
   }
 
-  function requestHost(action, payload = {}) {
+  function requestHost(action, payload = {}, timeoutMs = HOST_REQUEST_TIMEOUT_MS) {
     if (!hasLiveHostBinding()) {
       return Promise.reject(hostError(
         "Taskboard 启动器未运行，无法操作 Codex 对话输入框",
@@ -1428,10 +1541,12 @@
 
     const id = `${Date.now().toString(36)}-${(++hostRequestSequence).toString(36)}`;
     return new Promise((resolve, reject) => {
-      const timeout = window.setTimeout(() => {
-        hostRequests.delete(id);
-        reject(hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond"));
-      }, HOST_REQUEST_TIMEOUT_MS);
+      const timeout = timeoutMs === null
+        ? null
+        : window.setTimeout(() => {
+          hostRequests.delete(id);
+          reject(hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond"));
+        }, timeoutMs);
       hostRequests.set(id, { resolve, reject, timeout });
       try {
         window.postMessage({
@@ -1440,7 +1555,7 @@
           payload: { ...payload, id, action },
         }, window.location.origin);
       } catch (error) {
-        window.clearTimeout(timeout);
+        if (timeout !== null) window.clearTimeout(timeout);
         hostRequests.delete(id);
         reject(error);
       }
@@ -1458,10 +1573,22 @@
     return requestHost("load-frame", { frameName, frameCapability: capability });
   }
 
-  function requestHostTaskComposerPrefill({ instruction }) {
-    return requestHost("prefill-task-composer", {
+  function requestHostTaskConversationStart({
+    taskId,
+    previousThreadId,
+    codexHostId,
+    targetRoot,
+    instruction,
+    title,
+  }) {
+    return requestHost("start-task-conversation", {
+      taskId,
+      previousThreadId,
+      codexHostId,
+      targetRoot,
       instruction,
-    });
+      title,
+    }, null);
   }
 
   function frameMatchesTaskboardUrl(taskboardUrl) {
@@ -1481,7 +1608,7 @@
     if (!response || typeof response !== "object" || typeof response.id !== "string") return;
     const pending = hostRequests.get(response.id);
     if (!pending) return;
-    window.clearTimeout(pending.timeout);
+    if (pending.timeout !== null) window.clearTimeout(pending.timeout);
     hostRequests.delete(response.id);
     if (response.ok) pending.resolve(response);
     else pending.reject(response.error
@@ -1711,7 +1838,7 @@
     observer = null;
     cancelFrameReadyWaiters(hostError("任务面板已关闭", "Taskboard was closed"));
     hostRequests.forEach(({ reject, timeout }) => {
-      window.clearTimeout(timeout);
+      if (timeout !== null) window.clearTimeout(timeout);
       reject(hostError("任务面板已关闭", "Taskboard was closed"));
     });
     hostRequests.clear();

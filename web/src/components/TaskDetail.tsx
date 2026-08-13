@@ -75,7 +75,7 @@ import {
   type RelationMutationResult,
 } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
-import { buildIssueUrl } from "../issueRoute";
+import { buildIssueUrl, readIssueIdentifier } from "../issueRoute";
 import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
 import copyIdIcon from "../assets/figma-taskboard/copy-id.svg";
 import copyLinkIcon from "../assets/figma-taskboard/copy-link.svg";
@@ -316,14 +316,60 @@ function ActivityChangeIcon({ field, before, after }: {
   return <LinearIcon name="write" />;
 }
 
-function DescriptionDocument({ value }: { value: string }) {
+function referencedTask(href: string, tasks: Task[]): Task | null {
+  try {
+    const base = new URL(document.baseURI);
+    base.search = "";
+    base.hash = "";
+    const url = new URL(href, base);
+    if (url.origin !== base.origin || url.pathname !== base.pathname) return null;
+    const identifier = readIssueIdentifier(url.search);
+    const projectId = url.searchParams.get("project");
+    if (!identifier || !projectId) return null;
+    return tasks.find((task) => task.projectId === projectId && task.identifier === identifier) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function DescriptionDocument({
+  value,
+  tasks,
+  onOpenTask,
+}: {
+  value: string;
+  tasks: Task[];
+  onOpenTask: (task: TaskRelationSummary) => void;
+}) {
   return (
     <div className="issue-description-document">
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
         components={{
-          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+          a: ({ node: _node, href, ...props }) => {
+            const task = href ? referencedTask(href, tasks) : null;
+            return (
+              <a
+                {...props}
+                href={href}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  if (
+                    !task
+                    || event.button !== 0
+                    || event.metaKey
+                    || event.ctrlKey
+                    || event.shiftKey
+                    || event.altKey
+                  ) return;
+                  event.preventDefault();
+                  onOpenTask(task);
+                }}
+              />
+            );
+          },
         }}
       >
         {value}
@@ -403,6 +449,7 @@ export function TaskDetail({
     ),
   );
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
+  const [changeStatusToTodo, setChangeStatusToTodo] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -434,7 +481,10 @@ export function TaskDetail({
       setDescription(task.description);
       setDescriptionSegments(createInlineMediaSegments(task.description));
     }
-    if (taskChanged) setEditingDescription(false);
+    if (taskChanged) {
+      setEditingDescription(false);
+      setChangeStatusToTodo(false);
+    }
   }, [task]);
 
   useEffect(() => {
@@ -672,6 +722,11 @@ export function TaskDetail({
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
+      if (changeStatusToTodo) {
+        const saved = await onUpdate(currentTask, { status: "todo" });
+        setCurrentTask(saved);
+        setChangeStatusToTodo(false);
+      }
       const failed = results.length - uploaded.length;
       if (failed > 0) setCommentsError([
         `评论已发布，但有 ${failed} 个附件上传失败。`,
@@ -904,6 +959,7 @@ export function TaskDetail({
                     <InlineMediaComposer
                       ref={descriptionComposerRef}
                       segments={descriptionSegments}
+                      mentionTasks={tasks}
                       placeholder={text("添加描述…", "Add description…")}
                       ariaLabel={text("议题描述", "Issue description")}
                       disabled={savingProperty === "description"}
@@ -938,7 +994,7 @@ export function TaskDetail({
                     }}
                   >
                     {description
-                      ? <DescriptionDocument value={description} />
+                      ? <DescriptionDocument value={description} tasks={tasks} onOpenTask={onOpenTask} />
                       : text("添加描述…", "Add description…")}
                   </div>
                 )}
@@ -1222,6 +1278,7 @@ export function TaskDetail({
                             ref={editingComposerRef}
                             className="comment-inline-media"
                             segments={editingSegments}
+                            mentionTasks={tasks}
                             placeholder={text("编辑评论", "Edit comment")}
                             ariaLabel={text("编辑评论", "Edit comment")}
                             disabled={savingCommentId === comment.id}
@@ -1279,7 +1336,11 @@ export function TaskDetail({
                           </div>
                         </div>
                       ) : (
-                        comment.body && <div className="comment-body"><DescriptionDocument value={comment.body} /></div>
+                        comment.body && (
+                          <div className="comment-body">
+                            <DescriptionDocument value={comment.body} tasks={tasks} onOpenTask={onOpenTask} />
+                          </div>
+                        )
                       )}
                       {comment.attachments.some(
                         (attachment) => !markdownIncludesAttachment(comment.body, attachment),
@@ -1351,6 +1412,7 @@ export function TaskDetail({
                   ref={composerRef}
                   className="comment-inline-media"
                   segments={commentSegments}
+                  mentionTasks={tasks}
                   placeholder={text("留下评论…", "Leave a comment…")}
                   ariaLabel={text("留下评论", "Leave a comment")}
                   onChange={setCommentSegments}
@@ -1377,7 +1439,6 @@ export function TaskDetail({
                     >
                       <LinearIcon name="attachment" />
                     </button>
-                    <span>{text("草稿会自动保存", "Drafts are saved automatically")}</span>
                     <input
                       ref={commentAttachmentInputRef}
                       type="file"
@@ -1389,7 +1450,19 @@ export function TaskDetail({
                     />
                   </div>
                   <div>
-                    <kbd>⌘ Enter</kbd>
+                    <div className="comment-status-action">
+                      <span>{text("改变状态为-等待认领", "Change status to Todo")}</span>
+                      <button
+                        type="button"
+                        className={`board-setting-switch${changeStatusToTodo ? " is-on" : ""}`}
+                        role="switch"
+                        aria-checked={changeStatusToTodo}
+                        disabled={submitting}
+                        onClick={() => setChangeStatusToTodo((current) => !current)}
+                      >
+                        <span aria-hidden="true" />
+                      </button>
+                    </div>
                     <button
                       className="button primary"
                       type="submit"
