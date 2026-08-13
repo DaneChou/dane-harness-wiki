@@ -6,7 +6,6 @@ const mermaid = vi.hoisted(() => ({
   initialize: vi.fn(),
   render: vi.fn(),
 }));
-
 vi.mock("mermaid", () => ({ default: mermaid }));
 vi.mock("../api", () => ({ resolvePersistedAttachmentUrl: (url: string) => url }));
 
@@ -29,6 +28,7 @@ describe("MarkdownDocument", () => {
     render(<MarkdownDocument value={[
       "<!-- trace-analysis:v1 raw -->",
       "&lt;!-- trace-analysis:v1 encoded --&gt;",
+      "&lt;!-- encoded multiline\nmetadata must stay hidden --&gt;",
       "<!-- multiline\nmetadata --><img src=x onerror=alert(1)>",
       "Visible report",
     ].join("\n")} />);
@@ -37,6 +37,28 @@ describe("MarkdownDocument", () => {
     expect(document.body.textContent).not.toContain("trace-analysis");
     expect(document.body.textContent).not.toContain("metadata");
     expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("rejects Mermaid image resources before rendering", async () => {
+    const sources = [
+      'flowchart LR\n  A@{ img: "https://tracker.invalid/pixel.png" }',
+      'sequenceDiagram\n  actor A@{ icon: "https://tracker.invalid/icon.png" }',
+      'C4Context\n  Person(A, "User", "", "https://tracker.invalid/sprite.png")',
+    ];
+
+    for (const source of sources) {
+      const view = render(<MarkdownDocument value={`\`\`\`mermaid\n${source}\n\`\`\``} />);
+      expect(await screen.findByRole("alert")).toBeTruthy();
+      view.unmount();
+    }
+    expect(mermaid.render).not.toHaveBeenCalled();
+  });
+
+  it("does not reject ordinary Mermaid labels that mention img fields", async () => {
+    render(<MarkdownDocument value={'```mermaid\nflowchart LR\n  A["missing img: value"] --> B\n```'} />);
+
+    await expect(screen.findByRole("img", { name: "Mermaid diagram" })).resolves.toBeTruthy();
+    expect(mermaid.render).toHaveBeenCalledOnce();
   });
 
   it("keeps ordinary fenced code as code and does not load Mermaid", async () => {
