@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { test } from "node:test";
 
 import {
@@ -244,10 +245,10 @@ test("the generated automation command uses an argv runtime file instead of an e
   process.env.CODEX_TASKBOARD_RUNTIME_FILE = "/Users/example/Library/Application Support/Codex Taskboard/launcher-runtime.json";
   try {
     const prompt = buildTaskboardAutomationPrompt(baseRequest);
-    assert.match(
-      prompt,
-      /'\/Users\/example\/taskboard\/cli\/taskctl\.mjs' --runtime-file '\/Users\/example\/Library\/Application Support\/Codex Taskboard\/launcher-runtime\.json'/,
-    );
+    const cliPath = path.resolve(path.dirname(baseRequest.skillPath), "../..", "cli/taskctl.mjs");
+    assert.ok(prompt.includes(
+      `'${process.execPath}' '${cliPath}' --runtime-file '${process.env.CODEX_TASKBOARD_RUNTIME_FILE}'`,
+    ));
     assert.doesNotMatch(prompt, /CODEX_TASKBOARD_RUNTIME_FILE=/);
   } finally {
     if (previous === undefined) {
