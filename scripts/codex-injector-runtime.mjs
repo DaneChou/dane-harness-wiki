@@ -2,7 +2,7 @@ const HOST_REQUEST_ERROR = "自动认领配置暂时无法应用，请刷新后�
 const AUTOMATION_SCHEMA_DIAGNOSTIC = "AUTOMATION_SCHEMA_MISMATCH";
 
 function parseHostRequest(payload, parseAutomationRequest) {
-  if (typeof payload !== "string" || payload.length > 4_096) {
+  if (typeof payload !== "string" || payload.length > 16_384) {
     return { id: null, request: null, error: HOST_REQUEST_ERROR };
   }
 
@@ -60,7 +60,9 @@ function parseHostRequest(payload, parseAutomationRequest) {
   if (
     request.action === "start-task-conversation"
     && typeof request.taskId === "string"
-    && /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(request.taskId)
+    && request.taskId.length > 0
+    && request.taskId.length <= 128
+    && !/[\u0000-\u001f\u007f]/.test(request.taskId)
     && typeof request.previousThreadId === "string"
     && request.previousThreadId.length <= 240
     && typeof request.targetRoot === "string"
