@@ -42,7 +42,6 @@ import {
   type InlineMediaSegment,
   type PendingInlineImage,
 } from "./InlineMediaComposer";
-import { IssuePicker } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 
 const RECURRENCE_UNITS: Record<TaskboardLanguage, Record<Recurrence["unit"], string>> = {
@@ -61,6 +60,7 @@ const RECURRENCE_UNITS: Record<TaskboardLanguage, Record<Recurrence["unit"], str
 };
 
 type TaskEditorError = string | readonly [string, string];
+type DraftRelationMenu = "parent" | "dependency" | "subIssue";
 
 export interface NewTaskRelationDraft {
   parentId: string | null;
@@ -143,53 +143,6 @@ function contextLabel(
   return `${context.branch ?? text("分离 HEAD", "detached")} · ${folder}`;
 }
 
-function DraftRelationPicker({
-  label,
-  addLabel,
-  selected,
-  candidates,
-  onSelect,
-  onRemove,
-}: {
-  label: string;
-  addLabel: string;
-  selected: Task[];
-  candidates: Task[];
-  onSelect: (task: Task) => void;
-  onRemove: (taskId: string) => void;
-}) {
-  const { text } = useTaskboardI18n();
-  return (
-    <section className="task-create-relation-group">
-      <header>
-        <span>{label}</span>
-        <IssuePicker
-          label={addLabel}
-          candidates={candidates}
-          onSelect={async (candidate) => onSelect(candidate)}
-        />
-      </header>
-      {selected.map((candidate) => (
-        <div className="task-create-relation-row" key={candidate.id}>
-          <StatusIcon status={candidate.status} />
-          <span className="issue-relation-option-id">{candidate.externalKey ?? candidate.identifier}</span>
-          <span className="issue-relation-option-title">{candidate.title}</span>
-          <button
-            type="button"
-            aria-label={text(
-              `移除 ${candidate.externalKey ?? candidate.identifier}`,
-              `Remove ${candidate.externalKey ?? candidate.identifier}`,
-            )}
-            onClick={() => onRemove(candidate.id)}
-          >
-            <LinearIcon name="close" />
-          </button>
-        </div>
-      ))}
-    </section>
-  );
-}
-
 export function TaskEditor({
   task,
   tasks,
@@ -229,6 +182,7 @@ export function TaskEditor({
   const [subIssueIds, setSubIssueIds] = useState<string[]>(initialDraft?.relations.subIssueIds ?? []);
   const [createMore, setCreateMore] = useState(false);
   const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "development" | "more" | "due" | "recurrence" | null>(null);
+  const [relationMenu, setRelationMenu] = useState<DraftRelationMenu | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<TaskEditorError | null>(null);
@@ -272,6 +226,25 @@ export function TaskEditor({
     }
     return ids;
   }, [subIssueIds, taskById]);
+  const parentCandidates = availableRelationTasks.filter((candidate) => (
+    !selectedSubIssueDescendantIds.has(candidate.id)
+  ));
+  const dependencyCandidates = availableRelationTasks;
+  const subIssueCandidates = availableRelationTasks.filter((candidate) => (
+    !selectedParentAncestorIds.has(candidate.id)
+  ));
+  const relationCandidates = relationMenu === "parent"
+    ? parentCandidates
+    : relationMenu === "dependency"
+      ? dependencyCandidates
+      : subIssueCandidates;
+  const selectedRelationIds = new Set(
+    relationMenu === "parent"
+      ? parentId ? [parentId] : []
+      : relationMenu === "dependency"
+        ? dependencyIds
+        : subIssueIds,
+  );
 
   const assigneeOptions = [task?.assignee, currentUser, CODEX_AGENT_ACTOR]
     .filter((actor): actor is ActorIdentity => actor !== undefined)
@@ -295,6 +268,24 @@ export function TaskEditor({
     document.addEventListener("pointerdown", closeFromOutside);
     return () => document.removeEventListener("pointerdown", closeFromOutside);
   }, [menu]);
+
+  useEffect(() => {
+    if (menu !== "more") setRelationMenu(null);
+  }, [menu]);
+
+  function toggleDraftRelation(candidate: Task) {
+    if (relationMenu === "parent") {
+      setParentId((current) => current === candidate.id ? null : candidate.id);
+    } else if (relationMenu === "dependency") {
+      setDependencyIds((current) => current.includes(candidate.id)
+        ? current.filter((id) => id !== candidate.id)
+        : [...current, candidate.id]);
+    } else if (relationMenu === "subIssue") {
+      setSubIssueIds((current) => current.includes(candidate.id)
+        ? current.filter((id) => id !== candidate.id)
+        : [...current, candidate.id]);
+    }
+  }
 
   useEffect(() => {
     const titleElement = titleRef.current;
@@ -640,45 +631,36 @@ export function TaskEditor({
             )}
 
             <div className="composer-menu-anchor" ref={moreMenuRef}>
-              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => setMenu(menu === "more" ? null : "more")}><LinearIcon name="more" /></button>
+              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => { setRelationMenu(null); setMenu(menu === "more" ? null : "more"); }}><LinearIcon name="more" /></button>
               {menu === "more" && (
-                <div className="composer-popover more-popover">
-                  {!task && (
-                    <div className="task-create-relations">
-                      <DraftRelationPicker
-                        label={text("父议题", "Parent issue")}
-                        addLabel={selectedParent
-                          ? text("更换父议题", "Change parent issue")
-                          : text("选择父议题", "Select parent issue")}
-                        selected={selectedParent ? [selectedParent] : []}
-                        candidates={availableRelationTasks.filter((candidate) => (
-                          candidate.id !== parentId && !selectedSubIssueDescendantIds.has(candidate.id)
-                        ))}
-                        onSelect={(candidate) => setParentId(candidate.id)}
-                        onRemove={() => setParentId(null)}
-                      />
-                      <DraftRelationPicker
-                        label={text("依赖议题", "Dependencies")}
-                        addLabel={text("添加依赖议题", "Add dependency")}
-                        selected={selectedDependencies}
-                        candidates={availableRelationTasks.filter((candidate) => !dependencyIds.includes(candidate.id))}
-                        onSelect={(candidate) => setDependencyIds((current) => [...current, candidate.id])}
-                        onRemove={(id) => setDependencyIds((current) => current.filter((candidate) => candidate !== id))}
-                      />
-                      <DraftRelationPicker
-                        label={text("子议题", "Sub-issues")}
-                        addLabel={text("添加子议题", "Add sub-issue")}
-                        selected={selectedSubIssues}
-                        candidates={availableRelationTasks.filter((candidate) => (
-                          !selectedParentAncestorIds.has(candidate.id) && !subIssueIds.includes(candidate.id)
-                        ))}
-                        onSelect={(candidate) => setSubIssueIds((current) => [...current, candidate.id])}
-                        onRemove={(id) => setSubIssueIds((current) => current.filter((candidate) => candidate !== id))}
-                      />
-                    </div>
-                  )}
+                <div className="composer-popover more-popover" role="menu">
                   <button type="button" onClick={() => setMenu("due")}><span><LinearIcon name="calendarAdd" /></span><strong>{text("设置截止日期", "Set due date")}</strong><kbd>⇧ D</kbd><b><LinearIcon name="chevronRight" /></b></button>
                   <button type="button" onClick={() => setMenu("recurrence")}><span><LinearIcon name="recurrence" /></span><strong>{text("设置重复…", "Set recurrence…")}</strong><b><LinearIcon name="chevronRight" /></b></button>
+                  {!task && (
+                    <>
+                      <div className="more-popover-divider" />
+                      <button className={relationMenu === "parent" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "parent"} onClick={() => setRelationMenu("parent")}><span><LinearIcon name="plus" /></span><strong>{text("添加父议题", "Add parent issue")}</strong>{selectedParent && <small>{selectedParent.externalKey ?? selectedParent.identifier}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      <button className={relationMenu === "dependency" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "dependency"} onClick={() => setRelationMenu("dependency")}><span><LinearIcon name="link" /></span><strong>{text("添加依赖议题", "Add dependency")}</strong>{selectedDependencies.length > 0 && <small>{text(`${selectedDependencies.length} 个已选`, `${selectedDependencies.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      <button className={relationMenu === "subIssue" ? "is-open" : undefined} type="button" role="menuitem" aria-haspopup="menu" aria-expanded={relationMenu === "subIssue"} onClick={() => setRelationMenu("subIssue")}><span><LinearIcon name="plus" /></span><strong>{text("添加子议题", "Add sub-issue")}</strong>{selectedSubIssues.length > 0 && <small>{text(`${selectedSubIssues.length} 个已选`, `${selectedSubIssues.length} selected`)}</small>}<b><LinearIcon name="chevronRight" /></b></button>
+                      {relationMenu && (
+                        <div className="task-create-relation-submenu" role="menu" aria-label={text("选择关系议题", "Select relation issue")}>
+                          {relationCandidates.length > 0 ? relationCandidates.map((candidate) => {
+                            const selected = selectedRelationIds.has(candidate.id);
+                            return (
+                              <button className={selected ? "is-selected" : undefined} type="button" role="menuitemcheckbox" aria-checked={selected} key={candidate.id} onClick={() => toggleDraftRelation(candidate)}>
+                                <StatusIcon status={candidate.status} />
+                                <span className="issue-relation-option-id">{candidate.externalKey ?? candidate.identifier}</span>
+                                <span className="issue-relation-option-title">{candidate.title}</span>
+                                <span className="task-create-relation-check">{selected && <LinearIcon name="check" />}</span>
+                              </button>
+                            );
+                          }) : (
+                            <p className="issue-relation-empty">{text("没有可选议题", "No issues available")}</p>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               )}
               {menu === "due" && (
