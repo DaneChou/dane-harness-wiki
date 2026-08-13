@@ -29,6 +29,7 @@ import {
   deleteArchivedTask as deleteArchivedTaskRequest,
   deleteProjectLabel as deleteProjectLabelRequest,
   deleteProject as deleteProjectRequest,
+  getAiChatCatalog,
   getCodexThreadProgress,
   getHostRuntime,
   getJiraConnection,
@@ -636,6 +637,7 @@ export function App() {
   const [manageTaskboardSkillPath, setManageTaskboardSkillPath] = useState("");
   const [taskboardMetadata, setTaskboardMetadata] = useState<TaskboardMetadata | null>(null);
   const [localAiChatAvailable, setLocalAiChatAvailable] = useState(false);
+  const [aiImportReadyProjectId, setAiImportReadyProjectId] = useState<string | null>(null);
   const [aiThreads, setAiThreads] = useState<AiChatThread[]>([]);
   const [aiOpenThreadRequest, setAiOpenThreadRequest] = useState<AiChatOpenThreadRequest | null>(null);
   const [readActivityKeys, setReadActivityKeys] = useState<Record<string, string>>({});
@@ -787,6 +789,25 @@ export function App() {
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isJiraProject = selectedProject?.source === "jira";
+  const aiImportProjectId = hasLoadedTasks
+    && tasks.length === 0
+    && selectedProject
+    && selectedProject.id !== GLOBAL_PROJECT_ID
+    && !isJiraProject
+    && localAiChatAvailable
+      ? selectedProject.id
+      : null;
+  useEffect(() => {
+    setAiImportReadyProjectId(null);
+    if (!aiImportProjectId) return;
+    const controller = new AbortController();
+    void getAiChatCatalog(aiImportProjectId, controller.signal)
+      .then(() => {
+        if (!controller.signal.aborted) setAiImportReadyProjectId(aiImportProjectId);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [aiImportProjectId, selectedProject]);
   useLayoutEffect(() => {
     if (selectedProject) rememberProjectOpen(selectedProject.id);
   }, [rememberProjectOpen, selectedProject]);
@@ -2935,10 +2956,7 @@ export function App() {
         ) : hasLoadedTasks
           && tasks.length === 0
           && selectedProject
-          && selectedProject.id !== GLOBAL_PROJECT_ID
-          && Boolean(selectedDeviceWorkspacePath ?? selectedProject.workspacePath)
-          && !isJiraProject
-          && localAiChatAvailable ? (
+          && aiImportReadyProjectId === selectedProject.id ? (
           <div className="page-empty">
             <h2>{text("当前项目还没有任务", "This project has no issues yet")}</h2>
             <p>{text(
