@@ -33,14 +33,25 @@ test("the resident injector authenticates its launcher-managed Taskboard service
   assert.match(runtimeSource, /request\.frameCapability/);
 });
 
-test("the CDP bridge accepts service ensure and native instruction composer prefill actions", () => {
+test("the CDP bridge accepts service ensure and native task conversation start actions", () => {
   assert.match(source, /const hostBindingName = "__codexTaskboardHostV1"/);
   assert.match(runtimeSource, /request\.action === "ensure"/);
-  assert.match(runtimeSource, /request\.action === "prefill-task-composer"/);
+  assert.match(runtimeSource, /request\.action === "start-task-conversation"/);
   assert.match(runtimeSource, /request\.action === "open-external"/);
   assert.match(runtimeSource, /request\.instruction\.length <= 1_024/);
-  assert.match(source, /function prefillTaskComposerViaCdp/);
+  assert.match(runtimeSource, /request\.title\.length <= 240/);
+  assert.match(source, /async function startTaskConversationViaCdp/);
   assert.match(source, /cdp\.send\("Input\.insertText", \{ text: instruction \}\)/);
+  assert.match(
+    source,
+    /cdp\.send\("Input\.dispatchKeyEvent", \{\s*type: "keyDown",\s*key: "Enter"/,
+  );
+  assert.match(source, /const threadId = typeof started\.result\.value === "string"/);
+  assert.match(source, /threadId && threadId !== previousThreadId/);
+  assert.match(source, /window\.postMessage\(\{ type: "rename-thread" \}, window\.location\.origin\)/);
+  assert.match(source, /const input = dialog\?\.querySelector\('input'\)/);
+  assert.match(source, /submit\.click\(\)/);
+  assert.match(source, /return \{ threadId, title \}/);
   assert.match(source, /Runtime\.bindingCalled/);
   assert.match(source, /Page\.createIsolatedWorld/);
   assert.match(source, /Runtime\.addBinding", \{\s*name: hostBindingName,\s*executionContextId:/);

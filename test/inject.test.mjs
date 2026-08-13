@@ -248,23 +248,22 @@ test("only a loopback Taskboard iframe can request native automation", () => {
   );
 });
 
-test("issues open an unsent native Codex composer in the exact workspace with the task instruction", () => {
-  assert.match(source, /function createThreadForTask\(payload\)/);
-  assert.match(source, /\[data-app-action-sidebar-select-project\]/);
-  assert.match(source, /data-codex-composer/);
-  assert.match(source, /type: "electron-set-active-workspace-root"/);
-  assert.match(source, /root: workspacePath/);
+test("issues start a native Codex conversation in the confirmed workspace with the task title", () => {
+  assert.match(source, /async function createThreadForTask\(payload\)/);
+  assert.match(source, /async function nativeProjectContext\(\)/);
+  assert.match(source, /async function resolveNativeProject\(requestedProjectId, workspacePath\)/);
+  assert.match(source, /project\.rootPaths\.includes\(workspacePath\)/);
+  assert.match(source, /async function waitForNativeProject\(project, workspacePath\)/);
+  assert.match(
+    source,
+    /type: "electron-set-active-workspace-root",\s*projectId: targetProject\.id,/,
+  );
+  assert.match(source, /await waitForNativeProject\(targetProject, workspacePath\)/);
   assert.doesNotMatch(source, /prefillPrompt: prompt/);
-  assert.match(source, /requestHostTaskComposerPrefill\(\{/);
-  assert.match(source, /requestHost\("prefill-task-composer"/);
-  assert.match(source, /function waitForPreparedComposer\(identifier\)/);
-  assert.match(source, /requestHostTaskComposerPrefill\(\{ instruction \}\)/);
-  assert.match(source, /normalizedLabel\(editor\.textContent\)\.includes\(normalizedLabel\(identifier\)\)/);
-  assert.doesNotMatch(source, /submit\.click\(\)/);
-  assert.match(source, /type: "taskboard:thread-prepared"/);
-  assert.doesNotMatch(source, /function waitForCreatedThread/);
-  assert.doesNotMatch(source, /type: "taskboard:thread-created"/);
-  assert.doesNotMatch(webApp, /taskboard:thread-created/);
+  assert.match(source, /requestHostTaskConversationStart\(\{ instruction, title \}\)/);
+  assert.match(source, /requestHost\("start-task-conversation", \{\s*instruction,\s*title,/);
+  assert.match(source, /lastNativeThreadId = normalizeThreadId\(started\.threadId\)/);
+  assert.match(source, /type: "taskboard:thread-prepared", payload: \{ taskId, threadId: started\.threadId \}/);
   assert.match(
     webApp,
     /const instruction = `e-taskboard 处理任务面板任务 \$\{task\.identifier\}，并同步进度状态。`/,
@@ -272,6 +271,7 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.doesNotMatch(webApp, /const prompt =/);
   assert.doesNotMatch(webApp, /skillName: "manage-taskboard"/);
   assert.match(webApp, /instruction,/);
+  assert.match(webApp, /title: task\.title,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
   assert.match(webApp, /type: "taskboard:open-thread", payload: \{ threadId \}/);
 });
@@ -281,9 +281,10 @@ test("the standalone web page opens linked Codex tasks through the app deep link
 });
 
 test("the injected app opens an existing local Codex task instead of a new composer", () => {
+  const openThreadStart = source.indexOf("async function openThread");
   const openThreadSource = source.slice(
-    source.indexOf("async function openThread"),
-    source.indexOf("function projectRowById"),
+    openThreadStart,
+    source.indexOf("async function nativeProjectContext", openThreadStart),
   );
   assert.match(openThreadSource, /if \(row\?\.isConnected\) \{\s*row\.click\?\.\(\);\s*return;/);
   assert.match(openThreadSource, /await dispatchHostMessage\(\{\s*type: "navigate-to-route",\s*path: routeForThread\(normalizedThreadId\)/);
