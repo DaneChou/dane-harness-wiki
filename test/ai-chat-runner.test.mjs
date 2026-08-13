@@ -45,6 +45,7 @@ async function createFixture() {
   const capturePath = path.join(directory, "capture.jsonl");
   const environmentCapturePath = path.join(directory, "environment-capture.jsonl");
   const descendantPath = path.join(directory, "descendant-alive");
+  const descendantDelayMs = process.platform === "win32" ? 1_500 : 300;
   const executable = path.join(directory, "fake-codex.mjs");
   await writeFile(executable, `#!/usr/bin/env node
 import { appendFileSync } from "node:fs";
@@ -92,7 +93,7 @@ if (args[0] === "app-server") {
     if (prompt.includes("MALFORMED_STUBBORN") || prompt.includes("CALLBACK_FATAL_STUBBORN")) {
       spawn(process.execPath, [
         "-e",
-        'process.on("SIGTERM", () => {}); setTimeout(() => require("node:fs").writeFileSync(process.env.FAKE_DESCENDANT_PATH, "alive"), 300); setInterval(() => {}, 1000)',
+        'process.on("SIGTERM", () => {}); setTimeout(() => require("node:fs").writeFileSync(process.env.FAKE_DESCENDANT_PATH, "alive"), ${descendantDelayMs}); setInterval(() => {}, 1000)',
       ], {env:process.env,stdio:"ignore"});
       process.on("SIGTERM", () => {});
       setInterval(() => {}, 1000);
@@ -166,6 +167,7 @@ if (args[0] === "app-server") {
     capturePath,
     database,
     databasePath,
+    descendantDelayMs,
     descendantPath,
     directory,
     environmentCapturePath,
@@ -331,9 +333,9 @@ test("parser and event callback failures kill a SIGTERM-resistant process group"
       await rm(fixture.descendantPath, { force: true });
       const thread = await fixture.service.createThread({ projectId: "project" });
       const run = await fixture.service.startTurn(thread.id, { message });
-      await waitFor(() => fixture.service.getRun(run.id).status === "failed", 700);
+      await waitFor(() => fixture.service.getRun(run.id).status === "failed");
       assert.equal(fixture.service.getRun(run.id).error, expectedError);
-      await new Promise((resolve) => setTimeout(resolve, 350));
+      await new Promise((resolve) => setTimeout(resolve, fixture.descendantDelayMs + 50));
       await assert.rejects(readFile(fixture.descendantPath), (error) => error.code === "ENOENT");
     }
   } finally {
