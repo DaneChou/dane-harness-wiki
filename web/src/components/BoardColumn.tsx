@@ -187,7 +187,11 @@ export function BoardColumn({
           <span className={`column-status-icon status-icon-${details.tone}`}>
             <ColumnStatusIcon status={status} />
           </span>
-          <h2 id={`column-${status}`}>{label}</h2>
+          <h2 id={`column-${status}`}>
+            {label}{tasks.length > 0 && (
+              status === "todo" || status === "in_progress" || status === "in_review"
+            ) ? ` ${tasks.length}` : ""}
+          </h2>
         </div>
         {createEnabled && (
           <div className="column-actions">
