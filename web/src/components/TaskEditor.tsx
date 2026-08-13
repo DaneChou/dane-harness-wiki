@@ -386,6 +386,7 @@ export function TaskEditor({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    if (event.defaultPrevented) return;
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (event.key !== "Enter") return;
     if (!task && (event.metaKey || event.ctrlKey)) {

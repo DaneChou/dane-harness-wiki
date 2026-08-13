@@ -317,6 +317,8 @@ function ActivityChangeIcon({ field, before, after }: {
 function referencedTask(href: string, tasks: Task[]): Task | null {
   try {
     const base = new URL(document.baseURI);
+    base.search = "";
+    base.hash = "";
     const url = new URL(href, base);
     if (url.origin !== base.origin || url.pathname !== base.pathname) return null;
     const identifier = readIssueIdentifier(url.search);

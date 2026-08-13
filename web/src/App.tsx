@@ -1955,34 +1955,40 @@ export function App() {
           : project
       )));
     }
-    let uploadedAttachments = 0;
     let failedAttachments = 0;
     let postCreateWriteFailed = false;
     if (creating && (attachments.length > 0 || inlineImages.length > 0)) {
-      try {
-        const [results, inlineAttachments] = await Promise.all([
+      const [results, inlineResults] = await Promise.all([
           Promise.allSettled(
             attachments.map((file) => uploadAttachment(saved.id, file)),
           ),
-          Promise.all(
+          Promise.allSettled(
             inlineImages.map((image) => uploadAttachment(saved.id, image.file)),
           ),
-        ]);
-        uploadedAttachments = results.filter((result) => result.status === "fulfilled").length;
-        failedAttachments = results.length - uploadedAttachments;
-        if (inlineImages.length > 0) {
+      ]);
+      failedAttachments = results.filter((result) => result.status === "rejected").length;
+      const inlineAttachments = inlineResults.flatMap((result) => (
+        result.status === "fulfilled" ? [result.value] : []
+      ));
+      if (inlineAttachments.length !== inlineImages.length) {
+        postCreateWriteFailed = true;
+      } else if (inlineImages.length > 0) {
+        try {
           const description = resolveInlineMediaMarkdown(
             draft.description,
             inlineImages,
             inlineAttachments,
           );
           saved = await updateTaskRequest(saved, { ...draft, description });
+        } catch {
+          postCreateWriteFailed = true;
         }
-      } catch {
-        postCreateWriteFailed = true;
       }
     }
     const relationUpdates = new Map<string, Task>();
+    const movedSubIssues: Array<{ task: Task; previousParentId: string | null }> = [];
+    let addedParentId: string | null = null;
+    const addedRelatedIds: string[] = [];
     let relationWriteFailed = false;
     if (creating && createOptions) {
       const { parentId, relatedIds, subIssueIds } = createOptions.relations;
@@ -1990,17 +1996,21 @@ export function App() {
         if (parentId) {
           const result = await addTaskRelation(saved, "parent", parentId);
           saved = result.task;
+          addedParentId = parentId;
           relationUpdates.set(result.relatedTask.id, result.relatedTask);
         }
         for (const relatedId of relatedIds) {
           const result = await addTaskRelation(saved, "related", relatedId);
           saved = result.task;
+          addedRelatedIds.push(relatedId);
           relationUpdates.set(result.relatedTask.id, result.relatedTask);
         }
         for (const subIssueId of subIssueIds) {
           const child = relationUpdates.get(subIssueId)
             ?? tasksRef.current.find((candidate) => candidate.id === subIssueId)!;
+          const previousParentId = child.relations.parent?.id ?? null;
           const result = await addTaskRelation(child, "parent", saved.id);
+          movedSubIssues.push({ task: result.task, previousParentId });
           relationUpdates.set(result.task.id, result.task);
           saved = result.relatedTask;
         }
@@ -2015,28 +2025,58 @@ export function App() {
     ]));
     if (creating) setNewTaskDraft(null);
     if (!creating || !createOptions?.keepOpen) setEditor(null);
-    if (relationWriteFailed) {
+    const failedWrites = [
+      ...(relationWriteFailed ? [{ zh: "关系", en: "relations" }] : []),
+      ...(postCreateWriteFailed ? [{ zh: "正文或图片", en: "description or images" }] : []),
+      ...(failedAttachments > 0 ? [{
+        zh: `${failedAttachments} 个附件`,
+        en: `${failedAttachments} attachment${failedAttachments === 1 ? "" : "s"}`,
+      }] : []),
+    ];
+    if (failedWrites.length > 0) {
       setActionError(text(
-        `${saved.identifier} 已创建，但部分关系写入失败。`,
-        `${saved.identifier} was created, but some relations could not be saved.`,
-      ));
-    } else if (postCreateWriteFailed) {
-      setActionError(text(
-        `${saved.identifier} 已创建，但部分后续内容写入失败。`,
-        `${saved.identifier} was created, but some follow-up content could not be saved.`,
-      ));
-    } else if (failedAttachments > 0) {
-      setActionError(text(
-        `${saved.identifier} 已创建，但有 ${failedAttachments} 个附件上传失败，可在详情页重试。`,
-        `${saved.identifier} was created, but ${failedAttachments} attachments failed to upload. Try again from the details page.`,
+        `${saved.identifier} 已创建，但以下内容写入失败：${failedWrites.map((failure) => failure.zh).join("、")}。`,
+        `${saved.identifier} was created, but these follow-up writes failed: ${failedWrites.map((failure) => failure.en).join(", ")}.`,
       ));
     }
     if (creating) {
       pushUndo(null, async () => {
+        const restoredRelations = new Map<string, Task>();
         const candidate = tasksRef.current.find((task) => task.id === saved.id);
-        const current = candidate && candidate.version >= saved.version ? candidate : saved;
+        let current = candidate && candidate.version >= saved.version ? candidate : saved;
+        if (addedParentId) {
+          const result = await removeTaskRelation(current, "parent", addedParentId);
+          current = result.task;
+          restoredRelations.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const relatedId of [...addedRelatedIds].reverse()) {
+          const result = await removeTaskRelation(current, "related", relatedId);
+          current = result.task;
+          restoredRelations.set(result.relatedTask.id, result.relatedTask);
+        }
+        for (const movedSubIssue of [...movedSubIssues].reverse()) {
+          const latestChild = tasksRef.current.find((task) => task.id === movedSubIssue.task.id);
+          const child = latestChild && latestChild.version >= movedSubIssue.task.version
+            ? latestChild
+            : movedSubIssue.task;
+          const removed = await removeTaskRelation(child, "parent", saved.id);
+          restoredRelations.set(removed.task.id, removed.task);
+          current = removed.relatedTask;
+          if (movedSubIssue.previousParentId) {
+            const restored = await addTaskRelation(
+              removed.task,
+              "parent",
+              movedSubIssue.previousParentId,
+            );
+            restoredRelations.set(restored.task.id, restored.task);
+            restoredRelations.set(restored.relatedTask.id, restored.relatedTask);
+          }
+        }
         await archiveTaskRequest(current);
-        setTasks((tasks) => tasks.filter((task) => task.id !== saved.id));
+        setTasks((tasks) => sortTasks([
+          ...tasks.filter((task) => task.id !== saved.id && !restoredRelations.has(task.id)),
+          ...[...restoredRelations.values()].filter((task) => task.id !== saved.id),
+        ]));
       });
     } else if (editor.task) {
       const previous = editor.task;
