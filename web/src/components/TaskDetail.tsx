@@ -31,6 +31,7 @@ import type {
   ActorIdentity,
   Attachment,
   Comment,
+  CodexThreadBinding,
   DevelopmentContext,
   DevelopmentScan,
   IssueRelationType,
@@ -104,7 +105,7 @@ interface TaskDetailProps {
     type: IssueRelationType,
     relatedTaskId: string,
   ) => Promise<RelationMutationResult>;
-  onOpenThread: (threadId: string) => void;
+  onOpenThread: (binding: CodexThreadBinding) => void;
   onOpenInThread: (task: Task) => void;
   onCopy: (text: string, announcement: string) => void;
   openingThread: boolean;
@@ -331,19 +332,20 @@ function DescriptionDocument({ value }: { value: string }) {
 }
 
 function ConversationLink({
-  threadId,
+  binding,
   onOpen,
 }: {
-  threadId: string;
-  onOpen: (threadId: string) => void;
+  binding: CodexThreadBinding;
+  onOpen: (binding: CodexThreadBinding) => void;
 }) {
   const { text } = useTaskboardI18n();
+  const { threadId } = binding;
   return (
     <button
       className="issue-conversation-link"
       type="button"
       title={text(`查看对话 ${threadId}`, `View conversation ${threadId}`)}
-      onClick={() => onOpen(threadId)}
+      onClick={() => onOpen(binding)}
     >
       <TaskboardIcon name="conversation" />
       <strong>{text("查看对话", "View conversation")}</strong>
@@ -939,12 +941,12 @@ export function TaskDetail({
                       : text("添加描述…", "Add description…")}
                   </div>
                 )}
-                {currentTask.threadId && (
+                {currentTask.threadBinding && (
                   <div
                     className="issue-conversation-list"
                     aria-label={text("处理此议题的对话", "Conversations for this issue")}
                   >
-                    <ConversationLink threadId={currentTask.threadId} onOpen={onOpenThread} />
+                    <ConversationLink binding={currentTask.threadBinding} onOpen={onOpenThread} />
                   </div>
                 )}
               </div>
@@ -1306,9 +1308,9 @@ export function TaskDetail({
                             ))}
                         </ul>
                       )}
-                      {comment.threadId && (
+                      {comment.threadBinding && (
                         <div className="comment-conversation-link">
-                          <ConversationLink threadId={comment.threadId} onOpen={onOpenThread} />
+                          <ConversationLink binding={comment.threadBinding} onOpen={onOpenThread} />
                         </div>
                       )}
                     </div>

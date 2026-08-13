@@ -179,6 +179,10 @@ export interface CodexProjectIdentity {
   workspacePath: string;
 }
 
+export interface CodexThreadBinding extends CodexProjectIdentity {
+  threadId: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -218,8 +222,7 @@ export interface TaskRelations {
   related: TaskRelationSummary[];
 }
 
-export interface TaskConversationRef {
-  threadId: string;
+export interface TaskConversationRef extends CodexThreadBinding {
   source: "task" | "comment";
   sourceId: string;
   title: string;
@@ -237,6 +240,7 @@ export interface Task {
   labels: string[];
   sortOrder: number;
   threadId: string | null;
+  threadBinding: CodexThreadBinding | null;
   conversationRefs: TaskConversationRef[];
   participants: ActorIdentity[];
   previewImage: Attachment | null;
@@ -283,6 +287,7 @@ export interface Comment {
   authorName: string;
   authorAvatarUrl: string | null;
   threadId: string | null;
+  threadBinding: CodexThreadBinding | null;
   attachments: Attachment[];
   version: number;
   createdAt: string;

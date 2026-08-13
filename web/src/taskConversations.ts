@@ -2,6 +2,7 @@ import type {
   AiChatRun,
   AiChatThread,
   AiChatTodoProgress,
+  CodexThreadBinding,
   Task,
 } from "./types";
 
@@ -12,6 +13,7 @@ export interface TaskConversationItem {
   title: string;
   source: "task" | "comment" | "local-ai";
   nativeThreadId: string | null;
+  threadBinding: CodexThreadBinding | null;
   aiThreadId: string | null;
   updatedAt: string;
   currentRun: AiChatRun | null;
@@ -55,6 +57,13 @@ export function taskConversations(task: Task, aiThreads: AiChatThread[]) {
       title: ref.title || task.title,
       source: ref.source,
       nativeThreadId: ref.threadId,
+      threadBinding: {
+        threadId: ref.threadId,
+        codexProjectId: ref.codexProjectId,
+        codexProjectKind: ref.codexProjectKind,
+        codexHostId: ref.codexHostId,
+        workspacePath: ref.workspacePath,
+      },
       aiThreadId: null,
       updatedAt: ref.updatedAt,
       currentRun: null,
@@ -80,6 +89,7 @@ export function taskConversations(task: Task, aiThreads: AiChatThread[]) {
       title: thread.title || thread.origin.issueIdentifier || task.title,
       source: "local-ai",
       nativeThreadId: current?.nativeThreadId ?? thread.codexThreadId,
+      threadBinding: current?.threadBinding ?? null,
       aiThreadId: thread.id,
       updatedAt: current?.kind === "native"
         ? newerTimestamp(current.updatedAt, threadActivityUpdatedAt)

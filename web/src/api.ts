@@ -199,10 +199,33 @@ export async function getTaskboardRevision(
 export async function getHostRuntime(signal?: AbortSignal): Promise<HostContext | null> {
   const data = await request<{
     runtime: (Pick<HostContext, "threadId" | "threadRunning" | "threadTodoProgress"> & {
+      codexProjectId: string | null;
+      codexProjectKind: "local" | "remote" | null;
+      codexHostId: string | null;
+      workspacePath: string | null;
       updatedAt: number;
     }) | null;
   }>("/api/local/host-runtime", { signal });
-  return data.runtime;
+  if (!data.runtime) return null;
+  const { codexProjectId, codexProjectKind, codexHostId, workspacePath } = data.runtime;
+  return {
+    threadId: data.runtime.threadId,
+    threadRunning: data.runtime.threadRunning,
+    threadTodoProgress: data.runtime.threadTodoProgress,
+    ...(codexProjectId && codexProjectKind && codexHostId && workspacePath
+      ? {
+          projectId: codexProjectId,
+          workspacePath,
+          projects: [{
+            id: codexProjectId,
+            name: codexProjectId,
+            projectKind: codexProjectKind,
+            workspacePath,
+            hostId: codexHostId,
+          }],
+        }
+      : {}),
+  };
 }
 
 export async function getCodexThreadProgress(
@@ -223,12 +246,17 @@ export async function getCodexThreadProgress(
 
 export async function publishHostRuntime(context: HostContext): Promise<void> {
   if (!context.threadId || context.threadRunning === undefined) return;
+  const project = context.projects?.find((candidate) => candidate.id === context.projectId);
   await request("/api/local/host-runtime", {
     method: "PUT",
     body: JSON.stringify({
       threadId: context.threadId,
       threadRunning: context.threadRunning,
       threadTodoProgress: context.threadTodoProgress ?? null,
+      codexProjectId: project?.id ?? null,
+      codexProjectKind: project?.projectKind ?? null,
+      codexHostId: project?.hostId ?? null,
+      workspacePath: project?.workspacePath ?? null,
     }),
   });
 }

@@ -110,6 +110,7 @@ import {
   type ActorIdentity,
   type AiChatThread,
   type CodexProjectIdentity,
+  type CodexThreadBinding,
   type DevelopmentScan,
   type HostContext,
   type IssueRelationType,
@@ -2507,22 +2508,38 @@ export function App() {
     };
   }
 
-  function openThread(threadId: string, taskboardProjectId?: string) {
+  function openThread(binding: CodexThreadBinding) {
+    const remoteProject = binding.codexProjectKind === "remote"
+      ? hostContext?.projects?.find((project) => (
+          project.id === binding.codexProjectId
+          && project.projectKind === "remote"
+          && project.hostId === binding.codexHostId
+          && project.workspacePath === binding.workspacePath
+        ))
+      : null;
+    if (binding.codexProjectKind === "remote" && !remoteProject) {
+      setActionError(text(
+        "该对话绑定的 SSH 远程项目或主机当前不可用。",
+        "The SSH remote project or host bound to this conversation is not available.",
+      ));
+      return;
+    }
     if (embedded && window.parent !== window) {
-      const codexProjectContext = taskboardProjectId
-        ? codexProjectContextForTaskProject(taskboardProjectId)
-        : null;
       postEmbeddedHostMessage({
         type: "taskboard:open-thread",
-        payload: {
-          threadId,
-          ...(codexProjectContext ?? {}),
-        },
+        payload: binding,
       });
       return;
     }
 
-    window.location.assign(`codex://threads/${encodeURIComponent(threadId.trim())}`);
+    if (binding.codexProjectKind === "remote") {
+      setActionError(text(
+        "请在 Codex App 中打开该 SSH 远程对话。",
+        "Open this SSH remote conversation in the Codex app.",
+      ));
+      return;
+    }
+    window.location.assign(`codex://threads/${encodeURIComponent(binding.threadId.trim())}`);
   }
 
   function openTaskConversation(conversation: TaskConversationItem) {
@@ -2533,8 +2550,8 @@ export function App() {
       }));
       return;
     }
-    if (conversation.nativeThreadId) {
-      openThread(conversation.nativeThreadId, conversation.projectId);
+    if (conversation.threadBinding) {
+      openThread(conversation.threadBinding);
     }
   }
 
@@ -3155,7 +3172,7 @@ export function App() {
             onRemoveRelation={(current, type, relatedTaskId) => (
               mutateTaskRelation("remove", current, type, relatedTaskId)
             )}
-            onOpenThread={(threadId) => openThread(threadId, detailTask.projectId)}
+            onOpenThread={openThread}
             onOpenInThread={openTaskInThread}
             onCopy={(text, message) => void copyText(text, message)}
             openingThread={openingThreadTaskId === detailTask.id}

@@ -283,11 +283,11 @@ test("issues open an unsent native Codex composer in the exact workspace with th
   assert.doesNotMatch(webApp, /skillName: "manage-taskboard"/);
   assert.match(webApp, /instruction,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
-  assert.match(webApp, /type: "taskboard:open-thread",[\s\S]*?threadId,[\s\S]*?codexProjectContext/);
+  assert.match(webApp, /type: "taskboard:open-thread",[\s\S]*?payload: binding/);
 });
 
 test("the standalone web page opens linked Codex tasks through the app deep link", () => {
-  assert.match(webApp, /window\.location\.assign\(`codex:\/\/threads\/\$\{encodeURIComponent\(threadId\.trim\(\)\)\}`\)/);
+  assert.match(webApp, /window\.location\.assign\(`codex:\/\/threads\/\$\{encodeURIComponent\(binding\.threadId\.trim\(\)\)\}`\)/);
 });
 
 test("the injected app opens an existing local Codex task instead of a new composer", () => {
@@ -326,8 +326,9 @@ test("remote Codex tasks wait for the exact project and host without a local rou
   assert.match(remoteOpenSource, /waitForRemoteThreadRow\(normalizedThreadId, projectId\)/);
   assert.match(remoteOpenSource, /type: "taskboard:thread-open-error"/);
   assert.doesNotMatch(remoteOpenSource, /routeForThread/);
-  assert.match(webApp, /openThread\(conversation\.nativeThreadId, conversation\.projectId\)/);
-  assert.match(webApp, /openThread\(threadId, detailTask\.projectId\)/);
+  assert.match(webApp, /openThread\(conversation\.threadBinding\)/);
+  assert.match(webApp, /onOpenThread=\{openThread\}/);
+  assert.match(webApp, /project\.id === binding\.codexProjectId[\s\S]*?project\.hostId === binding\.codexHostId[\s\S]*?project\.workspacePath === binding\.workspacePath/);
   assert.match(webApp, /message\.type === "taskboard:thread-open-error"/);
 });
 
