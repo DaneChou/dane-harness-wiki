@@ -932,7 +932,7 @@
   function handleExternalOpen(payload) {
     try {
       const url = new URL(payload?.url);
-      if (url.protocol !== "https:") return;
+      if (url.protocol !== "http:" && url.protocol !== "https:") return;
       void requestHost("open-external", { url: url.href }).catch(() => {});
     } catch (_) {}
   }

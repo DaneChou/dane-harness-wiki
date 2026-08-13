@@ -31,7 +31,7 @@ export function installEmbeddedExternalLinkHandler() {
     } catch {
       return;
     }
-    if (url.protocol !== "https:") return;
+    if (url.protocol !== "http:" && url.protocol !== "https:") return;
     event.preventDefault();
     postEmbeddedHostMessage({
       type: "taskboard:open-external",
