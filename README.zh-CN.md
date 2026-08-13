@@ -9,6 +9,7 @@
 ## 系统要求
 
 - Node.js 22.5 或更高版本
+- 构建 macOS App 和 DMG：Xcode Command Line Tools、Rust 1.88 或更高版本，以及 `aarch64-apple-darwin` 和 `x86_64-apple-darwin` target。`npm install` 会安装本项目使用的 Tauri CLI。
 
 ## 本地运行
 
@@ -46,7 +47,7 @@ npm run taskctl -- issue create \
   --labels product,mvp
 ```
 
-请运行 `npm link`，以便在 shell 路径中使用 `taskctl`。设置 `CODEX_TASKBOARD_URL`，可让 CLI 指向另一个本地或局域网服务。云端部署通过回环 companion 使用 `taskctl cloud login` 配置。
+请运行 `npm link`，以便在 shell 路径中使用 `taskctl`。设置 `CODEX_TASKBOARD_URL`，可让 CLI 指向另一个本地或局域网服务。云端部署通过**回环 companion**（本机 loopback 配套服务，不是「伴侣」）使用 `taskctl cloud login` 配置。
 
 ## 安装 Codex Skill
 
@@ -90,15 +91,26 @@ CODEX_TASKBOARD_HOST=127.0.0.1 npm run codex
 
 该命令会在需要时启动本地 Taskboard 服务，使用独立配置文件和仅限回环访问的端口 `9231` 启动官方 macOS Codex App，等待主渲染器和侧边栏，在 Plugins 后注入一个原生外观的 Taskboard 入口，并持续监视服务和替换后的渲染器。现有 Codex 窗口不会变化。使用嵌入式面板时，请让该命令保持运行。启动器不会修改 `ChatGPT.app` 或其 `app.asar`。
 
+源码启动器会把带身份信息的服务地址写入 `.data/launcher-runtime.json`。通过 `npm link` 安装的 `taskctl` 默认读取此文件。因此，普通 shell 和从面板打开的 Codex 任务无需设置额外环境变量，即可使用同一个 Taskboard 服务。
+
 ### macOS App：无需终端即可打开和注入
 
-构建一次本地启动器：
+如需进行 Tauri 开发，请运行：
 
 ```bash
-npm run app:codex
+npm run app:dev
 ```
 
-然后从 Finder 打开 `dist/macos/Codex Taskboard.app`。该 App 包含自己的 Node 运行时、Taskboard 服务、构建后的 Web UI、Skill、CLI 包装器和注入脚本。它会启动服务，启动官方 Codex App，等待渲染器，注入侧边栏入口，并在不显示终端窗口的情况下打开面板。该 App 可以复制到本检出目录之外；目标 Mac 只需安装官方 Codex App，不需要此仓库、系统 Node 安装或单独的 Codex CLI 安装。Taskboard 数据存储在 `~/Library/Application Support/Codex Taskboard`，启动器输出写入 `~/Library/Logs/Codex Taskboard/codex-taskboard-launcher.log`。
+如需构建本地 App 和 DMG，请先安装两个 Rust target，然后运行构建：
+
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+npm run app:build
+```
+
+从 Finder 打开 `src-tauri/target/universal-apple-darwin/release/bundle/macos/Codex Taskboard.app`。DMG 位于 `src-tauri/target/universal-apple-darwin/release/bundle/dmg/`。如果只需安装稳定版，请从 [GitHub Releases](https://github.com/chuspeeism/dashi-taskboard/releases/latest) 下载当前 DMG。
+
+该 App 包含自己的 Node 运行时、Taskboard 服务、构建后的 Web UI、Skill、CLI 包装器和注入脚本。它会启动服务，启动官方 Codex App，等待渲染器，注入侧边栏入口，并在不显示终端窗口的情况下打开面板。该 App 可以复制到本检出目录之外；目标 Mac 只需安装官方 Codex App，不需要此仓库、系统 Node 安装或单独的 Codex CLI 安装。Taskboard 数据存储在 `~/Library/Application Support/Codex Taskboard`，启动器输出写入 `~/Library/Logs/Codex Taskboard/codex-taskboard-launcher.log`。
 
 本地构建使用 ad-hoc 代码签名进行直接验证。公开的 macOS 下载仍需要 Developer ID 签名和 Apple 公证。
 
@@ -135,7 +147,7 @@ npm run codex:inject -- --port 9229 --open
 
 对于两名受信任的协作者，Taskboard 可以在 Cloudflare 上运行，使用 Worker Static Assets 和 API 路由，以 D1 作为权威业务数据库，并使用私有 R2 bucket 存储附件。该部署使用带共享密码的 HTTPS Basic 身份验证，并在全局修订号变化后刷新已打开的面板。
 
-每台设备保留自己的项目检出映射，并继续使用本地 companion 提供 Codex、Git/worktree、Skill 和 MCP 能力。云端模式绝不会回退到本地 SQLite 数据库，也不会同时写入本地数据库。
+每台设备保留自己的项目检出映射，并继续使用**本地 companion**（本机配套服务 / 环回代理）提供 Codex、Git/worktree、Skill 和 MCP 能力。请勿将 companion 译为「伴侣」，也不要把普通 Taskboard HTTP 接口称为「伴侣 API」。云端模式绝不会回退到本地 SQLite 数据库，也不会同时写入本地数据库。
 
 请参阅[云端协作](docs/cloud-collaboration.md)，了解所有者部署、现有 GitHub 安装设置、密码轮换、本地路径映射和一次性本地数据迁移流程。
 

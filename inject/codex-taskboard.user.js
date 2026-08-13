@@ -995,6 +995,25 @@
     } catch (_) {}
   }
 
+  async function handleAttachmentOpen(payload) {
+    try {
+      await requestHost("open-attachment", {
+        attachmentId: payload?.attachmentId,
+        filename: payload?.filename,
+      });
+    } catch (_) {
+      postToFrame({
+        type: "taskboard:attachment-open-error",
+        payload: {
+          error: hostText(
+            "无法在 Finder 中显示附件，请重试。",
+            "Could not reveal the attachment in Finder. Try again.",
+          ),
+        },
+      });
+    }
+  }
+
   function challengeFrameDocument(event) {
     if (!frame || event.currentTarget !== frame) return;
     frameReady = false;
@@ -1047,6 +1066,10 @@
     }
     if (message.type === "taskboard:open-external") {
       handleExternalOpen(message.payload);
+      return;
+    }
+    if (message.type === "taskboard:open-attachment") {
+      void handleAttachmentOpen(message.payload);
       return;
     }
     if (message.type === "taskboard:create-thread") void createThreadForTask(message.payload);
@@ -1153,7 +1176,7 @@
     text.textContent = hostErrorText(loadError);
     const retry = document.createElement("button");
     retry.type = "button";
-    retry.textContent = hostText("重新启动", "Restart");
+    retry.textContent = hostText("重新加载面板", "Reload panel");
     retry.addEventListener("click", openTaskboard, { once: true });
     content.append(text, retry);
     status.replaceChildren(content);
