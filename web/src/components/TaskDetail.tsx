@@ -70,6 +70,7 @@ import {
 } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
 import { buildIssueUrl } from "../issueRoute";
+import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
 import copyIdIcon from "../assets/figma-taskboard/copy-id.svg";
 import copyLinkIcon from "../assets/figma-taskboard/copy-link.svg";
 import { MarkdownDocument } from "./MarkdownDocument";
@@ -85,6 +86,8 @@ interface TaskDetailProps {
   developmentScanLoading: boolean;
   commentsRevision: number;
   attachmentsRevision: number;
+  onCreateLabel: (label: string) => Promise<void>;
+  onDeleteLabel: (label: string) => Promise<void>;
   onUpdate: (task: Task, changes: Partial<TaskDraft>) => Promise<Task>;
   onOpenTask: (task: TaskRelationSummary) => void;
   onAddRelation: (
@@ -153,6 +156,18 @@ function fileSize(value: number): string {
 }
 
 async function downloadAttachmentFile(attachment: Attachment) {
+  const host = new URL(document.baseURI).searchParams.get("host");
+  if (host === "codex" && window.parent !== window) {
+    postEmbeddedHostMessage({
+      type: "taskboard:open-attachment",
+      payload: {
+        attachmentId: attachment.id,
+        filename: attachment.filename,
+      },
+    });
+    return;
+  }
+
   const response = await fetch(resolveTaskboardUrl(attachmentDownloadUrl(attachment)));
   if (!response.ok) {
     throw new ApiError(response.status, await response.json().catch(() => ({})));
@@ -253,9 +268,14 @@ function activityValue(
     );
   }
   if (field === "relation" && typeof value === "object") {
-    const relation = value as { type: IssueRelationType; identifier: string; title: string };
+    const relation = value as {
+      type: IssueRelationType;
+      identifier: string;
+      externalKey?: string | null;
+      title: string;
+    };
     const [chineseLabel, englishLabel] = RELATION_LABELS[relation.type];
-    return `${text(chineseLabel, englishLabel)} ${relation.identifier} · ${relation.title}`;
+    return `${text(chineseLabel, englishLabel)} ${relation.externalKey ?? relation.identifier} · ${relation.title}`;
   }
   if (Array.isArray(value)) return value.join(language === "zh" ? "、" : ", ");
   if (typeof value === "object") return JSON.stringify(value);
@@ -326,6 +346,8 @@ export function TaskDetail({
   developmentScanLoading,
   commentsRevision,
   attachmentsRevision,
+  onCreateLabel,
+  onDeleteLabel,
   onUpdate,
   onOpenTask,
   onAddRelation,
@@ -382,6 +404,7 @@ export function TaskDetail({
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
   const editingDraft = serializeInlineMedia(editingSegments);
+  const displayIdentifier = currentTask.externalKey ?? currentTask.identifier;
   const editingInlineImages = inlineMediaImages(editingSegments);
 
   useEffect(() => {
@@ -452,6 +475,18 @@ export function TaskDetail({
     );
     return () => controller.abort();
   }, [attachmentsRevision, task.id]);
+
+  useEffect(() => {
+    function receiveAttachmentOpenError(event: MessageEvent) {
+      if (event.source !== window.parent || !event.data || typeof event.data !== "object") return;
+      if (event.data.type !== "taskboard:attachment-open-error") return;
+      setAttachmentsError(typeof event.data.payload?.error === "string"
+        ? event.data.payload.error
+        : ["无法打开附件，请重试。", "Could not open the attachment. Try again."]);
+    }
+    window.addEventListener("message", receiveAttachmentOpenError);
+    return () => window.removeEventListener("message", receiveAttachmentOpenError);
+  }, []);
 
   useEffect(() => {
     const key = `taskboard.comment-draft.${task.id}`;
@@ -807,7 +842,7 @@ export function TaskDetail({
   return (
     <section
       className="issue-detail"
-      aria-label={text(`${task.identifier} 议题详情`, `${task.identifier} issue details`)}
+      aria-label={text(`${displayIdentifier} 议题详情`, `${displayIdentifier} issue details`)}
     >
       <div className="issue-detail-scroll">
         <div className="issue-detail-layout">
@@ -1356,21 +1391,34 @@ export function TaskDetail({
                   ? text("正在打开…", "Opening…")
                   : text("在对话中打开", "Open in conversation")}</span>
               </button>
+              {currentTask.externalUrl && (
+                <a
+                  className="detail-copy-action detail-external-action"
+                  href={currentTask.externalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span className="detail-copy-action-icon" aria-hidden="true">
+                    <LinearIcon name="openExternal" />
+                  </span>
+                  <span className="detail-copy-action-label">{text("打开 Jira", "Open Jira")}</span>
+                </a>
+              )}
               <button
                 className="detail-copy-action"
                 type="button"
                 title={text(
-                  `复制议题 ID ${currentTask.identifier}`,
-                  `Copy issue ID ${currentTask.identifier}`,
+                  `复制议题 ID ${displayIdentifier}`,
+                  `Copy issue ID ${displayIdentifier}`,
                 )}
                 onClick={() => onCopy(
-                  currentTask.identifier,
-                  text(`${currentTask.identifier} 已复制。`, `${currentTask.identifier} copied.`),
+                  displayIdentifier,
+                  text(`${displayIdentifier} 已复制。`, `${displayIdentifier} copied.`),
                 )}
               >
                 <span className="detail-copy-action-icon" aria-hidden="true"><img src={copyIdIcon} alt="" /></span>
                 <span className="detail-copy-action-label">{text("复制 ID", "Copy ID")}</span>
-                <span className="detail-copy-identifier">{currentTask.identifier}</span>
+                <span className="detail-copy-identifier">{displayIdentifier}</span>
               </button>
               <button
                 className="detail-copy-action"
@@ -1439,7 +1487,7 @@ export function TaskDetail({
                   icon: <ActorAvatar actor={actor} className="task-property-assignee-avatar" />,
                 }))}
                 open={propertyMenu === "assignee"}
-                disabled={savingProperty === "assignee"}
+                disabled={currentTask.source === "jira" || savingProperty === "assignee"}
                 className="detail-property-picker"
                 triggerClassName="detail-property-trigger"
                 ariaLabel={text("负责人", "Assignee")}
@@ -1469,6 +1517,8 @@ export function TaskDetail({
                 placeholder={text("添加标签…", "Add labels…")}
                 onOpenChange={(open) => setPropertyMenu(open ? "labels" : null)}
                 onChange={(nextLabels) => void saveTask({ labels: nextLabels }, "labels")}
+                onCreateLabel={onCreateLabel}
+                onDeleteLabel={currentTask.source === "jira" ? undefined : onDeleteLabel}
               />
             </div>
             <label className="detail-property-row development-property">
@@ -1529,12 +1579,20 @@ export function TaskDetail({
               <span className="detail-property-label">{text("重复", "Recurrence")}</span>
               <select
                 value={currentTask.recurrence?.unit ?? ""}
-                disabled={!currentTask.dueDate || savingProperty === "recurrence"}
-                onChange={(event) => void saveTask({
-                  recurrence: event.target.value
-                    ? { interval: 1, unit: event.target.value as Recurrence["unit"] }
-                    : null,
-                }, "recurrence")}
+                disabled={savingProperty === "recurrence"}
+                onChange={(event) => {
+                  const unit = event.target.value as Recurrence["unit"] | "";
+                  const changes: Partial<TaskDraft> = {
+                    recurrence: unit ? { interval: 1, unit } : null,
+                  };
+                  if (unit && !currentTask.dueDate) {
+                    const dueDate = new Date();
+                    dueDate.setDate(dueDate.getDate() + 7);
+                    changes.dueDate = new Date(dueDate.getTime() - dueDate.getTimezoneOffset() * 60_000)
+                      .toISOString().slice(0, 10);
+                  }
+                  void saveTask(changes, "recurrence");
+                }}
               >
                 <option value="">{text("不重复", "Does not repeat")}</option>
                 <option value="day">{text("每天", "Daily")}</option>

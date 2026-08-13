@@ -7,14 +7,17 @@ const tauriConfig = JSON.parse(await readFile(new URL("../src-tauri/tauri.conf.j
 const releaseWorkflow = await readFile(new URL("../.github/workflows/release-macos.yml", import.meta.url), "utf8");
 const checkWorkflow = await readFile(new URL("../.github/workflows/check.yml", import.meta.url), "utf8");
 
-test("the macOS launcher uses one instance, serialized lifecycle changes, and a private CDP pipe", () => {
+test("the macOS launcher uses one instance, serialized lifecycle changes, and a loopback CDP port", () => {
   assert.match(launcherSource, /libc::flock/);
   assert.match(launcherSource, /lifecycle: Mutex/);
   assert.match(launcherSource, /generation: AtomicU64/);
   assert.match(launcherSource, /TcpListener::bind\(\("127\.0\.0\.1", 0\)\)/);
   assert.equal(launcherSource.match(/TcpListener::bind/g)?.length, 1);
-  assert.match(launcherSource, /"--cdp-pipe"/);
-  assert.doesNotMatch(launcherSource, /cdp_port/);
+  assert.match(launcherSource, /codex_port: Mutex<Option<u16>>/);
+  assert.match(
+    launcherSource,
+    /#\[cfg\(target_os = "macos"\)\]\s+command\.args\(\["--launch", "--watch", "--open", "--port", &codex_port\]\);/,
+  );
   assert.doesNotMatch(launcherSource, /const LAUNCHER_PORT/);
 });
 
@@ -31,6 +34,14 @@ test("release signing is tag-only and PR CI builds the real unsigned app bundle"
   assert.match(checkWorkflow, /tauri -- build/);
   assert.match(checkWorkflow, /--bundles app/);
   assert.match(checkWorkflow, /--no-sign/);
+});
+
+test("Windows CI uploads the NSIS installer with the pinned Node 24 artifact action", () => {
+  assert.match(
+    checkWorkflow,
+    /actions\/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7\.0\.1/,
+  );
+  assert.doesNotMatch(checkWorkflow, /actions\/upload-artifact@[^\s]+ # v4/);
 });
 
 test("the launcher minimum system version matches the current Codex client requirement", () => {
