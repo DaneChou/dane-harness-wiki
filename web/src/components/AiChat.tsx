@@ -1424,9 +1424,7 @@ export function AiChat({
     sendBlocked,
     attachments.length > 0,
   );
-  const anyRunning = threads.some((thread) => thread.status === "running");
-  const anyFailed = threads.some((thread) => thread.status === "failed");
-  const launcherState = anyRunning ? "running" : anyFailed ? "failed" : unread ? "unread" : "idle";
+  const launcherState = unread ? "unread" : "idle";
   const lastUserEvent = snapshot?.thread.status === "failed"
     ? [...snapshot.events].reverse().find((event) => (
         event.role === "user"
