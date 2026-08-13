@@ -100,6 +100,7 @@ export function MermaidDiagram({ source }: { source: string }) {
           securityLevel: "strict",
           suppressErrorRendering: true,
           theme: theme === "dark" ? "dark" : "default",
+          htmlLabels: false,
           flowchart: { htmlLabels: false },
         });
         const { svg } = await mermaid.render(renderId, source);
