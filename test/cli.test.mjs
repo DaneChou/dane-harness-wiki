@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 
 import { main, parseArgs } from "../cli/taskctl.mjs";
@@ -110,7 +111,7 @@ test("project create sends id, name, and an absolute workspace path", async () =
   assert.equal(result.exitCode, 0);
   assert.equal(requestBody.id, "docs");
   assert.equal(requestBody.name, "Docs");
-  assert.equal(requestBody.workspacePath.endsWith("/docs"), true);
+  assert.equal(requestBody.workspacePath, path.resolve("./docs"));
 });
 
 test("issue list serializes project and status filters", async () => {
@@ -241,6 +242,8 @@ test("issue update sends an explicit optimistic concurrency version", async () =
 
 test("issue update binds one worktree context", async () => {
   let requestBody;
+  const repositoryPath = path.resolve("/work/repo");
+  const worktreePath = path.resolve(repositoryPath, "../taskboard-worktree");
   const result = await run(
     [
       "issue", "update", "TASK-1",
@@ -252,14 +255,14 @@ test("issue update binds one worktree context", async () => {
       requestBody = JSON.parse(init.body);
       return response({ task: { id: "TASK-1", ...requestBody, version: 5 } });
     },
-    { cwd: "/work/repo" },
+    { cwd: repositoryPath },
   );
 
   assert.equal(result.exitCode, 0);
   assert.deepEqual(requestBody, {
     developmentContext: {
       type: "worktree",
-      path: "/work/taskboard-worktree",
+      path: worktreePath,
       branch: "worktree/taskboard",
     },
     threadId: "thread-current",
@@ -451,19 +454,21 @@ test("comment update and delete require an explicit version", async () => {
 });
 
 test("context current selects the project with the most specific matching workspace", async () => {
+  const repositoryPath = path.resolve("/work/repo");
+  const appPath = path.join(repositoryPath, "packages", "app");
   const result = await run(
-    ["context", "current", "--cwd", "/work/repo/packages/app"],
+    ["context", "current", "--cwd", appPath],
     async () => response({ projects: [
       { id: "local", name: "Local", workspacePath: null },
-      { id: "repo", workspacePath: "/work/repo" },
-      { id: "app", workspacePath: "/work/repo/packages/app" },
+      { id: "repo", workspacePath: repositoryPath },
+      { id: "app", workspacePath: appPath },
     ] }),
-    { cwd: "/unused" },
+    { cwd: path.resolve("/unused") },
   );
 
   assert.equal(result.exitCode, 0);
-  assert.equal(result.stdout.cwd, "/work/repo/packages/app");
-  assert.deepEqual(result.stdout.project, { id: "app", workspacePath: "/work/repo/packages/app" });
+  assert.equal(result.stdout.cwd, appPath);
+  assert.deepEqual(result.stdout.project, { id: "app", workspacePath: appPath });
 });
 
 test("context current falls back to the local project", async () => {

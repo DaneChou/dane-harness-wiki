@@ -1615,12 +1615,20 @@ export function TaskDetail({
               <span className="detail-property-label">{text("重复", "Recurrence")}</span>
               <select
                 value={currentTask.recurrence?.unit ?? ""}
-                disabled={!currentTask.dueDate || savingProperty === "recurrence"}
-                onChange={(event) => void saveTask({
-                  recurrence: event.target.value
-                    ? { interval: 1, unit: event.target.value as Recurrence["unit"] }
-                    : null,
-                }, "recurrence")}
+                disabled={savingProperty === "recurrence"}
+                onChange={(event) => {
+                  const unit = event.target.value as Recurrence["unit"] | "";
+                  const changes: Partial<TaskDraft> = {
+                    recurrence: unit ? { interval: 1, unit } : null,
+                  };
+                  if (unit && !currentTask.dueDate) {
+                    const dueDate = new Date();
+                    dueDate.setDate(dueDate.getDate() + 7);
+                    changes.dueDate = new Date(dueDate.getTime() - dueDate.getTimezoneOffset() * 60_000)
+                      .toISOString().slice(0, 10);
+                  }
+                  void saveTask(changes, "recurrence");
+                }}
               >
                 <option value="">{text("不重复", "Does not repeat")}</option>
                 <option value="day">{text("每天", "Daily")}</option>

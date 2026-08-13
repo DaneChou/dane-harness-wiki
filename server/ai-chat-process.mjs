@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
+import { signalProcessTree } from "../shared/process-tree.mjs";
 
 const VISIBLE_TEXT_LIMIT = 65_536;
 const STDERR_LIMIT = 65_536;
@@ -360,13 +361,7 @@ export function spawnCodexTurn({
   });
 
   function terminateProcessGroup() {
-    if (Number.isInteger(child.pid)) {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-        return;
-      } catch {}
-    }
-    child.kill("SIGKILL");
+    signalProcessTree(child, "SIGKILL");
   }
 
   function rejectWithDiagnostic(error) {

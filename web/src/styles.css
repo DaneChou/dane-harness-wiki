@@ -6964,15 +6964,6 @@ kbd {
   background: var(--accent);
 }
 
-.ai-chat-launcher.is-running .ai-chat-launcher-state {
-  background: var(--success);
-  animation: ai-chat-status-pulse 1.35s ease-in-out infinite;
-}
-
-.ai-chat-launcher.is-failed .ai-chat-launcher-state {
-  background: var(--danger);
-}
-
 .ai-chat-panel {
   --ai-chat-composer-gap: 12px;
   --ai-chat-composer-radius: 13px;
@@ -8486,12 +8477,6 @@ kbd {
 
 @keyframes ai-chat-spin {
   to { transform: rotate(360deg); }
-}
-
-@keyframes ai-chat-status-pulse {
-  0%,
-  100% { transform: scale(.86); opacity: .72; }
-  50% { transform: scale(1); opacity: 1; }
 }
 
 @keyframes ai-chat-panel-in {

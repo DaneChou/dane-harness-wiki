@@ -29,6 +29,7 @@ import {
   deleteArchivedTask as deleteArchivedTaskRequest,
   deleteProjectLabel as deleteProjectLabelRequest,
   deleteProject as deleteProjectRequest,
+  getAiChatCatalog,
   getCodexThreadProgress,
   getHostRuntime,
   getJiraConnection,
@@ -188,7 +189,6 @@ interface ProjectContextMenuState {
 
 interface UndoOperation {
   id: number;
-  message: string;
   undo: () => Promise<void>;
 }
 
@@ -630,6 +630,7 @@ export function App() {
   const [manageTaskboardSkillPath, setManageTaskboardSkillPath] = useState("");
   const [taskboardMetadata, setTaskboardMetadata] = useState<TaskboardMetadata | null>(null);
   const [localAiChatAvailable, setLocalAiChatAvailable] = useState(false);
+  const [aiImportReadyProjectId, setAiImportReadyProjectId] = useState<string | null>(null);
   const [aiThreads, setAiThreads] = useState<AiChatThread[]>([]);
   const [aiOpenThreadRequest, setAiOpenThreadRequest] = useState<AiChatOpenThreadRequest | null>(null);
   const [readActivityKeys, setReadActivityKeys] = useState<Record<string, string>>({});
@@ -781,6 +782,25 @@ export function App() {
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isJiraProject = selectedProject?.source === "jira";
+  const aiImportProjectId = hasLoadedTasks
+    && tasks.length === 0
+    && selectedProject
+    && selectedProject.id !== GLOBAL_PROJECT_ID
+    && !isJiraProject
+    && localAiChatAvailable
+      ? selectedProject.id
+      : null;
+  useEffect(() => {
+    setAiImportReadyProjectId(null);
+    if (!aiImportProjectId) return;
+    const controller = new AbortController();
+    void getAiChatCatalog(aiImportProjectId, controller.signal)
+      .then(() => {
+        if (!controller.signal.aborted) setAiImportReadyProjectId(aiImportProjectId);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [aiImportProjectId, selectedProject]);
   useLayoutEffect(() => {
     if (selectedProject) rememberProjectOpen(selectedProject.id);
   }, [rememberProjectOpen, selectedProject]);
@@ -1704,9 +1724,10 @@ export function App() {
     refreshWorkflowOptions,
   ]);
 
-  function pushUndo(message: string, undo: () => Promise<void>) {
-    const operation = { id: ++undoSequenceRef.current, message, undo };
+  function pushUndo(message: string | null, undo: () => Promise<void>) {
+    const operation = { id: ++undoSequenceRef.current, undo };
     undoStackRef.current = [...undoStackRef.current.slice(-19), operation];
+    if (!message) return;
     setAnnouncementValue("");
     setUndoNotice({ id: operation.id, message });
   }
@@ -1951,12 +1972,7 @@ export function App() {
         ));
       }
       if (creating) {
-        const totalUploaded = uploadedAttachments + inlineImages.length;
-        const message = text(
-          `${saved.identifier} 已创建${totalUploaded > 0 ? `，已上传 ${totalUploaded} 个附件` : ""}。`,
-          `${saved.identifier} was created${totalUploaded > 0 ? ` with ${totalUploaded} attachments uploaded` : ""}.`,
-        );
-        pushUndo(message, async () => {
+        pushUndo(null, async () => {
           const candidate = tasksRef.current.find((task) => task.id === saved.id);
           const current = candidate && candidate.version >= saved.version ? candidate : saved;
           await archiveTaskRequest(current);
@@ -1966,9 +1982,8 @@ export function App() {
         const previous = editor.task;
         const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
         if (!draft.assigneeTarget || previousAssigneeTarget) {
-          const displayIdentifier = saved.externalKey ?? saved.identifier;
           pushUndo(
-            text(`${displayIdentifier} 已更新。`, `${displayIdentifier} was updated.`),
+            null,
             () => restoreTaskDetails(previous, saved, previousAssigneeTarget),
           );
         }
@@ -2036,14 +2051,7 @@ export function App() {
       setTasks((current) => sortTasks(current.map((candidate) =>
         candidate.id === moved.id ? moved : candidate,
       )));
-      const displayIdentifier = task.externalKey ?? task.identifier;
-      const message = task.status === status
-        ? text(`${displayIdentifier} 排序已调整。`, `${displayIdentifier} was reordered.`)
-        : text(
-          `${displayIdentifier} 已移至${taskStatusLabel(language, status)}。`,
-          `${displayIdentifier} was moved to ${taskStatusLabel(language, status)}.`,
-        );
-      pushUndo(message, async () => {
+      pushUndo(null, async () => {
         const candidate = tasksRef.current.find((current) => current.id === moved.id);
         const current = candidate && candidate.version >= moved.version ? candidate : moved;
         const restored = await moveTaskRequest(current, previous.status, previous.sortOrder);
@@ -2117,9 +2125,8 @@ export function App() {
       )));
       const previousAssigneeTarget = assigneeTargetForActor(previous.assignee, currentUser);
       if (!assigneeTarget || previousAssigneeTarget) {
-        const displayIdentifier = task.externalKey ?? task.identifier;
         pushUndo(
-          text(`${displayIdentifier} 已更新。`, `${displayIdentifier} was updated.`),
+          null,
           () => restoreTaskDetails(previous, updated, previousAssigneeTarget),
         );
       }
@@ -2932,6 +2939,32 @@ export function App() {
             openingThread={openingThreadTaskId === detailTask.id}
             onError={setActionError}
           />
+        ) : hasLoadedTasks
+          && tasks.length === 0
+          && selectedProject
+          && aiImportReadyProjectId === selectedProject.id ? (
+          <div className="page-empty">
+            <h2>{text("当前项目还没有任务", "This project has no issues yet")}</h2>
+            <p>{text(
+              "让 Codex 检查当前项目目录对应的对话，并整理任务状态。",
+              "Ask Codex to inspect conversations for this project directory and organize their task status.",
+            )}</p>
+            <button
+              className="button primary"
+              type="button"
+              onClick={() => setAiOpenThreadRequest((current) => ({
+                projectId: selectedProject.id,
+                issueId: null,
+                composerText: text(
+                  "只检查当前项目目录对应的 Codex 对话。请将其中已完成、处理中和待执行的任务整理并导入当前项目的 Taskboard。",
+                  "Only inspect Codex conversations associated with the current project directory. Organize completed, in-progress, and pending tasks, then import them into this project's Taskboard.",
+                ),
+                requestId: (current?.requestId ?? 0) + 1,
+              }))}
+            >
+              {text("导入当前项目任务状态", "Import current project task status")}
+            </button>
+          </div>
         ) : boardView === "dashboard" ? (
           <DashboardView
             key={selectedProjectId}

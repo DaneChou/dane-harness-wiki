@@ -667,6 +667,7 @@ fn start_launcher_locked(
         .env("CODEX_TASKBOARD_INSTANCE_TOKEN", &instance_token)
         .env("CODEX_TASKBOARD_INSTANCE_SECRET", &instance_secret)
         .env("CODEX_TASKBOARD_VERSION", &version)
+        .env_remove("CODEX_API_KEY")
         .env(
             "CODEX_TASKBOARD_CODEX_PROFILE",
             codex_profile.to_string_lossy().as_ref(),
@@ -1052,6 +1053,17 @@ async fn offer_update(
     quit: &MenuItem<tauri::Wry>,
     show_current_version: bool,
 ) {
+    if cfg!(target_os = "windows") {
+        update_snapshot(app, state, |snapshot| {
+            snapshot.update_message = "Windows 版本暂不支持自动更新。".into();
+            snapshot.update_available = false;
+        });
+        check_update
+            .set_text("检查更新（Windows 暂不支持）")
+            .unwrap();
+        check_update.set_enabled(false).unwrap();
+        return;
+    }
     if state
         .update_flow_in_progress
         .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
