@@ -748,32 +748,44 @@
     } catch (_) {}
   }
 
-  function projectRowById(projectId) {
-    if (typeof projectId !== "string" || !projectId.trim()) return null;
-    return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
-      .find((row) => row.getAttribute("data-app-action-sidebar-project-id") === projectId.trim()) || null;
+  async function nativeProjectContext() {
+    const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
+    const entries = bootstrap?.globalStateEntries ?? [];
+    const selectedProject = entries.find((entry) => entry.key === "selected-project")?.value;
+    const localProjects = entries.find((entry) => entry.key === "local-projects")?.value ?? {};
+    return {
+      projectId: typeof selectedProject?.projectId === "string" ? selectedProject.projectId : "",
+      projects: Object.values(localProjects).filter((project) => (
+        project
+        && typeof project.id === "string"
+        && Array.isArray(project.rootPaths)
+      )),
+    };
   }
 
-  function projectRowByLabel(label) {
-    if (typeof label !== "string" || !label.trim()) return null;
-    const expected = normalizedLabel(label);
-    return Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]"))
-      .find((row) => normalizedLabel(row.getAttribute("data-app-action-sidebar-project-label")) === expected) || null;
+  async function resolveNativeProject(requestedProjectId, workspacePath) {
+    const context = await nativeProjectContext();
+    if (workspacePath) {
+      return context.projects.find((project) => project.rootPaths.includes(workspacePath)) ?? null;
+    }
+    return context.projects.find((project) => project.id === requestedProjectId) ?? null;
   }
 
-  async function ensureProjectRows() {
-    let section = findProjectsSection();
-    const deadline = Date.now() + 1_200;
-    while (!section && Date.now() < deadline) {
-      await new Promise((resolve) => window.setTimeout(resolve, 40));
-      section = findProjectsSection();
+  async function waitForNativeProject(project, workspacePath) {
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline) {
+      const context = await nativeProjectContext();
+      const current = context.projects.find((candidate) => candidate.id === context.projectId);
+      if (
+        context.projectId === project.id
+        && (!workspacePath || current?.rootPaths.includes(workspacePath))
+      ) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
-    if (section?.getAttribute("data-app-action-sidebar-section-collapsed") === "true") {
-      section.querySelector("[data-app-action-sidebar-section-toggle]")?.click();
-    }
-    while (readCodexProjects().length === 0 && Date.now() < deadline) {
-      await new Promise((resolve) => window.setTimeout(resolve, 40));
-    }
+    throw new Error(hostText(
+      "Codex 未在限定时间内切换到目标项目或 worktree",
+      "Codex did not switch to the target project or worktree in time",
+    ));
   }
 
   async function createThreadForTask(payload) {
@@ -783,6 +795,9 @@
     const instruction = typeof payload?.instruction === "string" ? payload.instruction.trim() : "";
     const workspacePath = typeof payload?.workspacePath === "string"
       ? payload.workspacePath.trim()
+      : "";
+    const requestedProjectId = typeof payload?.codexProjectId === "string"
+      ? payload.codexProjectId.trim()
       : "";
     if (
       !taskId
@@ -801,29 +816,19 @@
         ));
       }
 
-      if (workspacePath) {
-        await bridge.sendMessageFromView({
-          type: "electron-set-active-workspace-root",
-          root: workspacePath,
-        });
-      } else {
-        await ensureProjectRows();
-        const snapshotProjectId = hostContextSnapshot?.projectId || "";
-        const requestedProjectId = typeof payload.codexProjectId === "string"
-          ? payload.codexProjectId.trim()
-          : "";
-        const row = projectRowByLabel(payload.workspaceLabel)
-          || projectRowById(requestedProjectId)
-          || projectRowById(snapshotProjectId)
-          || projectRowByLabel(payload.projectName);
-        if (row?.getAttribute("data-app-action-sidebar-project-collapsed") === "true") {
-          row.click?.();
-          await new Promise((resolve) => window.setTimeout(resolve, 120));
-        }
-        const selectProject = row?.querySelector("[data-app-action-sidebar-select-project]");
-        selectProject?.click?.();
-        if (selectProject) await new Promise((resolve) => window.setTimeout(resolve, 120));
+      const targetProject = await resolveNativeProject(requestedProjectId, workspacePath);
+      if (!targetProject) {
+        throw new Error(hostText(
+          "Codex 中没有映射目标项目或 worktree",
+          "The target project or worktree is not mapped in Codex",
+        ));
       }
+      await bridge.sendMessageFromView({
+        type: "electron-set-active-workspace-root",
+        projectId: targetProject.id,
+      });
+      await waitForNativeProject(targetProject, workspacePath);
+      lastNativeProjectId = targetProject.id;
 
       closeTaskboard(false);
       await dispatchHostMessage({

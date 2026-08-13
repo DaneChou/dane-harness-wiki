@@ -444,12 +444,6 @@ function intervalMinutesFromRrule(value: string): AutomationIntervalMinutes | nu
   return match ? Number(match[1]) as AutomationIntervalMinutes : null;
 }
 
-function workspaceName(path?: string): string | null {
-  if (!path) return null;
-  const parts = path.split(/[\\/]/).filter(Boolean);
-  return parts.at(-1) ?? path;
-}
-
 function isAutomationHostItem(value: unknown): value is AutomationHostItem {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Partial<AutomationHostItem>;
@@ -2343,8 +2337,13 @@ export function App() {
       : null;
     const workspacePath = worktreePath
       ?? selectedDeviceWorkspacePath
-      ?? developmentScan.workspacePath
-      ?? hostContext?.workspacePath;
+      ?? selectedProject?.workspacePath
+      ?? (
+        selectedProject?.id === GLOBAL_PROJECT_ID
+        || hostContext?.projectId === selectedProject?.id
+          ? hostContext?.workspacePath
+          : undefined
+      );
     const instruction = `e-taskboard 处理任务面板任务 ${task.identifier}，并同步进度状态。`;
 
     if (!embedded || window.parent === window) {
@@ -2355,7 +2354,11 @@ export function App() {
       return;
     }
     if (openingThreadTaskId) return;
-    const codexProject = hostContext?.projects?.find((project) => project.id === selectedProject?.id);
+    const codexProjectId = selectedProject?.id === GLOBAL_PROJECT_ID
+      ? hostContext?.projectId
+      : hostContext?.projects?.some((project) => project.id === selectedProject?.id)
+        ? selectedProject?.id
+        : undefined;
     setOpeningThreadTaskId(task.id);
     setActionError(null);
     postEmbeddedHostMessage({
@@ -2365,12 +2368,8 @@ export function App() {
         identifier: task.identifier,
         title: task.title,
         instruction,
-        codexProjectId: codexProject?.id ?? (
-          selectedProject?.id === GLOBAL_PROJECT_ID ? hostContext?.projectId : selectedProject?.id
-        ),
-        projectName: selectedProject?.name,
+        codexProjectId,
         workspacePath,
-        workspaceLabel: worktreePath ? workspaceName(worktreePath) : undefined,
       },
     });
   }
