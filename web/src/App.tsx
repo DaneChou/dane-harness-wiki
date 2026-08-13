@@ -2350,10 +2350,10 @@ export function App() {
     const instruction = `e-taskboard 处理任务面板任务 ${task.identifier}，并同步进度状态。`;
 
     if (!embedded || window.parent === window) {
-      const query = new URLSearchParams();
-      if (workspacePath) query.set("path", workspacePath);
-      query.set("prompt", instruction);
-      window.location.assign(`codex://new?${query.toString().replace(/\+/g, "%20")}`);
+      setActionError([
+        "在对话中打开仅可在 Codex 内嵌任务面板中使用。请从 Codex 侧栏打开任务面板后重试。",
+        "Open in conversation is available only in the embedded Codex Taskboard. Open Taskboard from the Codex sidebar and try again.",
+      ]);
       return;
     }
     if (openingThreadTaskId) return;

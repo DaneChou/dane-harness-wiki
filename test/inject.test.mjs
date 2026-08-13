@@ -315,11 +315,16 @@ test("host navigation follows Codex's renderer message bus", () => {
   assert.doesNotMatch(source, /new CustomEvent\("codex-message-from-view"/);
 });
 
-test("the standalone web page opens unlinked issues as prefilled empty Codex tasks", () => {
-  assert.match(webApp, /const query = new URLSearchParams\(\)/);
-  assert.match(webApp, /query\.set\("path", workspacePath\)/);
-  assert.match(webApp, /query\.set\("prompt", instruction\)/);
-  assert.match(webApp, /window\.location\.assign\(`codex:\/\/new\?/);
+test("the standalone web page reports that new Codex conversations require the embedded Taskboard", () => {
+  assert.match(
+    webApp,
+    /setActionError\(\[\s*"在对话中打开仅可在 Codex 内嵌任务面板中使用。请从 Codex 侧栏打开任务面板后重试。",/,
+  );
+  assert.match(
+    webApp,
+    /"Open in conversation is available only in the embedded Codex Taskboard\. Open Taskboard from the Codex sidebar and try again\.",/,
+  );
+  assert.doesNotMatch(webApp, /codex:\/\/new/);
 });
 
 test("host context captures all Codex projects even when the sidebar section is collapsed", () => {
