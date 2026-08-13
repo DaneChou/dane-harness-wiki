@@ -57,7 +57,7 @@ import {
   assigneeTargetForActor,
 } from "./actors";
 import { BoardColumn } from "./components/BoardColumn";
-import { AiChat, type AiChatOpenThreadRequest } from "./components/AiChat";
+import type { AiChatOpenThreadRequest } from "./components/AiChat";
 import { DashboardView } from "./components/DashboardView";
 import { IssueListView } from "./components/IssueListView";
 import { JiraConnectionDialog } from "./components/JiraConnectionDialog";
@@ -151,6 +151,9 @@ type LoadError = ProjectLoadError | TasksLoadError;
 const SHOW_WORKFLOW_BOARD_ENTRY = false;
 const GANTT_ZOOM_OPTIONS: GanttZoom[] = ["day", "week", "month"];
 
+const AiChat = lazy(() => import("./components/AiChat").then((module) => ({
+  default: module.AiChat,
+})));
 const WorkflowBoard = lazy(() => import("./components/WorkflowBoard").then((module) => ({
   default: module.WorkflowBoard,
 })));
@@ -3362,13 +3365,17 @@ export function App() {
         />
       )}
 
-      <AiChat
-        available={localAiChatAvailable}
-        projectId={selectedProjectId || null}
-        issueId={detailTaskId}
-        onThreadsChange={setAiThreads}
-        openThreadRequest={aiOpenThreadRequest}
-      />
+      {localAiChatAvailable && (
+        <Suspense fallback={null}>
+          <AiChat
+            available
+            projectId={selectedProjectId || null}
+            issueId={detailTaskId}
+            onThreadsChange={setAiThreads}
+            openThreadRequest={aiOpenThreadRequest}
+          />
+        </Suspense>
+      )}
 
       <div className="sr-only" role="status" aria-live="polite">{announcement}</div>
       {undoNotice && (
