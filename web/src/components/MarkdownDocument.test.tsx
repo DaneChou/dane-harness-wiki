@@ -42,7 +42,7 @@ describe("MarkdownDocument", () => {
   it("rejects Mermaid image resources before rendering", async () => {
     const sources = [
       'flowchart LR\n  A@{ img: "https://tracker.invalid/pixel.png" }',
-      'sequenceDiagram\n  actor A@{ icon: "https://tracker.invalid/icon.png" }',
+      'sequenceDiagram\n  actor A\n  properties A: {"icon":"https://tracker.invalid/icon.png"}',
       'C4Context\n  Person(A, "User", "", "https://tracker.invalid/sprite.png")',
     ];
 
@@ -54,11 +54,19 @@ describe("MarkdownDocument", () => {
     expect(mermaid.render).not.toHaveBeenCalled();
   });
 
-  it("does not reject ordinary Mermaid labels that mention img fields", async () => {
-    render(<MarkdownDocument value={'```mermaid\nflowchart LR\n  A["missing img: value"] --> B\n```'} />);
+  it("does not reject ordinary Mermaid labels that mention img fields, URLs, or sprite", async () => {
+    const sources = [
+      'flowchart LR\n  A["missing img: value"] --> B',
+      'flowchart LR\n  A["Docs: https://example.invalid/guide"] --> B',
+      'flowchart LR\n  A["sprite"] --> B',
+    ];
 
-    await expect(screen.findByRole("img", { name: "Mermaid diagram" })).resolves.toBeTruthy();
-    expect(mermaid.render).toHaveBeenCalledOnce();
+    for (const source of sources) {
+      const view = render(<MarkdownDocument value={`\`\`\`mermaid\n${source}\n\`\`\``} />);
+      await expect(screen.findByRole("img", { name: "Mermaid diagram" })).resolves.toBeTruthy();
+      view.unmount();
+    }
+    expect(mermaid.render).toHaveBeenCalledTimes(sources.length);
   });
 
   it("keeps ordinary fenced code as code and does not load Mermaid", async () => {

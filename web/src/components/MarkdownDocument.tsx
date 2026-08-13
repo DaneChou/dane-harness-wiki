@@ -23,7 +23,7 @@ interface MarkdownAstNode {
 const RAW_COMMENT = /<!--[\s\S]*?-->/g;
 const ENCODED_COMMENT = /&lt;!--[\s\S]*?--&gt;/gi;
 const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
-const MERMAID_EXTERNAL_RESOURCE = /https?:\/\/|<\/?(?:image|img)\b|!\[[^\]]*\]\s*\(|@\{[^}]*\b["']?(?:icon|img)["']?\s*:|\bsprite\b/i;
+const MERMAID_EXTERNAL_RESOURCE = /@\{[^}\r\n]*\b["']?img["']?\s*:|\bproperties\s+[^:\r\n]+\s*:\s*\{[^}\r\n]*["']?icon["']?\s*:\s*["']?https?:\/\/|^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?https?:\/\//im;
 
 export function remarkStripMarkdownComments() {
   return (tree: MarkdownAstNode) => {
