@@ -77,6 +77,8 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - run: npm ci
+      - name: Run the Windows Node.js test suite
+        run: npm test
       - name: Build the unsigned NSIS installer
         run: npm run app:build:windows
       - name: Preserve the unsigned NSIS installer
