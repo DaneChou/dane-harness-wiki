@@ -32,7 +32,7 @@ const RAW_COMMENT = /<!--[\s\S]*?-->/g;
 const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
 const MERMAID_FRONTMATTER = /^([^\S\n\r]*)-{3}\s*[\n\r](.*?)[\n\r]\1-{3}\s*[\n\r]+/s;
 const MERMAID_EXTERNAL_RESOURCE = /^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
-const MERMAID_SEQUENCE_PROPERTIES = /(?:^|[;\r\n])\s*properties\s+[^:\r\n;]+\s*:\s*/gim;
+const MERMAID_SEQUENCE_PROPERTIES = /(?:^|[;\r\n])\s*properties\s+[^:\r\n;]+\s*:[^\S\r\n]*/gim;
 
 interface EncodedCommentMarker {
   kind: "open" | "close";
@@ -75,11 +75,18 @@ function mermaidObjectEnd(source: string, start: number) {
 }
 
 function hasFlowchartImageResource(source: string) {
-  for (const shape of source.matchAll(/@\{/g)) {
-    const objectStart = (shape.index ?? 0) + 1;
-    const objectEnd = mermaidObjectEnd(source, objectStart);
+  const flowSource = source.replace(/^\s*%%(?!\{)[^\n]+\n?/gm, "").trimStart();
+  let inString = false;
+  for (let index = 0; index < flowSource.length; index += 1) {
+    if (flowSource[index] === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString || !flowSource.startsWith("@{", index)) continue;
+    const objectStart = index + 1;
+    const objectEnd = mermaidObjectEnd(flowSource, objectStart);
     if (objectEnd < 0) return false;
-    const metadataSource = source.slice(objectStart + 1, objectEnd);
+    const metadataSource = flowSource.slice(objectStart + 1, objectEnd);
     const yamlSource = metadataSource.includes("\n")
       ? `${metadataSource}\n`
       : `{\n${metadataSource}\n}`;
@@ -94,6 +101,7 @@ function hasFlowchartImageResource(source: string) {
     } catch {
       continue;
     }
+    index = objectEnd;
   }
   return false;
 }
@@ -126,7 +134,7 @@ function hasExternalMermaidCss(source: string) {
     }
   }
 
-  for (const directive of source.matchAll(/%%\{\s*(?:init|initialize)\s*:\s*([\s\S]*?)\}%%/gi)) {
+  for (const directive of source.matchAll(/%%\{\s*(?:init|initialize)\b\s*:?\s*([\s\S]*?)\}%%/gi)) {
     try {
       if (hasExternalThemeCss(JSON.parse(directive[1].trim().replace(/'/g, '"')))) return true;
     } catch {
@@ -165,7 +173,9 @@ function hasExternalMermaidCss(source: string) {
 function hasExternalMermaidResource(source: string) {
   if (MERMAID_EXTERNAL_RESOURCE.test(source) || hasFlowchartImageResource(source)) return true;
   for (const match of source.matchAll(MERMAID_SEQUENCE_PROPERTIES)) {
-    const objectStart = match.index + match[0].length;
+    let objectStart = match.index + match[0].length;
+    const wrapPrefix = source.slice(objectStart).match(/^:?(?:no)?wrap:[^\S\r\n]*/);
+    if (wrapPrefix) objectStart += wrapPrefix[0].length;
     if (source[objectStart] !== "{") continue;
     const objectEnd = mermaidObjectEnd(source, objectStart);
     if (objectEnd < 0) continue;
