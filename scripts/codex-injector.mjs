@@ -1539,8 +1539,9 @@ async function startTaskConversationViaCdp(cdp, executionContextId, request) {
     }
     throw new Error("Timed out while starting the Codex conversation");
   } catch (error) {
-    if (discoveredThreadId && error && typeof error === "object") {
-      error.threadId = discoveredThreadId;
+    if (error && typeof error === "object") {
+      if (discoveredThreadId) error.threadId = discoveredThreadId;
+      else if (submitted) error.uncertain = true;
     }
     throw error;
   }

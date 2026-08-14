@@ -1619,6 +1619,7 @@
         ? new Error(response.error)
         : hostError("任务面板服务启动失败", "The Taskboard service failed to start");
       if (typeof response.threadId === "string") error.threadId = response.threadId;
+      if (response.uncertain === true) error.uncertain = true;
       pending.reject(error);
     }
   }

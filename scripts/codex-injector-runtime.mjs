@@ -130,6 +130,7 @@ export async function handleHostBindingPayload(params, handlers) {
       ok: false,
       error: error.message,
       ...(typeof error?.threadId === "string" ? { threadId: error.threadId } : {}),
+      ...(error?.uncertain === true ? { uncertain: true } : {}),
     });
   }
   return { responded: true, accepted: true };
