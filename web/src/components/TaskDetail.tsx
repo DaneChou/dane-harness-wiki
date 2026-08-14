@@ -1271,46 +1271,51 @@ export function TaskDetail({
                             }}
                           />
                           <div className="comment-edit-actions">
-                            <button
-                              className="button secondary"
-                              type="button"
-                              disabled={savingCommentId === comment.id}
-                              onClick={() => editCommentImageInputRef.current?.click()}
-                            >
-                              <LinearIcon name="attachment" />
-                              {text("添加附件", "Add attachment")}
-                            </button>
-                            <input
-                              ref={editCommentImageInputRef}
-                              type="file"
-                              accept="image/*"
-                              multiple
-                              hidden
-                              onChange={(event) => {
-                                if (event.currentTarget.files) {
-                                  editingComposerRef.current?.addImages(event.currentTarget.files);
-                                }
-                                event.currentTarget.value = "";
-                              }}
-                            />
-                            <button
-                              className="button secondary"
-                              type="button"
-                              disabled={savingCommentId === comment.id}
-                              onClick={endCommentEdit}
-                            >
-                              {text("取消", "Cancel")}
-                            </button>
-                            <button
-                              className="button primary"
-                              type="button"
-                              disabled={!editingDraft.trim() || savingCommentId === comment.id}
-                              onClick={() => void saveComment(comment)}
-                            >
-                              {savingCommentId === comment.id
-                                ? text("保存中…", "Saving…")
-                                : text("保存", "Save")}
-                            </button>
+                            <div className="composer-footer-leading">
+                              <button
+                                className="comment-attach-button"
+                                type="button"
+                                disabled={savingCommentId === comment.id}
+                                aria-label={text("添加评论附件", "Add comment attachments")}
+                                title={text("添加附件", "Add attachments")}
+                                onClick={() => editCommentImageInputRef.current?.click()}
+                              >
+                                <LinearIcon name="attachment" />
+                              </button>
+                              <input
+                                ref={editCommentImageInputRef}
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                hidden
+                                onChange={(event) => {
+                                  if (event.currentTarget.files) {
+                                    editingComposerRef.current?.addImages(event.currentTarget.files);
+                                  }
+                                  event.currentTarget.value = "";
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <button
+                                className="button secondary"
+                                type="button"
+                                disabled={savingCommentId === comment.id}
+                                onClick={endCommentEdit}
+                              >
+                                {text("取消", "Cancel")}
+                              </button>
+                              <button
+                                className="button primary"
+                                type="button"
+                                disabled={!editingDraft.trim() || savingCommentId === comment.id}
+                                onClick={() => void saveComment(comment)}
+                              >
+                                {savingCommentId === comment.id
+                                  ? text("保存中…", "Saving…")
+                                  : text("保存", "Save")}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ) : (
