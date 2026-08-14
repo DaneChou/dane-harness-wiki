@@ -9,6 +9,8 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { JSON_SCHEMA, load as loadYaml } from "js-yaml";
+import type { UponSanitizeAttributeHook, UponSanitizeElementHook } from "dompurify";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { decodeString } from "micromark-util-decode-string";
 import remarkBreaks from "remark-breaks";
@@ -28,6 +30,7 @@ interface MarkdownAstNode {
 
 const RAW_COMMENT = /<!--[\s\S]*?-->/g;
 const EXTERNAL_CSS_REFERENCE = /@import|url\s*\(\s*(?!(?:['"]\s*)?#)/i;
+const MERMAID_FRONTMATTER = /^([^\S\n\r]*)-{3}\s*[\n\r](.*?)[\n\r]\1-{3}\s*[\n\r]+/s;
 const MERMAID_EXTERNAL_RESOURCE = /^\s*(?:(?:Person(?:_Ext)?|System(?:Db|Queue)?(?:_Ext)?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){3}|(?:(?:Container|Component)(?:Db|Queue)?(?:_Ext)?|Deployment_Node|Node(?:_[LR])?)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){4}|(?:Rel(?:_(?:Up|Down|Left|Right|Back|[UDLR]))?|BiRel)\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){5}|RelIndex\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6}|UpdateElementStyle\s*\((?:(?:"[^"\r\n]*"|[^,\r\n]*)\s*,){6})\s*(?:\$sprite\s*=\s*)?["']?\s*(?:https?:)?\/\//im;
 const MERMAID_SEQUENCE_PROPERTIES = /(?:^|[;\r\n])\s*properties\s+[^:\r\n;]+\s*:\s*/gim;
 
@@ -71,89 +74,64 @@ function mermaidObjectEnd(source: string, start: number) {
   return -1;
 }
 
-function mermaidPropertyName(source: string) {
-  const value = source.trim();
-  if (value.startsWith('"') && value.endsWith('"')) {
-    try {
-      const decoded = JSON.parse(value) as unknown;
-      return typeof decoded === "string" ? decoded : value;
-    } catch {
-      return value;
-    }
-  }
-  if (value.startsWith("'") && value.endsWith("'")) {
-    return value.slice(1, -1).replace(/''/g, "'");
-  }
-  return value;
-}
-
 function hasFlowchartImageResource(source: string) {
   for (const shape of source.matchAll(/@\{/g)) {
     const objectStart = (shape.index ?? 0) + 1;
     const objectEnd = mermaidObjectEnd(source, objectStart);
     if (objectEnd < 0) return false;
-    const objectSource = source.slice(objectStart + 1, objectEnd);
-    let entryStart = 0;
-    let colon = -1;
-    let depth = 0;
-    let quote: '"' | "'" | null = null;
-    let escaped = false;
-    let canStartScalar = true;
-
-    for (let index = 0; index <= objectSource.length; index += 1) {
-      const character = objectSource[index];
-      if (quote === '"') {
-        if (escaped) {
-          escaped = false;
-        } else if (character === "\\") {
-          escaped = true;
-        } else if (character === '"') {
-          quote = null;
-        }
-      } else if (quote === "'") {
-        if (character === "'" && objectSource[index + 1] === "'") {
-          index += 1;
-        } else if (character === "'") {
-          quote = null;
-        }
-      } else if (canStartScalar && (character === '"' || character === "'")) {
-        quote = character;
-      } else if (character === "{" || character === "[" || character === "(") {
-        depth += 1;
-        canStartScalar = true;
-      } else if (character === "}" || character === "]" || character === ")") {
-        depth -= 1;
-      } else if (depth === 0 && colon < entryStart && character === ":") {
-        colon = index;
-        canStartScalar = true;
-      } else if (depth === 0 && (character === "," || character === "\r" || character === "\n" || character === undefined)) {
-        if (colon >= entryStart) {
-          const name = mermaidPropertyName(objectSource.slice(entryStart, colon));
-          const value = objectSource.slice(colon + 1, index).trim();
-          if (name === "img" && value !== "" && value !== '""' && value !== "''") return true;
-        }
-        if (character === "\r" && objectSource[index + 1] === "\n") index += 1;
-        entryStart = index + 1;
-        colon = -1;
-        canStartScalar = true;
-      } else if (character !== " " && character !== "\t") {
-        canStartScalar = false;
-      }
+    const metadataSource = source.slice(objectStart + 1, objectEnd);
+    const yamlSource = metadataSource.includes("\n")
+      ? `${metadataSource}\n`
+      : `{\n${metadataSource}\n}`;
+    try {
+      const metadata = loadYaml(yamlSource, { schema: JSON_SCHEMA });
+      if (
+        metadata !== null
+        && typeof metadata === "object"
+        && !Array.isArray(metadata)
+        && (metadata as Record<string, unknown>).img
+      ) return true;
+    } catch {
+      continue;
     }
   }
   return false;
 }
 
+function hasExternalThemeCss(config: unknown) {
+  if (config === null || typeof config !== "object" || Array.isArray(config)) return false;
+  const themeCss = (config as Record<string, unknown>).themeCSS;
+  return typeof themeCss === "string" && EXTERNAL_CSS_REFERENCE.test(themeCss);
+}
+
 function hasExternalMermaidCss(source: string) {
-  const frontmatter = source.match(/^\s*---\s*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  const frontmatter = source.match(MERMAID_FRONTMATTER);
   if (frontmatter) {
-    const themeCssOffset = frontmatter[1].search(/["']?\bthemeCSS\b["']?\s*:/i);
-    if (themeCssOffset >= 0 && EXTERNAL_CSS_REFERENCE.test(frontmatter[1].slice(themeCssOffset))) return true;
+    const indent = frontmatter[1];
+    const yamlSource = indent
+      ? frontmatter[2].split("\n").map((line) => (
+        line.startsWith(indent) ? line.slice(indent.length) : line
+      )).join("\n")
+      : frontmatter[2];
+    try {
+      const metadata = loadYaml(yamlSource, { schema: JSON_SCHEMA });
+      if (
+        metadata !== null
+        && typeof metadata === "object"
+        && !Array.isArray(metadata)
+        && hasExternalThemeCss((metadata as Record<string, unknown>).config)
+      ) return true;
+    } catch {
+      // Mermaid reports malformed frontmatter through the existing render fallback.
+    }
   }
 
   for (const directive of source.matchAll(/%%\{\s*(?:init|initialize)\s*:\s*([\s\S]*?)\}%%/gi)) {
-    const themeCssOffset = directive[1].search(/["']?\bthemeCSS\b["']?\s*:/i);
-    if (themeCssOffset >= 0 && EXTERNAL_CSS_REFERENCE.test(directive[1].slice(themeCssOffset))) return true;
+    try {
+      if (hasExternalThemeCss(JSON.parse(directive[1].trim().replace(/'/g, '"')))) return true;
+    } catch {
+      continue;
+    }
   }
 
   const statements: string[] = [];
@@ -193,12 +171,24 @@ function hasExternalMermaidResource(source: string) {
     if (objectEnd < 0) continue;
     try {
       const properties = JSON.parse(source.slice(objectStart, objectEnd + 1)) as Record<string, unknown>;
-      if (Object.prototype.hasOwnProperty.call(properties, "icon")) return true;
+      const icon = properties.icon;
+      if (typeof icon === "string") {
+        const iconSource = icon.trim();
+        if (iconSource !== "" && !iconSource.startsWith("@")) return true;
+      }
     } catch {
       continue;
     }
   }
   return false;
+}
+
+function isLocalSvgReference(element: Element, reference: string) {
+  if (!reference.startsWith("#") || reference.length === 1) return false;
+  const svg = element.localName === "svg" ? element as SVGSVGElement : (element as SVGElement).ownerSVGElement;
+  if (!svg) return false;
+  const targetId = reference.slice(1);
+  return svg.id === targetId || [...svg.querySelectorAll<SVGElement>("[id]")].some((target) => target.id === targetId);
 }
 
 export function remarkStripMarkdownComments() {
@@ -358,34 +348,55 @@ export function MermaidDiagram({ source }: { source: string }) {
     void Promise.all([import("mermaid"), import("dompurify")])
       .then(async ([mermaidModule, purifierModule]) => {
         const mermaid = mermaidModule.default;
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: "strict",
-          suppressErrorRendering: true,
-          theme: theme === "dark" ? "dark" : "default",
-          htmlLabels: false,
-          secure: ["htmlLabels"],
-        });
-        const { svg } = await mermaid.render(renderId, source);
-        const sanitizedSvg = purifierModule.default.sanitize(svg, {
-          USE_PROFILES: { svg: true, svgFilters: true },
-          FORBID_TAGS: ["foreignObject", "image", "script"],
-          FORBID_ATTR: ["href", "xlink:href"],
-        });
-        const svgRoot = document.createElement("template");
-        svgRoot.innerHTML = sanitizedSvg;
-        if (svgRoot.content.children.length !== 1 || svgRoot.content.firstElementChild?.localName !== "svg") {
-          throw new Error("Mermaid did not produce a usable SVG document.");
-        }
-        svgRoot.content.querySelectorAll("style").forEach((element) => {
-          if (EXTERNAL_CSS_REFERENCE.test(element.textContent ?? "")) element.remove();
-        });
-        svgRoot.content.querySelectorAll<SVGElement>("[style]").forEach((element) => {
-          if (EXTERNAL_CSS_REFERENCE.test(element.getAttribute("style") ?? "")) {
-            element.removeAttribute("style");
+        const purifier = purifierModule.default;
+        const preserveLocalUse: UponSanitizeElementHook = (node, data) => {
+          if (!(node instanceof Element) || node.localName !== "use") return;
+          const reference = node.getAttribute("href") ?? node.getAttribute("xlink:href");
+          if (reference && isLocalSvgReference(node, reference)) data.allowedTags.use = true;
+        };
+        const filterSvgReferences: UponSanitizeAttributeHook = (node, data) => {
+          if (data.attrName !== "href" && data.attrName !== "xlink:href") return;
+          if (isLocalSvgReference(node, data.attrValue)) {
+            data.forceKeepAttr = true;
+          } else {
+            data.keepAttr = false;
           }
-        });
-        if (!cancelled) setDiagram({ source, theme, svg: svgRoot.innerHTML });
+        };
+        purifier.addHook("uponSanitizeElement", preserveLocalUse);
+        purifier.addHook("uponSanitizeAttribute", filterSvgReferences);
+        try {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            suppressErrorRendering: true,
+            theme: theme === "dark" ? "dark" : "default",
+            htmlLabels: false,
+            secure: ["htmlLabels"],
+          });
+          const { svg } = await mermaid.render(renderId, source);
+          const sanitizedSvg = purifier.sanitize(svg, {
+            USE_PROFILES: { svg: true, svgFilters: true },
+            FORBID_TAGS: ["foreignObject", "image", "script"],
+            FORBID_ATTR: ["href", "xlink:href"],
+          });
+          const svgRoot = document.createElement("template");
+          svgRoot.innerHTML = sanitizedSvg;
+          if (svgRoot.content.children.length !== 1 || svgRoot.content.firstElementChild?.localName !== "svg") {
+            throw new Error("Mermaid did not produce a usable SVG document.");
+          }
+          svgRoot.content.querySelectorAll("style").forEach((element) => {
+            if (EXTERNAL_CSS_REFERENCE.test(element.textContent ?? "")) element.remove();
+          });
+          svgRoot.content.querySelectorAll<SVGElement>("[style]").forEach((element) => {
+            if (EXTERNAL_CSS_REFERENCE.test(element.getAttribute("style") ?? "")) {
+              element.removeAttribute("style");
+            }
+          });
+          if (!cancelled) setDiagram({ source, theme, svg: svgRoot.innerHTML });
+        } finally {
+          purifier.removeHook("uponSanitizeElement", preserveLocalUse);
+          purifier.removeHook("uponSanitizeAttribute", filterSvgReferences);
+        }
       })
       .catch(() => {
         if (!cancelled) setDiagram({ source, theme, error: true });
