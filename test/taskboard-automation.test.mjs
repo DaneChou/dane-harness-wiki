@@ -42,6 +42,20 @@ const remoteRequest = {
   codexHostId: "remote-ssh-discovered:merlin-agent",
   projectName: "Playground",
   workspacePath: "/mlx_devbox/users/example/playground",
+  remoteProjects: [
+    {
+      codexProjectId: "remote-project-123",
+      codexProjectKind: "remote",
+      codexHostId: "remote-ssh-discovered:merlin-agent",
+      workspacePath: "/mlx_devbox/users/example/playground",
+    },
+    {
+      codexProjectId: "remote-worktree-456",
+      codexProjectKind: "remote",
+      codexHostId: "remote-ssh-discovered:merlin-agent",
+      workspacePath: "/mlx_devbox/users/example/playground-worktree",
+    },
+  ],
 };
 
 test("the automation model catalog matches Codex and normalizes unsupported efforts", () => {
@@ -174,6 +188,12 @@ test("the automation host request accepts only whitelisted project automation op
   const windowsRemoteRequest = {
     ...remoteRequest,
     workspacePath: String.raw`C:\Users\admin\Documents\dashi-taskboard`,
+    remoteProjects: [{
+      codexProjectId: "remote-project-123",
+      codexProjectKind: "remote",
+      codexHostId: "remote-ssh-discovered:merlin-agent",
+      workspacePath: String.raw`C:\Users\admin\Documents\dashi-taskboard`,
+    }],
   };
   assert.deepEqual(
     parseTaskboardAutomationHostRequest(windowsRemoteRequest),
@@ -221,8 +241,14 @@ test("the remote automation prompt keeps taskctl local and delegates work to the
   assert.match(prompt, /仅在本机作为任务面板控制器运行/);
   assert.match(prompt, /remote-ssh-discovered:merlin-agent/);
   assert.match(prompt, /\/mlx_devbox\/users\/example\/playground/);
+  assert.match(prompt, /remote-worktree-456/);
+  assert.match(prompt, /\/mlx_devbox\/users\/example\/playground-worktree/);
   assert.match(prompt, /Codex create_thread/);
-  assert.match(prompt, /projectId:"remote-project-123"/);
+  assert.match(prompt, /projectId:actualTarget\.codexProjectId/);
+  assert.match(prompt, /同一保存主机当前可用的精确远程项目映射/);
+  assert.match(prompt, /developmentContext\.type 是 worktree[\s\S]*workspacePath 与 developmentContext\.path 完全相同/);
+  assert.match(prompt, /零项或多项[\s\S]*目标 SSH worktree 未映射[\s\S]*不认领、不 create、不写基础项目 binding/);
+  assert.match(prompt, /不得回退到基础 root、local、项目名、其他主机/);
   assert.match(prompt, /Codex wait_threads/);
   assert.match(prompt, /远程会话不运行 taskctl/);
   assert.match(prompt, /完整 threadBinding 包含 threadId、codexProjectId、codexProjectKind、codexHostId、workspacePath/);

@@ -1132,6 +1132,7 @@ function storedAutomationPolicy(request) {
     codexHostId: request.codexHostId,
     projectName: request.projectName,
     workspacePath: request.workspacePath,
+    remoteProjects: request.remoteProjects ?? [],
     skillPath: request.skillPath,
     ...(request.automationId ? { automationId: request.automationId } : {}),
     enabledByUser: request.enabledByUser,
@@ -1324,6 +1325,7 @@ async function reconcileStoredAutomationPolicy(request, rpc) {
     || record.request.codexProjectKind !== request.codexProjectKind
     || record.request.codexHostId !== request.codexHostId
     || record.request.workspacePath !== request.workspacePath
+    || JSON.stringify(record.request.remoteProjects ?? []) !== JSON.stringify(request.remoteProjects ?? [])
   ) {
     return updateAndApplyQuotaPolicy({
       ...request,
@@ -1445,82 +1447,103 @@ async function startTaskConversationViaCdp(cdp, executionContextId, request) {
   if (!submitted) throw new Error("Codex new conversation composer did not become ready");
 
   const threadDeadline = Date.now() + 12_000;
-  while (Date.now() < threadDeadline) {
-    const started = await cdp.send("Runtime.evaluate", {
-      expression: `(() => {
-        const root = Array.from(document.querySelectorAll(
-          '[data-codex-composer-root][data-composer-placement="thread"]'
-        )).find((candidate) => candidate.getClientRects().length > 0);
-        const threadId = root
-          ?.querySelector('[data-above-composer-conversation-id]')
-          ?.getAttribute('data-above-composer-conversation-id')
-          ?.trim() || "";
-        return threadId.replace(/^(?:local|cloud):/i, "");
-      })()`,
-      contextId: executionContextId,
-      returnByValue: true,
-    });
-    const threadId = typeof started.result.value === "string" ? started.result.value : "";
-    if (threadId && threadId !== previousThreadId) {
-      const readyDeadline = Date.now() + 10_000;
-      let ready = false;
-      while (Date.now() < readyDeadline) {
+  let discoveredThreadId = "";
+  try {
+    while (Date.now() < threadDeadline) {
+      const started = await cdp.send("Runtime.evaluate", {
+        expression: `(() => {
+          const root = Array.from(document.querySelectorAll(
+            '[data-codex-composer-root][data-composer-placement="thread"]'
+          )).find((candidate) => candidate.getClientRects().length > 0);
+          const threadId = root
+            ?.querySelector('[data-above-composer-conversation-id]')
+            ?.getAttribute('data-above-composer-conversation-id')
+            ?.trim() || "";
+          return threadId.replace(/^(?:local|cloud):/i, "");
+        })()`,
+        contextId: executionContextId,
+        returnByValue: true,
+      });
+      const threadId = typeof started.result.value === "string" ? started.result.value : "";
+      if (threadId && threadId !== previousThreadId) {
+        discoveredThreadId = threadId;
+        const readyDeadline = Date.now() + 10_000;
+        let ready = false;
+        while (Date.now() < readyDeadline) {
+          try {
+            const result = await requestCodexAppServerViaCdp(
+              cdp,
+              executionContextId,
+              codexHostId,
+              "thread/read",
+              { threadId, includeTurns: false },
+              10_000,
+            );
+            if (
+              result?.thread?.id === threadId
+              && normalizeWorkspaceRoot(result.thread.cwd) === normalizedTargetRoot
+            ) {
+              ready = true;
+              break;
+            }
+          } catch {}
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+        if (!ready) throw new Error("Codex did not confirm the task conversation workspace root");
+
         try {
-          const result = await requestCodexAppServerViaCdp(
+          await requestCodexAppServerViaCdp(
             cdp,
             executionContextId,
             codexHostId,
-            "thread/read",
-            { threadId, includeTurns: false },
+            "thread/name/set",
+            { threadId, name: title },
+            10_000,
           );
-          if (
-            result?.thread?.id === threadId
-            && normalizeWorkspaceRoot(result.thread.cwd) === normalizedTargetRoot
-          ) {
-            ready = true;
-            break;
-          }
-        } catch {}
-        await new Promise((resolve) => setTimeout(resolve, 80));
-      }
-      if (!ready) throw new Error("Codex did not confirm the task conversation workspace root");
-
-      try {
-        await requestCodexAppServerViaCdp(cdp, executionContextId, codexHostId, "thread/name/set", {
-          threadId,
-          name: title,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-        if (!message.includes("rollout") || !message.includes("is empty")) throw error;
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        await requestCodexAppServerViaCdp(cdp, executionContextId, codexHostId, "thread/name/set", {
-          threadId,
-          name: title,
-        });
-      }
-
-      const titleDeadline = Date.now() + 10_000;
-      while (Date.now() < titleDeadline) {
-        try {
-          const result = await requestCodexAppServerViaCdp(
+        } catch (error) {
+          const message = error instanceof Error
+            ? error.message.toLowerCase()
+            : String(error).toLowerCase();
+          if (!message.includes("rollout") || !message.includes("is empty")) throw error;
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          await requestCodexAppServerViaCdp(
             cdp,
             executionContextId,
             codexHostId,
-            "thread/read",
-            { threadId, includeTurns: false },
+            "thread/name/set",
+            { threadId, name: title },
+            10_000,
           );
-          if (result?.thread?.id === threadId && result.thread.name === title) {
-            return { threadId, title };
-          }
-        } catch {}
-        await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+
+        const titleDeadline = Date.now() + 10_000;
+        while (Date.now() < titleDeadline) {
+          try {
+            const result = await requestCodexAppServerViaCdp(
+              cdp,
+              executionContextId,
+              codexHostId,
+              "thread/read",
+              { threadId, includeTurns: false },
+              10_000,
+            );
+            if (result?.thread?.id === threadId && result.thread.name === title) {
+              return { threadId, title };
+            }
+          } catch {}
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+        throw new Error("Codex did not confirm the task conversation title");
       }
-      throw new Error("Codex did not confirm the task conversation title");
+      await new Promise((resolve) => setTimeout(resolve, 80));
     }
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    throw new Error("Timed out while starting the Codex conversation");
+  } catch (error) {
+    if (discoveredThreadId && error && typeof error === "object") {
+      error.threadId = discoveredThreadId;
+    }
+    throw error;
   }
-  throw new Error("Timed out while starting the Codex conversation");
 }
 
 function getOrStartTaskConversation(cdp, executionContextId, request) {

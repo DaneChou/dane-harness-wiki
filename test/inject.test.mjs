@@ -190,6 +190,7 @@ test("the iframe automation contract is forwarded through the fixed host binding
   assert.match(source, /codexProjectKind: payload\.codexProjectKind/);
   assert.match(source, /codexHostId: payload\.codexHostId/);
   assert.match(source, /workspacePath: payload\.workspacePath/);
+  assert.match(source, /remoteProjects: payload\.remoteProjects/);
   assert.match(source, /skillPath: payload\.skillPath/);
   assert.match(source, /model: payload\.model/);
   assert.match(source, /reasoningEffort: payload\.reasoningEffort/);
@@ -219,6 +220,7 @@ test("complete App automation payloads cross the injected forwarder into the cur
     codexHostId: "local",
     projectName: "Local",
     workspacePath: "/tmp/local-project",
+    remoteProjects: [],
     skillPath: "/tmp/manage-taskboard/SKILL.md",
     automationId: "automation-1",
     enabledByUser: true,
@@ -286,25 +288,27 @@ test("issues start a native Codex conversation in the confirmed project with the
   assert.match(source, /const focusComposerNonce = crypto\.randomUUID\(\)/);
   assert.match(source, /state: \{\s*focusComposerNonce,\s*prefillPrompt: instruction,/);
   assert.match(source, /const HOST_REQUEST_TIMEOUT_MS = 12_000/);
+  assert.match(source, /const TASK_CONVERSATION_REQUEST_TIMEOUT_MS = 75_000/);
   assert.match(source, /function requestHost\(action, payload = \{\}, timeoutMs = HOST_REQUEST_TIMEOUT_MS\)/);
-  assert.doesNotMatch(source, /CONVERSATION_REQUEST_TIMEOUT_MS/);
   assert.match(source, /requestHostTaskConversationStart\(\{\s*taskId,\s*previousThreadId,\s*codexHostId,\s*targetRoot,\s*instruction,\s*title,/);
   assert.match(
     source,
-    /requestHost\("start-task-conversation", \{\s*taskId,\s*previousThreadId,\s*codexHostId,\s*targetRoot,\s*instruction,\s*title,\s*\}, null\)/,
+    /requestHost\("start-task-conversation", \{\s*taskId,\s*previousThreadId,\s*codexHostId,\s*targetRoot,\s*instruction,\s*title,\s*\}, TASK_CONVERSATION_REQUEST_TIMEOUT_MS\)/,
   );
   assert.match(source, /lastNativeThreadId = startedThreadId/);
   assert.match(source, /type: "taskboard:thread-prepared", payload: \{ taskId, threadId: started\.threadId \}/);
-  assert.match(
-    webApp,
-    /const instruction = `e-taskboard 处理任务面板任务 \$\{task\.identifier\}，并同步进度状态。`/,
-  );
-  assert.doesNotMatch(webApp, /const prompt =/);
-  assert.doesNotMatch(webApp, /skillName: "manage-taskboard"/);
-  assert.match(webApp, /instruction,/);
+  assert.match(webApp, /Promise\.all\(\[getTask\(task\.id\), listComments\(task\.id\)\]\)/);
+  assert.match(webApp, /moveTaskRequest\(latestTask, "in_progress", undefined, null\)/);
+  assert.match(webApp, /pendingRemoteThreadClaimsRef\.current\.set/);
+  assert.match(webApp, /完整描述[\s\S]*全部评论[\s\S]*开发上下文/);
+  assert.match(webApp, /远程 worker 不得运行 taskctl/);
   assert.match(webApp, /title: task\.title,/);
   assert.match(webApp, /type: "taskboard:create-thread"/);
-  assert.match(webApp, /codexProjectWorkspacePath: codexProjectContext\?\.workspacePath/);
+  assert.match(webApp, /codexProjectWorkspacePath: identity\.workspacePath/);
+  assert.match(webApp, /workspacePath: identity\.workspacePath/);
+  assert.match(webApp, /const binding: CodexThreadBinding = \{ threadId, \.\.\.pending\.identity \}/);
+  assert.match(webApp, /moveTaskRequest\([\s\S]*pending\.claimedTask,[\s\S]*"in_progress",[\s\S]*binding/);
+  assert.match(webApp, /pending\.previousTask\.status[\s\S]*binding/);
   assert.match(webApp, /type: "taskboard:open-thread",[\s\S]*?payload: binding/);
 });
 

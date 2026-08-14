@@ -25,6 +25,7 @@
   const REATTACH_DELAY_MS = 160;
   const FRAME_READY_TIMEOUT_MS = 12_000;
   const HOST_REQUEST_TIMEOUT_MS = 12_000;
+  const TASK_CONVERSATION_REQUEST_TIMEOUT_MS = 75_000;
   const HOST_HEARTBEAT_MAX_AGE_MS = 8_000;
   const MACOS_TITLEBAR_SAFE_LEFT = 80;
   const FRAME_REFRESH_PARAM = "__codex_taskboard_refresh";
@@ -1154,6 +1155,8 @@
           error: error instanceof Error
             ? error.message
             : hostText("无法创建 Codex 对话", "Could not create the Codex conversation"),
+          ...(typeof error?.threadId === "string" ? { threadId: error.threadId } : {}),
+          ...(error?.uncertain === true ? { uncertain: true } : {}),
         },
       });
     } finally {
@@ -1171,6 +1174,7 @@
       codexHostId: payload.codexHostId,
       projectName: payload.projectName,
       workspacePath: payload.workspacePath,
+      ...(payload.remoteProjects === undefined ? {} : { remoteProjects: payload.remoteProjects }),
       skillPath: payload.skillPath,
       ...(payload.automationId === undefined ? {} : { automationId: payload.automationId }),
       enabledByUser: payload.enabledByUser,
@@ -1545,7 +1549,9 @@
         ? null
         : window.setTimeout(() => {
           hostRequests.delete(id);
-          reject(hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond"));
+          const error = hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond");
+          if (action === "start-task-conversation") error.uncertain = true;
+          reject(error);
         }, timeoutMs);
       hostRequests.set(id, { resolve, reject, timeout });
       try {
@@ -1588,7 +1594,7 @@
       targetRoot,
       instruction,
       title,
-    }, null);
+    }, TASK_CONVERSATION_REQUEST_TIMEOUT_MS);
   }
 
   function frameMatchesTaskboardUrl(taskboardUrl) {
@@ -1611,9 +1617,13 @@
     if (pending.timeout !== null) window.clearTimeout(pending.timeout);
     hostRequests.delete(response.id);
     if (response.ok) pending.resolve(response);
-    else pending.reject(response.error
-      ? new Error(response.error)
-      : hostError("任务面板服务启动失败", "The Taskboard service failed to start"));
+    else {
+      const error = response.error
+        ? new Error(response.error)
+        : hostError("任务面板服务启动失败", "The Taskboard service failed to start");
+      if (typeof response.threadId === "string") error.threadId = response.threadId;
+      pending.reject(error);
+    }
   }
 
   function onHostBridgeMessage(event) {

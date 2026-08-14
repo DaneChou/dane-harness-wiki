@@ -24,6 +24,7 @@ import {
   archiveTask as archiveTaskRequest,
   createProjectLabel as createProjectLabelRequest,
   createProject as createProjectRequest,
+  createComment,
   createTask as createTaskRequest,
   configureJiraConnection,
   deleteArchivedTask as deleteArchivedTaskRequest,
@@ -33,6 +34,7 @@ import {
   getCodexThreadProgress,
   getHostRuntime,
   getJiraConnection,
+  getTask,
   getTaskboardRevision,
   getWorkflowWorkspace,
   getTaskboardMetadata,
@@ -40,6 +42,7 @@ import {
   listDevelopmentContexts,
   listDeviceWorkspaces,
   listProjects,
+  listComments,
   listTasks,
   moveTask as moveTaskRequest,
   publishHostRuntime,
@@ -204,6 +207,12 @@ interface UndoNotice {
   message: string;
 }
 
+interface PendingRemoteThreadClaim {
+  claimedTask: Task;
+  previousTask: Task;
+  identity: CodexProjectIdentity;
+}
+
 type ProjectAutomationStatus = "ACTIVE" | "PAUSED";
 type AutomationQuotaState = "available" | "blocked" | "unknown" | "unavailable";
 type AutomationIntervalMinutes = 5 | 10 | 15 | 30 | 60;
@@ -242,6 +251,7 @@ interface AutomationRequestContext {
   codexHostId: string;
   projectName: string;
   workspacePath: string;
+  remoteProjects: CodexProjectIdentity[];
   skillPath: string;
 }
 
@@ -788,6 +798,7 @@ export function App() {
     );
   }
   const pendingAutomationRequestsRef = useRef(new Map<string, PendingAutomationRequest>());
+  const pendingRemoteThreadClaimsRef = useRef(new Map<string, PendingRemoteThreadClaim>());
   const automationRequestInFlightRef = useRef<"list" | "save" | null>(null);
   const loadedAutomationProjectIdsRef = useRef(new Set<string>());
   const queuedAutomationSavesRef = useRef(new Map<string, QueuedProjectAutomationSave>());
@@ -969,9 +980,27 @@ export function App() {
       codexHostId: automationProjectContext.codexHostId,
       projectName: selectedProject.name,
       workspacePath: automationProjectContext.workspacePath,
+      remoteProjects: automationProjectContext.codexProjectKind === "remote"
+        ? (hostContext?.projects ?? [])
+            .filter((project) => (
+              project.projectKind === "remote"
+              && project.hostId === automationProjectContext.codexHostId
+              && typeof project.workspacePath === "string"
+            ))
+            .map((project) => ({
+              codexProjectId: project.id,
+              codexProjectKind: "remote" as const,
+              codexHostId: project.hostId!,
+              workspacePath: project.workspacePath!,
+            }))
+            .sort((left, right) => (
+              left.workspacePath.localeCompare(right.workspacePath)
+              || left.codexProjectId.localeCompare(right.codexProjectId)
+            ))
+        : [],
       skillPath: manageTaskboardSkillPath,
     };
-  }, [automationProjectContext, manageTaskboardSkillPath, selectedProject]);
+  }, [automationProjectContext, hostContext, manageTaskboardSkillPath, selectedProject]);
   const detailTask = detailTaskIdentifier
     ? tasks.find((task) => task.identifier === detailTaskIdentifier) ?? null
     : null;
@@ -1130,6 +1159,7 @@ export function App() {
         codexHostId: context.codexHostId,
         projectName: context.projectName,
         workspacePath: context.workspacePath,
+        remoteProjects: context.remoteProjects,
         skillPath: context.skillPath,
         ...(automationId ? { automationId } : {}),
         enabledByUser: options.enabledByUser,
@@ -1536,17 +1566,36 @@ export function App() {
         return;
       }
 
-      if (message.type === "taskboard:thread-prepared") {
-        setOpeningThreadTaskId(null);
+      if (message.type === "taskboard:thread-prepared" && message.payload) {
+        const payload = message.payload as { taskId?: unknown; threadId?: unknown };
+        if (typeof payload.taskId === "string" && pendingRemoteThreadClaimsRef.current.has(payload.taskId)) {
+          void bindPreparedRemoteThread(payload.taskId, payload.threadId);
+        } else {
+          setOpeningThreadTaskId(null);
+        }
         return;
       }
 
       if (message.type === "taskboard:thread-create-error" && message.payload) {
-        const payload = message.payload as { taskId?: unknown; error?: unknown };
-        setOpeningThreadTaskId(null);
-        setActionError(typeof payload.error === "string"
-          ? payload.error
-          : textRef.current("无法在 Codex 中创建对话。", "Could not create the conversation in Codex."));
+        const payload = message.payload as {
+          taskId?: unknown;
+          error?: unknown;
+          threadId?: unknown;
+          uncertain?: unknown;
+        };
+        if (typeof payload.taskId === "string" && pendingRemoteThreadClaimsRef.current.has(payload.taskId)) {
+          void compensateFailedRemoteThread(
+            payload.taskId,
+            payload.error,
+            payload.threadId,
+            payload.uncertain === true,
+          );
+        } else {
+          setOpeningThreadTaskId(null);
+          setActionError(typeof payload.error === "string"
+            ? payload.error
+            : textRef.current("无法在 Codex 中创建对话。", "Could not create the conversation in Codex."));
+        }
         return;
       }
 
@@ -2644,11 +2693,254 @@ export function App() {
     postEmbeddedHostMessage({ type: "taskboard:expand-sidebar" });
   }
 
+  function remoteIdentityForTask(
+    task: Task,
+    baseIdentity: CodexProjectIdentity,
+  ): CodexProjectIdentity | null {
+    if (task.developmentContext?.type === "worktree") {
+      const worktreePath = task.developmentContext.path;
+      const matches = (hostContext?.projects ?? []).filter((project) => (
+        project.projectKind === "remote"
+        && project.hostId === baseIdentity.codexHostId
+        && project.workspacePath === worktreePath
+      ));
+      if (matches.length !== 1) return null;
+      return {
+        codexProjectId: matches[0].id,
+        codexProjectKind: "remote",
+        codexHostId: matches[0].hostId!,
+        workspacePath: matches[0].workspacePath!,
+      };
+    }
+    const liveProject = hostContext?.projects?.find((project) => (
+      project.id === baseIdentity.codexProjectId
+      && project.projectKind === "remote"
+      && project.hostId === baseIdentity.codexHostId
+      && project.workspacePath === baseIdentity.workspacePath
+    ));
+    return liveProject ? baseIdentity : null;
+  }
+
+  function remoteTaskInstruction(task: Task, comments: Awaited<ReturnType<typeof listComments>>) {
+    const commentText = comments.length === 0
+      ? "（无评论）"
+      : comments.map((comment) => (
+          `- ${comment.authorName}（${comment.createdAt}）\n${comment.body}`
+        )).join("\n\n");
+    return [
+      `处理 Taskboard 议题 ${task.identifier}：${task.title}`,
+      `\n完整描述：\n${task.description || "（无描述）"}`,
+      `\n全部评论：\n${commentText}`,
+      `\n开发上下文：\n${JSON.stringify(task.developmentContext)}`,
+      "\n本地 Taskboard 控制器已负责认领、对话绑定、评论和状态写回。远程 worker 不得运行 taskctl。请只完成实现和必要验证，并返回改动、验证结果、执行结果和剩余风险。",
+    ].join("\n");
+  }
+
+  function updateTaskFromRemoteThread(task: Task) {
+    setTasks((current) => sortTasks(current.map((candidate) => (
+      candidate.id === task.id ? task : candidate
+    ))));
+  }
+
+  async function addRemoteThreadFailureComment(taskId: string, body: string) {
+    try {
+      await createComment(taskId, body, undefined, null);
+      setCommentsRevision((current) => current + 1);
+    } catch {}
+  }
+
+  async function bindPreparedRemoteThread(taskId: string, rawThreadId: unknown) {
+    const pending = pendingRemoteThreadClaimsRef.current.get(taskId);
+    if (!pending) return;
+    const threadId = typeof rawThreadId === "string" ? rawThreadId.trim() : "";
+    if (!threadId) {
+      await compensateFailedRemoteThread(taskId, textRef.current(
+        "Codex 没有返回新对话 ID。",
+        "Codex did not return the new conversation ID.",
+      ));
+      return;
+    }
+    const binding: CodexThreadBinding = { threadId, ...pending.identity };
+    try {
+      const boundTask = await moveTaskRequest(
+        pending.claimedTask,
+        "in_progress",
+        pending.claimedTask.sortOrder,
+        binding,
+      );
+      pendingRemoteThreadClaimsRef.current.delete(taskId);
+      updateTaskFromRemoteThread(boundTask);
+      setOpeningThreadTaskId(null);
+      setAnnouncement(textRef.current(
+        `${boundTask.identifier} 已绑定到新的 SSH 对话。`,
+        `${boundTask.identifier} is bound to the new SSH conversation.`,
+      ));
+    } catch (error) {
+      let recoveredTask: Task | null = null;
+      if (!(error instanceof ApiError && error.code === "VERSION_CONFLICT")) {
+        try {
+          const latest = await getTask(taskId);
+          const bindingWasSaved = latest.status === "in_progress"
+            && latest.projectId === pending.claimedTask.projectId
+            && latest.archivedAt === null
+            && latest.threadBinding?.threadId === binding.threadId
+            && latest.threadBinding.codexProjectId === binding.codexProjectId
+            && latest.threadBinding.codexProjectKind === binding.codexProjectKind
+            && latest.threadBinding.codexHostId === binding.codexHostId
+            && latest.threadBinding.workspacePath === binding.workspacePath;
+          if (bindingWasSaved) {
+            recoveredTask = latest;
+          } else if (
+            latest.version === pending.claimedTask.version
+            && latest.projectId === pending.claimedTask.projectId
+            && latest.status === "in_progress"
+            && latest.archivedAt === null
+            && latest.threadId === null
+            && latest.threadBinding === null
+          ) {
+            recoveredTask = await moveTaskRequest(
+              latest,
+              "blocked",
+              undefined,
+              binding,
+            );
+          }
+        } catch {}
+      }
+      pendingRemoteThreadClaimsRef.current.delete(taskId);
+      setOpeningThreadTaskId(null);
+      if (recoveredTask) {
+        updateTaskFromRemoteThread(recoveredTask);
+        if (recoveredTask.status === "in_progress") return;
+      }
+      await addRemoteThreadFailureComment(taskId, textRef.current(
+        `已创建 SSH 对话 ${threadId}，但任务 binding 写入发生冲突或失败；未覆盖其他控制端的更新。`,
+        `SSH conversation ${threadId} was created, but saving the task binding conflicted or failed. No other controller update was overwritten.`,
+      ));
+      setActionError(error instanceof ApiError && error.code === "VERSION_CONFLICT"
+        ? textRef.current(
+          `SSH 对话 ${threadId} 已创建，但议题已在其他位置更新，未覆盖该更新。`,
+          `SSH conversation ${threadId} was created, but the issue changed elsewhere. That update was not overwritten.`,
+        )
+        : errorMessage(error));
+    }
+  }
+
+  async function compensateFailedRemoteThread(
+    taskId: string,
+    rawError: unknown,
+    rawThreadId?: unknown,
+    uncertain = false,
+  ) {
+    const pending = pendingRemoteThreadClaimsRef.current.get(taskId);
+    if (!pending) return;
+    pendingRemoteThreadClaimsRef.current.delete(taskId);
+    const error = typeof rawError === "string"
+      ? rawError
+      : textRef.current("无法创建 Codex 对话。", "Could not create the Codex conversation.");
+    const threadId = typeof rawThreadId === "string" ? rawThreadId.trim() : "";
+    const binding = threadId ? { threadId, ...pending.identity } : null;
+    const status: TaskStatus = threadId || uncertain ? "blocked" : pending.previousTask.status;
+    await addRemoteThreadFailureComment(taskId, threadId
+      ? textRef.current(
+        `SSH 对话 ${threadId} 已创建，但后续确认失败：${error}`,
+        `SSH conversation ${threadId} was created, but follow-up confirmation failed: ${error}`,
+      )
+      : uncertain
+        ? textRef.current(
+          `创建 SSH 对话的结果不确定，任务已停止自动重试：${error}`,
+          `The SSH conversation result is uncertain, so automatic retry was stopped: ${error}`,
+        )
+        : textRef.current(
+          `创建 SSH 对话失败，任务已退回 ${pending.previousTask.status}：${error}`,
+          `Creating the SSH conversation failed. The task was returned to ${pending.previousTask.status}: ${error}`,
+        ));
+    try {
+      const compensated = await moveTaskRequest(
+        pending.claimedTask,
+        status,
+        pending.previousTask.sortOrder,
+        binding,
+      );
+      updateTaskFromRemoteThread(compensated);
+    } catch (moveError) {
+      if (!(moveError instanceof ApiError && moveError.code === "VERSION_CONFLICT")) {
+        setActionError(errorMessage(moveError));
+      }
+    } finally {
+      setOpeningThreadTaskId(null);
+    }
+    setActionError(error);
+  }
+
+  async function openRemoteTaskInThread(task: Task, baseIdentity: CodexProjectIdentity) {
+    try {
+      const [latestTask, comments] = await Promise.all([getTask(task.id), listComments(task.id)]);
+      if (latestTask.threadBinding) {
+        setOpeningThreadTaskId(null);
+        openThread(latestTask.threadBinding);
+        return;
+      }
+      if (latestTask.status !== "todo" || latestTask.archivedAt !== null || latestTask.threadId) {
+        throw new Error(textRef.current(
+          "该议题已被其他控制器认领或绑定，请刷新后重试。",
+          "This issue was claimed or bound by another controller. Refresh and try again.",
+        ));
+      }
+      const identity = remoteIdentityForTask(latestTask, baseIdentity);
+      if (!identity) {
+        throw new Error(latestTask.developmentContext?.type === "worktree"
+          ? textRef.current(
+            "目标 SSH worktree 未在保存的主机中添加或映射。",
+            "The target SSH worktree is not added or mapped on the saved host.",
+          )
+          : textRef.current(
+            "已保存的 SSH 远程项目或主机当前不可用。",
+            "The saved SSH remote project or host is not available.",
+          ));
+      }
+      const claimedTask = await moveTaskRequest(latestTask, "in_progress", undefined, null);
+      pendingRemoteThreadClaimsRef.current.set(task.id, {
+        claimedTask,
+        previousTask: latestTask,
+        identity,
+      });
+      updateTaskFromRemoteThread(claimedTask);
+      postEmbeddedHostMessage({
+        type: "taskboard:create-thread",
+        payload: {
+          taskId: latestTask.id,
+          identifier: latestTask.identifier,
+          title: latestTask.title,
+          instruction: remoteTaskInstruction(latestTask, comments),
+          codexProjectId: identity.codexProjectId,
+          codexProjectKind: identity.codexProjectKind,
+          codexHostId: identity.codexHostId,
+          codexProjectWorkspacePath: identity.workspacePath,
+          workspacePath: identity.workspacePath,
+        },
+      });
+    } catch (error) {
+      setOpeningThreadTaskId(null);
+      setActionError(error instanceof ApiError && error.code === "VERSION_CONFLICT"
+        ? textRef.current(
+          "该议题已在其他位置更新，未创建重复对话。",
+          "This issue changed elsewhere. No duplicate conversation was created.",
+        )
+        : errorMessage(error));
+      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+    }
+  }
+
   function openTaskInThread(task: Task) {
     const worktreePath = task.developmentContext?.type === "worktree"
       ? task.developmentContext.path
       : null;
-    const codexProjectContext = codexProjectContextForTaskProject(task.projectId);
+    const savedRemoteIdentity = projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
+      ? projectCodexIdentities[task.projectId]
+      : null;
+    const codexProjectContext = savedRemoteIdentity
+      ?? codexProjectContextForTaskProject(task.projectId);
     if (
       projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
       && !codexProjectContext
@@ -2678,9 +2970,23 @@ export function App() {
       ]);
       return;
     }
+    if (codexProjectContext?.codexProjectKind === "remote" && !codexProjectContext.workspacePath) {
+      setActionError(text(
+        "SSH 远程项目缺少精确工作目录映射。",
+        "The SSH remote project is missing its exact workspace mapping.",
+      ));
+      return;
+    }
     if (openingThreadTaskId) return;
     setOpeningThreadTaskId(task.id);
     setActionError(null);
+    if (codexProjectContext?.codexProjectKind === "remote" && codexProjectContext.workspacePath) {
+      void openRemoteTaskInThread(task, {
+        ...codexProjectContext,
+        workspacePath: codexProjectContext.workspacePath,
+      });
+      return;
+    }
     postEmbeddedHostMessage({
       type: "taskboard:create-thread",
       payload: {

@@ -89,7 +89,11 @@ test("global tasks resolve thread metadata from the active Codex project", () =>
     /hostContext\?\.projects\?\.find\(\s*\(project\) => project\.id === effectiveCodexProjectId/,
   );
   assert.match(openTaskSource, /codexProjectId: codexProject\.id,\s*codexProjectKind: codexProject\.projectKind/);
-  assert.match(openTaskSource, /const codexProjectContext = codexProjectContextForTaskProject\(task\.projectId\)/);
+  assert.match(openTaskSource, /const savedRemoteIdentity = projectCodexIdentities\[task\.projectId\]/);
+  assert.match(openTaskSource, /codexProjectContextForTaskProject\(task\.projectId\)/);
+  assert.match(openTaskSource, /project\.hostId === baseIdentity\.codexHostId/);
+  assert.match(openTaskSource, /project\.workspacePath === worktreePath/);
+  assert.match(openTaskSource, /if \(matches\.length !== 1\) return null/);
   assert.match(openTaskSource, /codexProjectId: codexProjectContext\?\.codexProjectId/);
 });
 

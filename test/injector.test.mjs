@@ -43,7 +43,8 @@ test("the CDP bridge accepts service ensure and native task conversation start a
   assert.match(runtimeSource, /request\.previousThreadId\.length <= 240/);
   assert.match(runtimeSource, /request\.codexHostId\.length <= 240/);
   assert.match(runtimeSource, /request\.targetRoot\.length <= 4_096/);
-  assert.match(runtimeSource, /request\.instruction\.length <= 1_024/);
+  assert.match(runtimeSource, /payload\.length > 4_194_304/);
+  assert.match(runtimeSource, /request\.instruction\.length <= 4_000_000/);
   assert.match(runtimeSource, /request\.title\.length <= 240/);
   assert.match(source, /async function startTaskConversationViaCdp/);
   assert.match(source, /data-composer-placement="home"/);
@@ -61,6 +62,8 @@ test("the CDP bridge accepts service ensure and native task conversation start a
   assert.match(source, /if \(!submitted\) throw new Error/);
   assert.match(source, /const threadId = typeof started\.result\.value === "string"/);
   assert.match(source, /threadId && threadId !== previousThreadId/);
+  assert.match(source, /discoveredThreadId = threadId/);
+  assert.match(source, /error\.threadId = discoveredThreadId/);
   assert.match(source, /function requestCodexAppServerViaCdp/);
   assert.match(source, /type: "mcp-request"/);
   assert.match(source, /hostId: \$\{JSON\.stringify\(hostId\)\}/);
@@ -78,6 +81,7 @@ test("the CDP bridge accepts service ensure and native task conversation start a
   assert.match(source, /Runtime\.addBinding", \{\s*name: hostBindingName,\s*executionContextId:/);
   assert.match(source, /params\.executionContextId !== activeContextId/);
   assert.match(runtimeSource, /params\.executionContextId/);
+  assert.match(runtimeSource, /threadId: error\.threadId/);
   assert.match(source, /hostResponseMessage/);
   assert.match(source, /if \(keepAlive\) await hostBridge\.install\(\)/);
   assert.match(source, /hostBridge\.publishHeartbeat/);
@@ -121,6 +125,7 @@ test("persisted automation policies retain remote project identity", () => {
   );
   assert.match(storedPolicySource, /codexProjectKind: request\.codexProjectKind/);
   assert.match(storedPolicySource, /codexHostId: request\.codexHostId/);
+  assert.match(storedPolicySource, /remoteProjects: request\.remoteProjects/);
 });
 
 test("automation list rebuilds a stored policy on the incoming project identity", async () => {
@@ -150,6 +155,12 @@ test("automation list rebuilds a stored policy on the incoming project identity"
     codexHostId: "remote-host",
     projectName: "Remote project",
     workspacePath: "/remote/project",
+    remoteProjects: [{
+      codexProjectId: "remote-worktree",
+      codexProjectKind: "remote",
+      codexHostId: "remote-host",
+      workspacePath: "/remote/project-worktree",
+    }],
     skillPath: "/new/skill/SKILL.md",
     enabledByUser: false,
     quotaAware: false,
