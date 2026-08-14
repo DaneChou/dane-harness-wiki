@@ -76,16 +76,46 @@ function mermaidObjectEnd(source: string, start: number) {
 
 function hasFlowchartImageResource(source: string) {
   const flowSource = source.replace(/^\s*%%(?!\{)[^\n]+\n?/gm, "").trimStart();
+  const edgeTextRules = [
+    { start: /^\s*[xo<]?--\s*/, end: /^\s*[xo<]?--+[-xo>]\s*/ },
+    { start: /^\s*[xo<]?==\s*/, end: /^\s*[xo<]?==+[=xo>]\s*/ },
+    { start: /^\s*[xo<]?-\.\s*/, end: /^\s*[xo<]?-?\.+-[xo>]?\s*/ },
+  ];
   let inString = false;
+  let edgeTextEnd: RegExp | null = null;
   for (let index = 0; index < flowSource.length; index += 1) {
+    const remainingSource = flowSource.slice(index);
+    if (edgeTextEnd) {
+      const edgeEnd = remainingSource.match(edgeTextEnd);
+      if (edgeEnd) {
+        edgeTextEnd = null;
+        index += edgeEnd[0].length - 1;
+      }
+      continue;
+    }
     if (flowSource[index] === '"') {
       inString = !inString;
       continue;
     }
-    if (inString || !flowSource.startsWith("@{", index)) continue;
+    if (inString) continue;
+    const fullLink = edgeTextRules.map(({ end }) => remainingSource.match(end)).find(Boolean);
+    if (fullLink) {
+      index += fullLink[0].length - 1;
+      continue;
+    }
+    const edgeText = edgeTextRules.map(({ start, end }) => ({
+      end,
+      match: remainingSource.match(start),
+    })).find(({ match }) => match);
+    if (edgeText?.match) {
+      edgeTextEnd = edgeText.end;
+      index += edgeText.match[0].length - 1;
+      continue;
+    }
+    if (!flowSource.startsWith("@{", index)) continue;
     const objectStart = index + 1;
     const objectEnd = mermaidObjectEnd(flowSource, objectStart);
-    if (objectEnd < 0) return false;
+    if (objectEnd < 0) continue;
     const metadataSource = flowSource.slice(objectStart + 1, objectEnd);
     const yamlSource = metadataSource.includes("\n")
       ? `${metadataSource}\n`
