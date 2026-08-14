@@ -1278,7 +1278,7 @@ export function TaskDetail({
                               onClick={() => editCommentImageInputRef.current?.click()}
                             >
                               <LinearIcon name="attachment" />
-                              {text("添加图片", "Add images")}
+                              {text("添加附件", "Add attachment")}
                             </button>
                             <input
                               ref={editCommentImageInputRef}
