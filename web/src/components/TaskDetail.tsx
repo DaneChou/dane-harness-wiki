@@ -1,8 +1,4 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
-import ReactMarkdown from "react-markdown";
-import { defaultUrlTransform } from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import { taskboardStorage } from "../storage";
 import {
   ApiError,
@@ -15,7 +11,6 @@ import {
   listTaskActivities,
   markdownIncludesAttachment,
   resolveTaskboardUrl,
-  resolvePersistedAttachmentUrl,
   uploadAttachment,
   uploadCommentAttachment,
   updateComment,
@@ -79,6 +74,7 @@ import { buildIssueUrl, readIssueIdentifier } from "../issueRoute";
 import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
 import copyIdIcon from "../assets/figma-taskboard/copy-id.svg";
 import copyLinkIcon from "../assets/figma-taskboard/copy-link.svg";
+import { MarkdownDocument } from "./MarkdownDocument";
 
 type TaskDetailError = string | readonly [string, string];
 
@@ -342,39 +338,22 @@ function DescriptionDocument({
   onOpenTask: (task: TaskRelationSummary) => void;
 }) {
   return (
-    <div className="issue-description-document">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
-        components={{
-          a: ({ node: _node, href, ...props }) => {
-            const task = href ? referencedTask(href, tasks) : null;
-            return (
-              <a
-                {...props}
-                href={href}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(event) => {
-                  if (
-                    !task
-                    || event.button !== 0
-                    || event.metaKey
-                    || event.ctrlKey
-                    || event.shiftKey
-                    || event.altKey
-                  ) return;
-                  event.preventDefault();
-                  onOpenTask(task);
-                }}
-              />
-            );
-          },
-        }}
-      >
-        {value}
-      </ReactMarkdown>
-    </div>
+    <MarkdownDocument
+      value={value}
+      onLinkClick={(event, href) => {
+        const task = href ? referencedTask(href, tasks) : null;
+        if (
+          !task
+          || event.button !== 0
+          || event.metaKey
+          || event.ctrlKey
+          || event.shiftKey
+          || event.altKey
+        ) return;
+        event.preventDefault();
+        onOpenTask(task);
+      }}
+    />
   );
 }
 
