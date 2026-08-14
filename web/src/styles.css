@@ -6252,6 +6252,42 @@ kbd {
   color: var(--text-primary);
 }
 
+.property-relation-chip {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.property-relation-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface-raised);
+  color: var(--text-tertiary);
+  opacity: 0;
+}
+
+.property-relation-chip:hover .property-relation-remove,
+.property-relation-chip:focus-within .property-relation-remove {
+  opacity: 1;
+}
+
+.property-relation-remove:hover {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.property-control .property-relation-remove svg {
+  width: 8px;
+  height: 8px;
+}
+
 .property-control svg {
   width: 14px;
   height: 14px;
