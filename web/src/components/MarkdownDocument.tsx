@@ -85,6 +85,11 @@ function hasFlowchartImageResource(source: string) {
   let edgeTextEnd: RegExp | null = null;
   for (let index = 0; index < flowSource.length; index += 1) {
     const remainingSource = flowSource.slice(index);
+    if (flowSource[index] === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
     if (edgeTextEnd) {
       const edgeEnd = remainingSource.match(edgeTextEnd);
       if (edgeEnd) {
@@ -93,11 +98,6 @@ function hasFlowchartImageResource(source: string) {
       }
       continue;
     }
-    if (flowSource[index] === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
     const fullLink = edgeTextRules.map(({ end }) => remainingSource.match(end)).find(Boolean);
     if (fullLink) {
       index += fullLink[0].length - 1;
