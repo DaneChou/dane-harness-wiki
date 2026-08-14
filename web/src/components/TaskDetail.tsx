@@ -26,6 +26,7 @@ import type {
   ActorIdentity,
   Attachment,
   Comment,
+  CodexThreadBinding,
   DevelopmentContext,
   DevelopmentScan,
   IssueRelationType,
@@ -100,7 +101,8 @@ interface TaskDetailProps {
     type: IssueRelationType,
     relatedTaskId: string,
   ) => Promise<RelationMutationResult>;
-  onOpenThread: (threadId: string) => void;
+  onOpenThread: (binding: CodexThreadBinding) => void;
+  onOpenLegacyLocalThread: (threadId: string) => void;
   onOpenInThread: (task: Task) => void;
   onCopy: (text: string, announcement: string) => void;
   openingThread: boolean;
@@ -360,7 +362,7 @@ function ConversationLink({
   onOpen,
 }: {
   threadId: string;
-  onOpen: (threadId: string) => void;
+  onOpen: () => void;
 }) {
   const { text } = useTaskboardI18n();
   return (
@@ -368,7 +370,7 @@ function ConversationLink({
       className="issue-conversation-link"
       type="button"
       title={text(`查看对话 ${threadId}`, `View conversation ${threadId}`)}
-      onClick={() => onOpen(threadId)}
+      onClick={onOpen}
     >
       <TaskboardIcon name="conversation" />
       <strong>{text("查看对话", "View conversation")}</strong>
@@ -394,6 +396,7 @@ export function TaskDetail({
   onAddRelation,
   onRemoveRelation,
   onOpenThread,
+  onOpenLegacyLocalThread,
   onOpenInThread,
   onCopy,
   openingThread,
@@ -974,12 +977,17 @@ export function TaskDetail({
                       : text("添加描述…", "Add description…")}
                   </div>
                 )}
-                {currentTask.threadId && (
+                {(currentTask.threadBinding || currentTask.legacyLocalThreadId) && (
                   <div
                     className="issue-conversation-list"
                     aria-label={text("处理此议题的对话", "Conversations for this issue")}
                   >
-                    <ConversationLink threadId={currentTask.threadId} onOpen={onOpenThread} />
+                    <ConversationLink
+                      threadId={currentTask.threadBinding?.threadId ?? currentTask.legacyLocalThreadId!}
+                      onOpen={() => currentTask.threadBinding
+                        ? onOpenThread(currentTask.threadBinding)
+                        : onOpenLegacyLocalThread(currentTask.legacyLocalThreadId!)}
+                    />
                   </div>
                 )}
               </div>
@@ -1346,9 +1354,14 @@ export function TaskDetail({
                             ))}
                         </ul>
                       )}
-                      {comment.threadId && (
+                      {(comment.threadBinding || comment.legacyLocalThreadId) && (
                         <div className="comment-conversation-link">
-                          <ConversationLink threadId={comment.threadId} onOpen={onOpenThread} />
+                          <ConversationLink
+                            threadId={comment.threadBinding?.threadId ?? comment.legacyLocalThreadId!}
+                            onOpen={() => comment.threadBinding
+                              ? onOpenThread(comment.threadBinding)
+                              : onOpenLegacyLocalThread(comment.legacyLocalThreadId!)}
+                          />
                         </div>
                       )}
                     </div>
