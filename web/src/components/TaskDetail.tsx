@@ -486,7 +486,6 @@ export function TaskDetail({
 
   useEffect(() => {
     const controller = new AbortController();
-    setCommentsLoading(true);
     setCommentsError(null);
     void Promise.all([
       listComments(task.id, controller.signal),
