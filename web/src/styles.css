@@ -2673,7 +2673,9 @@ kbd {
 }
 
 .issue-description-document a.issue-reference-link {
+  display: inline-flex;
   color: inherit;
+  vertical-align: middle;
 }
 
 .issue-description-document a.issue-reference-link:hover {
@@ -2683,7 +2685,6 @@ kbd {
 .issue-reference-inline {
   display: inline-flex;
   align-items: center;
-  max-width: min(440px, calc(100vw - 48px));
   min-height: 22px;
   gap: 5px;
   padding: 0 6px 0 4px;
@@ -2693,7 +2694,7 @@ kbd {
   color: var(--text-secondary);
   font-size: 0.94em;
   line-height: 22px;
-  vertical-align: middle;
+  white-space: nowrap;
 }
 
 .issue-reference-link:hover .issue-reference-inline {
@@ -2711,6 +2712,8 @@ kbd {
 .issue-reference-status .taskboard-icon {
   width: 15px;
   height: 15px;
+  margin: 0;
+  border-radius: 0;
 }
 
 .issue-reference-id {
@@ -2721,10 +2724,8 @@ kbd {
 }
 
 .issue-reference-title {
-  min-width: 0;
-  overflow: hidden;
+  flex: 0 0 auto;
   color: var(--text-primary);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
