@@ -420,7 +420,7 @@ export function TaskDetail({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [descriptionSegments, setDescriptionSegments] = useState<InlineMediaSegment[]>(
-    () => createInlineMediaSegments(task.description),
+    () => createInlineMediaSegments(task.description, tasks),
   );
   const [editingDescription, setEditingDescription] = useState(false);
   const [propertyMenu, setPropertyMenu] = useState<
@@ -440,6 +440,7 @@ export function TaskDetail({
   const [commentSegments, setCommentSegments] = useState<InlineMediaSegment[]>(
     () => createInlineMediaSegments(
       taskboardStorage.getItem(`taskboard.comment-draft.${task.id}`) ?? "",
+      tasks,
     ),
   );
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
@@ -473,7 +474,7 @@ export function TaskDetail({
     if (document.activeElement !== titleRef.current) setTitle(task.title);
     if (taskChanged || !editingDescription) {
       setDescription(task.description);
-      setDescriptionSegments(createInlineMediaSegments(task.description));
+      setDescriptionSegments(createInlineMediaSegments(task.description, tasks));
     }
     if (taskChanged) {
       setEditingDescription(false);
@@ -676,7 +677,7 @@ export function TaskDetail({
       if (!saved) return;
       setCurrentTask(saved);
       setDescription(saved.description);
-      setDescriptionSegments(createInlineMediaSegments(saved.description));
+      setDescriptionSegments(createInlineMediaSegments(saved.description, tasks));
       setAttachments((current) => [
         ...current,
         ...uploaded.filter((attachment) => !current.some((item) => item.id === attachment.id)),
@@ -762,7 +763,7 @@ export function TaskDetail({
     if (savingCommentId !== null) return;
     editingUploadedAttachmentsRef.current.clear();
     setEditingId(comment.id);
-    setEditingSegments(createInlineMediaSegments(comment.body));
+    setEditingSegments(createInlineMediaSegments(comment.body, tasks));
     setActiveMenuId(null);
   }
 
@@ -961,7 +962,7 @@ export function TaskDetail({
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.preventDefault();
-                          setDescriptionSegments(createInlineMediaSegments(currentTask.description));
+                          setDescriptionSegments(createInlineMediaSegments(currentTask.description, tasks));
                           setEditingDescription(false);
                         }
                       }}
@@ -975,13 +976,13 @@ export function TaskDetail({
                     aria-label={text("编辑议题描述", "Edit issue description")}
                     onClick={() => {
                       if (window.getSelection()?.isCollapsed === false) return;
-                      setDescriptionSegments(createInlineMediaSegments(description));
+                      setDescriptionSegments(createInlineMediaSegments(description, tasks));
                       setEditingDescription(true);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setDescriptionSegments(createInlineMediaSegments(description));
+                        setDescriptionSegments(createInlineMediaSegments(description, tasks));
                         setEditingDescription(true);
                       }
                     }}

@@ -17,6 +17,8 @@ import { unified } from "unified";
 import type { Attachment, Task } from "../types";
 import { attachmentContentUrl, resolvePersistedAttachmentUrl } from "../api";
 import { useTaskboardI18n } from "../i18n";
+import { readIssueIdentifier } from "../issueRoute";
+import { ColumnStatusIcon, STATUS_DETAILS } from "./BoardColumn";
 import { clipboardImages, fileKey, MAX_ATTACHMENT_SIZE } from "./PendingAttachments";
 import { LinearIcon } from "./LinearIcon";
 import { IssueMentionMenu } from "./IssueMentionMenu";
@@ -42,6 +44,13 @@ interface PersistedImageSegment {
   url: string;
 }
 
+interface IssueReferenceSegment {
+  id: string;
+  type: "issue-reference";
+  markdown: string;
+  taskId: string;
+}
+
 interface MarkdownAstNode {
   type: string;
   position: {
@@ -54,7 +63,11 @@ interface MarkdownAstNode {
   url?: string;
 }
 
-export type InlineMediaSegment = InlineTextSegment | InlineImageSegment | PersistedImageSegment;
+export type InlineMediaSegment =
+  | InlineTextSegment
+  | InlineImageSegment
+  | PersistedImageSegment
+  | IssueReferenceSegment;
 export type PendingInlineImage = InlineImageSegment;
 type InlineMediaError = string | readonly [string, string];
 
@@ -106,9 +119,15 @@ function imageSegment(file: File): InlineImageSegment {
   };
 }
 
-export function createInlineMediaSegments(text = ""): InlineMediaSegment[] {
+export function createInlineMediaSegments(
+  text = "",
+  mentionTasks: readonly Task[] = EMPTY_MENTION_TASKS,
+): InlineMediaSegment[] {
   const segments: InlineMediaSegment[] = [];
-  const images: Array<{ start: number; end: number; alt: string; url: string }> = [];
+  const items: Array<
+    | { type: "persisted-image"; start: number; end: number; alt: string; url: string }
+    | { type: "issue-reference"; start: number; end: number; taskId: string }
+  > = [];
   const root = inlineMediaMarkdownParser.parse(text);
   const getDefinition = definitions(root);
   const nodes = [root as MarkdownAstNode];
@@ -116,7 +135,8 @@ export function createInlineMediaSegments(text = ""): InlineMediaSegment[] {
   while (nodes.length > 0) {
     const node = nodes.pop()!;
     if (node.type === "image") {
-      images.push({
+      items.push({
+        type: "persisted-image",
         start: node.position.start.offset,
         end: node.position.end.offset,
         alt: node.alt ?? "",
@@ -126,7 +146,8 @@ export function createInlineMediaSegments(text = ""): InlineMediaSegment[] {
     if (node.type === "imageReference") {
       const definition = getDefinition(node.identifier);
       if (definition) {
-        images.push({
+        items.push({
+          type: "persisted-image",
           start: node.position.start.offset,
           end: node.position.end.offset,
           alt: node.alt ?? "",
@@ -134,22 +155,48 @@ export function createInlineMediaSegments(text = ""): InlineMediaSegment[] {
         });
       }
     }
+    if (node.type === "link" && node.url?.startsWith("?")) {
+      const projectId = new URLSearchParams(node.url).get("project");
+      const identifier = readIssueIdentifier(node.url);
+      const task = projectId && identifier
+        ? mentionTasks.find((candidate) => (
+            candidate.projectId === projectId && candidate.identifier === identifier
+          ))
+        : null;
+      if (task) {
+        items.push({
+          type: "issue-reference",
+          start: node.position.start.offset,
+          end: node.position.end.offset,
+          taskId: task.id,
+        });
+      }
+    }
     if (node.children) nodes.push(...node.children);
   }
 
-  images.sort((a, b) => a.start - b.start);
+  items.sort((a, b) => a.start - b.start);
   let offset = 0;
 
-  for (const image of images) {
-    if (image.start > offset) segments.push(textSegment(text.slice(offset, image.start)));
-    segments.push({
-      id: segmentId("image"),
-      type: "persisted-image",
-      markdown: text.slice(image.start, image.end),
-      alt: image.alt,
-      url: image.url,
-    });
-    offset = image.end;
+  for (const item of items) {
+    if (item.start > offset) segments.push(textSegment(text.slice(offset, item.start)));
+    if (item.type === "persisted-image") {
+      segments.push({
+        id: segmentId("image"),
+        type: "persisted-image",
+        markdown: text.slice(item.start, item.end),
+        alt: item.alt,
+        url: item.url,
+      });
+    } else {
+      segments.push({
+        id: segmentId("issue"),
+        type: "issue-reference",
+        markdown: text.slice(item.start, item.end),
+        taskId: item.taskId,
+      });
+    }
+    offset = item.end;
   }
 
   if (offset < text.length) segments.push(textSegment(text.slice(offset)));
@@ -163,16 +210,16 @@ export function inlineMediaImages(segments: InlineMediaSegment[]): PendingInline
 export function inlineMediaText(segments: InlineMediaSegment[]): string {
   return segments.map((segment) => {
     if (segment.type === "text") return segment.text;
-    if (segment.type === "persisted-image") return segment.markdown;
-    return "";
+    if (segment.type === "pending-image") return "";
+    return segment.markdown;
   }).join("");
 }
 
 export function serializeInlineMedia(segments: InlineMediaSegment[]): string {
   return segments.map((segment) => {
     if (segment.type === "text") return segment.text;
-    if (segment.type === "persisted-image") return segment.markdown;
-    return `\n\n${segment.token}\n\n`;
+    if (segment.type === "pending-image") return `\n\n${segment.token}\n\n`;
+    return segment.markdown;
   }).join("");
 }
 
@@ -196,10 +243,17 @@ function normalizeSegments(segments: InlineMediaSegment[]): InlineMediaSegment[]
   const normalized: InlineMediaSegment[] = [];
   for (const segment of segments) {
     const previous = normalized.at(-1);
-    if (segment.type === "text" && previous?.type === "text") {
+    if (
+      (segment.type === "issue-reference" && previous?.type !== "text")
+      || (previous?.type === "issue-reference" && segment.type !== "text")
+    ) {
+      normalized.push(textSegment());
+    }
+    const adjacent = normalized.at(-1);
+    if (segment.type === "text" && adjacent?.type === "text") {
       normalized[normalized.length - 1] = {
-        ...previous,
-        text: previous.text + segment.text,
+        ...adjacent,
+        text: adjacent.text + segment.text,
       };
     } else {
       normalized.push(segment);
@@ -273,6 +327,44 @@ function PersistedImageBlock({
         <LinearIcon name="close" />
       </button>
     </figure>
+  );
+}
+
+function IssueReferenceChip({
+  segment,
+  task,
+  disabled,
+  onRemove,
+}: {
+  segment: IssueReferenceSegment;
+  task: Task;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const { text } = useTaskboardI18n();
+  const displayIdentifier = task.externalKey ?? task.identifier;
+
+  return (
+    <button
+      type="button"
+      className={`issue-reference-inline inline-media-issue-reference issue-reference-status-${task.status}`}
+      disabled={disabled}
+      aria-label={text(
+        `${displayIdentifier} ${task.title}，按退格键或删除键移除`,
+        `${displayIdentifier} ${task.title}, press Backspace or Delete to remove`,
+      )}
+      onKeyDown={(event) => {
+        if (event.key !== "Backspace" && event.key !== "Delete") return;
+        event.preventDefault();
+        onRemove();
+      }}
+    >
+      <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
+        <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
+      </span>
+      <span className="issue-reference-id">{displayIdentifier}</span>
+      <span className="issue-reference-title">{task.title}</span>
+    </button>
   );
 }
 
@@ -363,6 +455,27 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       )));
     }
 
+    function removeIssueReference(id: string) {
+      const index = segments.findIndex((segment) => segment.id === id);
+      if (index < 0) return;
+      const previous = segments[index - 1];
+      const next = segments[index + 1];
+      const nextSegments = normalizeSegments(segments.filter((segment) => segment.id !== id));
+      const focusId = previous?.type === "text"
+        ? previous.id
+        : next?.type === "text"
+          ? next.id
+          : null;
+      if (focusId) {
+        pendingFocus.current = {
+          id: focusId,
+          offset: previous?.type === "text" ? previous.text.length : 0,
+        };
+      }
+      setMention(null);
+      onChange(nextSegments);
+    }
+
     function updateMention(
       segment: InlineTextSegment,
       value: string,
@@ -397,17 +510,26 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const displayIdentifier = task.externalKey ?? task.identifier;
       const route = new URLSearchParams({ project: task.projectId, issue: task.identifier });
       const suffix = segment.text.slice(mention.end);
-      const reference = `[@${displayIdentifier}](?${route})${/^\s/.test(suffix) ? "" : " "}`;
-      const nextText = `${segment.text.slice(0, mention.start)}${reference}${suffix}`;
-      pendingFocus.current = { id: segment.id, offset: mention.start + reference.length };
+      const insertSpace = !/^\s/.test(suffix);
+      const before = { ...segment, text: segment.text.slice(0, mention.start) };
+      const reference: IssueReferenceSegment = {
+        id: segmentId("issue"),
+        type: "issue-reference",
+        markdown: `[@${displayIdentifier}](?${route})`,
+        taskId: task.id,
+      };
+      const after = textSegment(`${insertSpace ? " " : ""}${suffix}`);
+      pendingFocus.current = { id: after.id, offset: insertSpace ? 1 : 0 };
       setMention(null);
-      onChange(segments.map((candidate) => (
-        candidate.id === segment.id ? { ...segment, text: nextText } : candidate
-      )));
+      onChange(normalizeSegments(segments.flatMap((candidate) => (
+        candidate.id === segment.id ? [before, reference, after] : [candidate]
+      ))));
     }
 
     function handleTextareaKeyDown(
       event: KeyboardEvent<HTMLTextAreaElement>,
+      segment: InlineTextSegment,
+      index: number,
     ) {
       if (event.nativeEvent.isComposing || event.keyCode === 229) {
         onKeyDown?.(event);
@@ -431,6 +553,26 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       if (mention && event.key === "Escape") {
         event.preventDefault();
         setMention(null);
+        return;
+      }
+      if (
+        event.key === "Backspace"
+        && event.currentTarget.selectionStart === 0
+        && event.currentTarget.selectionEnd === 0
+        && segments[index - 1]?.type === "issue-reference"
+      ) {
+        event.preventDefault();
+        removeIssueReference(segments[index - 1].id);
+        return;
+      }
+      if (
+        event.key === "Delete"
+        && event.currentTarget.selectionStart === segment.text.length
+        && event.currentTarget.selectionEnd === segment.text.length
+        && segments[index + 1]?.type === "issue-reference"
+      ) {
+        event.preventDefault();
+        removeIssueReference(segments[index + 1].id);
         return;
       }
       onKeyDown?.(event);
@@ -483,9 +625,13 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const isEmpty = segments.every((segment) => (
       segment.type === "text" ? segment.text.length === 0 : false
     ));
+    const hasIssueReferences = segments.some((segment) => segment.type === "issue-reference");
 
     return (
-      <div className={`inline-media-composer ${className}`.trim()} aria-label={ariaLabel}>
+      <div
+        className={`inline-media-composer${hasIssueReferences ? " has-issue-references" : ""} ${className}`.trim()}
+        aria-label={ariaLabel}
+      >
         {segments.map((segment, index) => (
           segment.type === "text" ? (
             <textarea
@@ -505,7 +651,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
                 updateMention(segment, event.target.value, event.currentTarget);
               }}
               onPaste={(event) => pasteImages(event, segment)}
-              onKeyDown={handleTextareaKeyDown}
+              onKeyDown={(event) => handleTextareaKeyDown(event, segment, index)}
               onKeyUp={(event) => {
                 if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
                   updateMention(segment, event.currentTarget.value, event.currentTarget);
@@ -521,12 +667,20 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
               disabled={disabled}
               onRemove={() => removeImage(segment.id)}
             />
-          ) : (
+          ) : segment.type === "persisted-image" ? (
             <PersistedImageBlock
               key={segment.id}
               segment={segment}
               disabled={disabled}
               onRemove={() => removeImage(segment.id)}
+            />
+          ) : (
+            <IssueReferenceChip
+              key={segment.id}
+              segment={segment}
+              task={mentionTasks.find((task) => task.id === segment.taskId)!}
+              disabled={disabled}
+              onRemove={() => removeIssueReference(segment.id)}
             />
           )
         ))}
