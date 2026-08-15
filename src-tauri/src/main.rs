@@ -10,9 +10,11 @@ use objc2::{
     sel, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 #[cfg(target_os = "macos")]
-use objc2_app_kit::{NSAlert, NSApplication, NSButton};
+use objc2_app_kit::{
+    NSAlert, NSApplication, NSButton, NSProgressIndicator, NSProgressIndicatorStyle,
+};
 #[cfg(target_os = "macos")]
-use objc2_foundation::{NSObject, NSString};
+use objc2_foundation::{NSObject, NSSize, NSString};
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::cell::RefCell;
@@ -142,6 +144,7 @@ impl UpdateDialogTarget {
 #[cfg(target_os = "macos")]
 struct NativeUpdateDialog {
     alert: Retained<NSAlert>,
+    progress_indicator: Retained<NSProgressIndicator>,
     install_button: Retained<NSButton>,
     defer_button: Retained<NSButton>,
     _target: Retained<UpdateDialogTarget>,
@@ -161,6 +164,13 @@ impl UpdateDialog {
         let dialog = run_on_main(move |mtm| {
             let alert = NSAlert::new(mtm);
             let target = UpdateDialogTarget::new(mtm, response);
+            let progress_indicator = NSProgressIndicator::new(mtm);
+            progress_indicator.setStyle(NSProgressIndicatorStyle::Bar);
+            progress_indicator.setMinValue(0.0);
+            progress_indicator.setMaxValue(100.0);
+            progress_indicator.setFrameSize(NSSize::new(280.0, 20.0));
+            progress_indicator.sizeToFit();
+            progress_indicator.setDisplayedWhenStopped(true);
             alert.setMessageText(&NSString::from_str("Codex Taskboard 更新"));
             alert.setInformativeText(&NSString::from_str(&message));
             let install_button = alert.addButtonWithTitle(&NSString::from_str("立即更新"));
@@ -180,6 +190,7 @@ impl UpdateDialog {
                 native: Arc::new(MainThreadBound::new(
                     NativeUpdateDialog {
                         alert,
+                        progress_indicator,
                         install_button,
                         defer_button,
                         _target: target,
@@ -204,19 +215,40 @@ impl UpdateDialog {
             native
                 .alert
                 .setInformativeText(&NSString::from_str(&message));
+            native.progress_indicator.setIndeterminate(true);
+            unsafe {
+                native.progress_indicator.startAnimation(None);
+            }
+            native
+                .alert
+                .setAccessoryView(Some(&native.progress_indicator));
             native.install_button.setHidden(true);
             native.defer_button.setHidden(true);
             native.alert.layout();
         });
     }
 
-    fn set_message(&self, message: &str) {
+    fn set_progress(&self, message: &str, progress: Option<u64>) {
         let native = Arc::clone(&self.native);
         let message = message.to_owned();
         run_on_main(move |mtm| {
-            let alert = &native.get(mtm).alert;
-            alert.setInformativeText(&NSString::from_str(&message));
-            alert.layout();
+            let native = native.get(mtm);
+            native
+                .alert
+                .setInformativeText(&NSString::from_str(&message));
+            if let Some(progress) = progress {
+                native.progress_indicator.setIndeterminate(false);
+                unsafe {
+                    native.progress_indicator.stopAnimation(None);
+                }
+                native.progress_indicator.setDoubleValue(progress as f64);
+            } else {
+                native.progress_indicator.setIndeterminate(true);
+                unsafe {
+                    native.progress_indicator.startAnimation(None);
+                }
+            }
+            native.alert.layout();
         });
     }
 
@@ -240,7 +272,7 @@ impl UpdateDialog {
 
     fn show_progress(&self, _message: &str) {}
 
-    fn set_message(&self, _message: &str) {}
+    fn set_progress(&self, _message: &str, _progress: Option<u64>) {}
 
     fn close(&self) {}
 }
@@ -1109,25 +1141,27 @@ async fn install_update(
         .download(
             move |chunk_length, content_length| {
                 downloaded = downloaded.saturating_add(chunk_length as u64);
+                let progress = content_length.filter(|total| *total > 0).map(|total| {
+                    downloaded
+                        .saturating_mul(100)
+                        .saturating_div(total)
+                        .min(100)
+                });
                 let snapshot = update_snapshot(&progress_app, &progress_state, |snapshot| {
-                    snapshot.update_message = match content_length.filter(|total| *total > 0) {
-                        Some(total) => format!(
-                            "正在下载 {progress_version} · {}%",
-                            downloaded
-                                .saturating_mul(100)
-                                .saturating_div(total)
-                                .min(100)
-                        ),
+                    snapshot.update_message = match progress {
+                        Some(progress) => {
+                            format!("正在下载 {progress_version} · {progress}%")
+                        }
                         None => format!("正在下载 {progress_version}…"),
                     };
                 });
-                progress_dialog.set_message(&snapshot.update_message);
+                progress_dialog.set_progress(&snapshot.update_message, progress);
             },
             move || {
                 let snapshot = update_snapshot(&finish_app, &finish_state, |snapshot| {
                     snapshot.update_message = "正在验证更新…".into();
                 });
-                finish_dialog.set_message(&snapshot.update_message);
+                finish_dialog.set_progress(&snapshot.update_message, None);
             },
         )
         .await
@@ -1147,7 +1181,7 @@ async fn install_update(
     let snapshot = update_snapshot(app, state, |snapshot| {
         snapshot.update_message = "正在安装更新…".into();
     });
-    update_dialog.set_message(&snapshot.update_message);
+    update_dialog.set_progress(&snapshot.update_message, None);
     {
         let _lifecycle = state.lifecycle.lock().unwrap();
         if state.intentional_stop.load(Ordering::SeqCst) {
@@ -1193,7 +1227,7 @@ async fn install_update(
     let snapshot = update_snapshot(app, state, |snapshot| {
         snapshot.update_message = "正在重启…".into();
     });
-    update_dialog.set_message(&snapshot.update_message);
+    update_dialog.set_progress(&snapshot.update_message, None);
     app.restart()
 }
 
