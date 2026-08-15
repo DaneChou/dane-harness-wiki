@@ -6574,6 +6574,13 @@ kbd {
   width: 100%;
 }
 
+.inline-media-composer.is-all-selected {
+  border-radius: 6px;
+  background: var(--accent-soft);
+  outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  outline-offset: 2px;
+}
+
 .inline-media-composer.has-issue-references {
   display: flex;
   align-items: center;
