@@ -1269,9 +1269,17 @@ kbd {
   flex: 0 0 auto;
 }
 
-.project-automation-field select {
-  min-width: 98px;
+.project-automation-picker {
+  flex: 0 0 132px;
+  width: 132px;
+}
+
+.project-automation-picker-trigger {
+  display: flex;
+  align-items: center;
+  width: 100%;
   height: 26px;
+  gap: 6px;
   padding: 0 6px;
   border: var(--border-hairline) solid var(--border);
   border-radius: 5px;
@@ -1279,11 +1287,20 @@ kbd {
   background: var(--surface);
   color: var(--text-primary);
   font: inherit;
+  text-align: left;
 }
 
-.project-automation-field select:focus-visible {
+.project-automation-picker-trigger:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.project-automation-picker-trigger:focus-visible {
   outline: 0;
-  box-shadow: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.project-automation-picker-trigger .task-property-trigger-label {
+  flex: 1 1 auto;
 }
 
 .project-automation-note,
@@ -2653,6 +2670,62 @@ kbd {
 
 .issue-description-document a:hover {
   text-decoration: underline;
+}
+
+.issue-description-document a.issue-reference-link {
+  color: inherit;
+}
+
+.issue-description-document a.issue-reference-link:hover {
+  text-decoration: none;
+}
+
+.issue-reference-inline {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(440px, calc(100vw - 48px));
+  min-height: 22px;
+  gap: 5px;
+  padding: 0 6px 0 4px;
+  border-radius: 5px;
+  background: var(--surface-hover);
+  box-shadow: inset 0 0 0 var(--border-hairline) var(--border);
+  color: var(--text-secondary);
+  font-size: 0.94em;
+  line-height: 22px;
+  vertical-align: middle;
+}
+
+.issue-reference-link:hover .issue-reference-inline {
+  background: var(--surface-active);
+}
+
+.issue-reference-status {
+  display: grid;
+  place-items: center;
+  flex: 0 0 15px;
+  width: 15px;
+  height: 15px;
+}
+
+.issue-reference-status .taskboard-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.issue-reference-id {
+  flex: 0 0 auto;
+  color: var(--text-secondary);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+
+.issue-reference-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-primary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .issue-description-document ul,
@@ -6262,6 +6335,39 @@ kbd {
 .property-relation-chip {
   flex: 0 0 auto;
   white-space: nowrap;
+}
+
+.property-relation-kind {
+  color: var(--text-tertiary);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.property-relation-tooltip {
+  position: absolute;
+  z-index: 40;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  display: none;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 5px 8px;
+  border: var(--border-hairline) solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  pointer-events: none;
+  transform: translateX(-50%);
+  white-space: normal;
+}
+
+.property-relation-chip:hover .property-relation-tooltip,
+.property-relation-chip:focus-within .property-relation-tooltip {
+  display: block;
 }
 
 .property-relation-remove {

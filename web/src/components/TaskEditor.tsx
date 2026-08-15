@@ -640,9 +640,16 @@ export function TaskEditor({
 
             {!task && selectedRelationChips.map(({ type, issue }) => {
               const identifier = issue.externalKey ?? issue.identifier;
+              const relationLabel = type === "subIssue"
+                ? text("子", "Sub")
+                : type === "parent"
+                  ? text("父", "Parent")
+                  : text("关联", "Related");
               return (
                 <span className="property-control property-relation-chip" key={`${type}:${issue.id}`}>
+                  <span className="property-relation-kind">{relationLabel}</span>
                   <span>{identifier}</span>
+                  <span className="property-relation-tooltip" role="tooltip">{issue.title}</span>
                   <button
                     className="property-relation-remove"
                     type="button"

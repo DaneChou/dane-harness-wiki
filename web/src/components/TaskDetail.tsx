@@ -340,6 +340,19 @@ function DescriptionDocument({
   return (
     <MarkdownDocument
       value={value}
+      renderLink={(href) => {
+        const task = href ? referencedTask(href, tasks) : null;
+        if (!task) return null;
+        return (
+          <span className="issue-reference-inline">
+            <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
+              <StatusIcon status={task.status} />
+            </span>
+            <span className="issue-reference-id">{task.externalKey ?? task.identifier}</span>
+            <span className="issue-reference-title">{task.title}</span>
+          </span>
+        );
+      }}
       onLinkClick={(event, href) => {
         const task = href ? referencedTask(href, tasks) : null;
         if (
@@ -410,7 +423,9 @@ export function TaskDetail({
     () => createInlineMediaSegments(task.description),
   );
   const [editingDescription, setEditingDescription] = useState(false);
-  const [propertyMenu, setPropertyMenu] = useState<"status" | "priority" | "assignee" | "labels" | null>(null);
+  const [propertyMenu, setPropertyMenu] = useState<
+    "status" | "priority" | "assignee" | "labels" | "development" | "recurrence" | null
+  >(null);
   const [savingProperty, setSavingProperty] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(true);
@@ -1606,34 +1621,36 @@ export function TaskDetail({
                 onDeleteLabel={currentTask.source === "jira" ? undefined : onDeleteLabel}
               />
             </div>
-            <label className="detail-property-row development-property">
-              <span className="detail-property-icon" aria-hidden="true">
-                <LinearIcon name="branch" />
-              </span>
+            <div className="detail-property-row development-property">
               <span className="detail-property-label">{text("开发上下文", "Development context")}</span>
-              <select
+              <TaskPropertyPicker
                 value={contextValue(currentTask.developmentContext)}
+                options={[
+                  {
+                    value: "",
+                    label: developmentScanLoading
+                      ? text("正在扫描 Git…", "Scanning Git…")
+                      : text("未绑定", "Not linked"),
+                    icon: <LinearIcon name="branch" />,
+                  },
+                  ...developmentOptions.map((context) => ({
+                    value: contextValue(context),
+                    label: contextLabel(context, text),
+                    icon: <LinearIcon name={context.type === "branch" ? "branch" : "folder"} />,
+                  })),
+                ]}
+                open={propertyMenu === "development"}
                 disabled={developmentScanLoading || savingProperty === "developmentContext"}
+                className="detail-property-picker"
+                triggerClassName="detail-property-trigger"
+                ariaLabel={text("开发上下文", "Development context")}
                 title={currentTask.developmentContext?.type === "worktree" ? currentTask.developmentContext.path : undefined}
-                onChange={(event) => void saveTask({
-                  developmentContext: event.target.value ? JSON.parse(event.target.value) as DevelopmentContext : null,
+                onOpenChange={(open) => setPropertyMenu(open ? "development" : null)}
+                onChange={(value) => void saveTask({
+                  developmentContext: value ? JSON.parse(value) as DevelopmentContext : null,
                 }, "developmentContext")}
-              >
-                <option value="">{developmentScanLoading
-                  ? text("正在扫描 Git…", "Scanning Git…")
-                  : text("未绑定", "Not linked")}</option>
-                <optgroup label={text("代码分支", "Code branches")}>
-                  {developmentOptions.filter((context) => context.type === "branch").map((context) => (
-                    <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Worktree">
-                  {developmentOptions.filter((context) => context.type === "worktree").map((context) => (
-                    <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </label>
+              />
+            </div>
             <label className="detail-property-row">
               <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
@@ -1659,14 +1676,25 @@ export function TaskDetail({
                 }, "dueDate")}
               />
             </label>
-            <label className="detail-property-row">
-              <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="recurrence" /></span>
+            <div className="detail-property-row">
               <span className="detail-property-label">{text("重复", "Recurrence")}</span>
-              <select
+              <TaskPropertyPicker
                 value={currentTask.recurrence?.unit ?? ""}
+                options={[
+                  { value: "", label: text("不重复", "Does not repeat"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "day", label: text("每天", "Daily"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "week", label: text("每周", "Weekly"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "month", label: text("每月", "Monthly"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "year", label: text("每年", "Yearly"), icon: <LinearIcon name="recurrence" /> },
+                ]}
+                open={propertyMenu === "recurrence"}
                 disabled={savingProperty === "recurrence"}
-                onChange={(event) => {
-                  const unit = event.target.value as Recurrence["unit"] | "";
+                className="detail-property-picker"
+                triggerClassName="detail-property-trigger"
+                ariaLabel={text("重复", "Recurrence")}
+                onOpenChange={(open) => setPropertyMenu(open ? "recurrence" : null)}
+                onChange={(value) => {
+                  const unit = value as Recurrence["unit"] | "";
                   const changes: Partial<TaskDraft> = {
                     recurrence: unit ? { interval: 1, unit } : null,
                   };
@@ -1678,14 +1706,8 @@ export function TaskDetail({
                   }
                   void saveTask(changes, "recurrence");
                 }}
-              >
-                <option value="">{text("不重复", "Does not repeat")}</option>
-                <option value="day">{text("每天", "Daily")}</option>
-                <option value="week">{text("每周", "Weekly")}</option>
-                <option value="month">{text("每月", "Monthly")}</option>
-                <option value="year">{text("每年", "Yearly")}</option>
-              </select>
-            </label>
+              />
+            </div>
             <IssueRelationSidebar
               task={currentTask}
               tasks={tasks}
