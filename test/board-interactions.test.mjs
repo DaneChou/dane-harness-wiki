@@ -156,8 +156,8 @@ test("issues expose processing conversations without manual binding", () => {
   assert.match(detailSource, /onOpenLegacyLocalThread\(comment\.legacyLocalThreadId!\)/);
   assert.doesNotMatch(detailSource, /compact/);
   assert.doesNotMatch(styles, /issue-conversation-link\.compact/);
-  assert.match(detailSource, /代码分支/);
-  assert.match(detailSource, /Worktree/);
+  assert.match(detailSource, /\.\.\.developmentOptions\.map\(\(context\) => \(\{/);
+  assert.match(detailSource, /context\.type === "branch" \? "branch" : "folder"/);
   assert.match(detailSource, /developmentContext/);
   assert.doesNotMatch(detailSource, /placeholder="绑定分支/);
   assert.doesNotMatch(contextMenuSource, /打开关联 Codex 对话/);
