@@ -44,7 +44,7 @@ import {
   assigneeTargetForActor,
 } from "../actors";
 import { ActorAvatar } from "./ActorAvatar";
-import { STATUS_DETAILS, StatusIcon } from "./BoardColumn";
+import { ColumnStatusIcon, STATUS_DETAILS, StatusIcon } from "./BoardColumn";
 import { LabelPicker } from "./LabelPicker";
 import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
 import { TaskboardIcon } from "./TaskboardIcon";
@@ -344,9 +344,9 @@ function DescriptionDocument({
         const task = href ? referencedTask(href, tasks) : null;
         if (!task) return null;
         return (
-          <span className="issue-reference-inline">
+          <span className={`issue-reference-inline issue-reference-status-${task.status}`}>
             <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-              <StatusIcon status={task.status} />
+              <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
             </span>
             <span className="issue-reference-id">{task.externalKey ?? task.identifier}</span>
             <span className="issue-reference-title">{task.title}</span>
