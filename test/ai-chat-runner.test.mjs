@@ -33,6 +33,42 @@ test("normalized item events retain a bounded public item id", () => {
   assert.equal(normalized.data.itemId, itemId.slice(0, 65_536));
 });
 
+test("completed item errors are warnings while failed item errors remain errors", () => {
+  const completed = normalizeCodexEvent({
+    type: "item.completed",
+    item: {
+      id: "notice",
+      type: "error",
+      status: "completed",
+      message: "Skill descriptions were shortened",
+    },
+  });
+  const failed = normalizeCodexEvent({
+    type: "item.completed",
+    item: {
+      id: "failure",
+      type: "error",
+      status: "failed",
+      message: "Tool failed",
+    },
+  });
+
+  assert.deepEqual(completed, {
+    kind: "event",
+    type: "error",
+    role: "activity",
+    content: "Skill descriptions were shortened",
+    data: { status: "warning", itemId: "notice" },
+  });
+  assert.deepEqual(failed, {
+    kind: "event",
+    type: "error",
+    role: "error",
+    content: "Tool failed",
+    data: { status: "failed", itemId: "failure" },
+  });
+});
+
 async function createFixture() {
   const directory = await mkdtemp(path.join(os.tmpdir(), "taskboard-ai-runner-"));
   const workspacePath = path.join(directory, "workspace");
