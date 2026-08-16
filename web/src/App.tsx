@@ -1017,8 +1017,9 @@ export function App() {
       skillPath: manageTaskboardSkillPath,
     };
   }, [automationProjectContext, hostContext, manageTaskboardSkillPath, selectedProject]);
+  const referenceTasks = useMemo(() => [...tasks, ...archivedTasks], [archivedTasks, tasks]);
   const detailTask = detailTaskIdentifier
-    ? tasks.find((task) => task.identifier === detailTaskIdentifier) ?? null
+    ? referenceTasks.find((task) => task.identifier === detailTaskIdentifier) ?? null
     : null;
   const detailTaskId = detailTask?.id ?? null;
   const contextMenuTask = contextMenu
@@ -3578,6 +3579,7 @@ export function App() {
             key={detailTask.id}
             task={detailTask}
             tasks={tasks}
+            referenceTasks={referenceTasks}
             currentUser={currentUser}
             availableLabels={availableLabels}
             developmentScan={developmentScan}
@@ -4000,6 +4002,7 @@ export function App() {
           key={editor.task?.id ?? `new-${selectedProjectId}-${editor.status}`}
           task={editor.task}
           tasks={tasks.filter((task) => task.projectId === selectedProjectId)}
+          referenceTasks={referenceTasks.filter((task) => task.projectId === selectedProjectId)}
           initialStatus={editor.status}
           initialDraft={editor.task || newTaskDraft?.projectId !== selectedProjectId
             ? null

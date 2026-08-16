@@ -44,7 +44,7 @@ import {
   assigneeTargetForActor,
 } from "../actors";
 import { ActorAvatar } from "./ActorAvatar";
-import { STATUS_DETAILS, StatusIcon } from "./BoardColumn";
+import { ColumnStatusIcon, STATUS_DETAILS, StatusIcon } from "./BoardColumn";
 import { LabelPicker } from "./LabelPicker";
 import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
 import { TaskboardIcon } from "./TaskboardIcon";
@@ -81,6 +81,7 @@ type TaskDetailError = string | readonly [string, string];
 interface TaskDetailProps {
   task: Task;
   tasks: Task[];
+  referenceTasks: Task[];
   currentUser: ActorIdentity;
   availableLabels: string[];
   developmentScan: DevelopmentScan;
@@ -312,7 +313,10 @@ function ActivityChangeIcon({ field, before, after }: {
   return <LinearIcon name="write" />;
 }
 
-function referencedTask(href: string, tasks: Task[]): Task | null {
+function referencedTask(
+  href: string,
+  referenceTasks: Task[],
+): { identifier: string; task: Task | null } | null {
   try {
     const base = new URL(document.baseURI);
     base.search = "";
@@ -322,7 +326,10 @@ function referencedTask(href: string, tasks: Task[]): Task | null {
     const identifier = readIssueIdentifier(url.search);
     const projectId = url.searchParams.get("project");
     if (!identifier || !projectId) return null;
-    return tasks.find((task) => task.projectId === projectId && task.identifier === identifier) ?? null;
+    const task = referenceTasks.find((candidate) => (
+      candidate.projectId === projectId && candidate.identifier === identifier
+    )) ?? null;
+    return { identifier: task?.externalKey ?? identifier, task };
   } catch {
     return null;
   }
@@ -330,20 +337,41 @@ function referencedTask(href: string, tasks: Task[]): Task | null {
 
 function DescriptionDocument({
   value,
-  tasks,
+  referenceTasks,
   onOpenTask,
 }: {
   value: string;
-  tasks: Task[];
+  referenceTasks: Task[];
   onOpenTask: (task: TaskRelationSummary) => void;
 }) {
   return (
     <MarkdownDocument
       value={value}
+      renderLink={(href) => {
+        const reference = href ? referencedTask(href, referenceTasks) : null;
+        if (!reference) return null;
+        const { task } = reference;
+        if (!task) {
+          return (
+            <span className="issue-reference-inline">
+              <span className="issue-reference-id">{reference.identifier}</span>
+            </span>
+          );
+        }
+        return (
+          <span className={`issue-reference-inline issue-reference-status-${task.status}`}>
+            <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
+              <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
+            </span>
+            <span className="issue-reference-id">{task.externalKey ?? task.identifier}</span>
+            <span className="issue-reference-title">{task.title}</span>
+          </span>
+        );
+      }}
       onLinkClick={(event, href) => {
-        const task = href ? referencedTask(href, tasks) : null;
+        const reference = href ? referencedTask(href, referenceTasks) : null;
         if (
-          !task
+          !reference
           || event.button !== 0
           || event.metaKey
           || event.ctrlKey
@@ -351,7 +379,7 @@ function DescriptionDocument({
           || event.altKey
         ) return;
         event.preventDefault();
-        onOpenTask(task);
+        if (reference.task) onOpenTask(reference.task);
       }}
     />
   );
@@ -383,6 +411,7 @@ function ConversationLink({
 export function TaskDetail({
   task,
   tasks,
+  referenceTasks,
   currentUser,
   availableLabels,
   developmentScan,
@@ -407,10 +436,12 @@ export function TaskDetail({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [descriptionSegments, setDescriptionSegments] = useState<InlineMediaSegment[]>(
-    () => createInlineMediaSegments(task.description),
+    () => createInlineMediaSegments(task.description, referenceTasks),
   );
   const [editingDescription, setEditingDescription] = useState(false);
-  const [propertyMenu, setPropertyMenu] = useState<"status" | "priority" | "assignee" | "labels" | null>(null);
+  const [propertyMenu, setPropertyMenu] = useState<
+    "status" | "priority" | "assignee" | "labels" | "development" | "recurrence" | null
+  >(null);
   const [savingProperty, setSavingProperty] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentsLoading, setAttachmentsLoading] = useState(true);
@@ -425,6 +456,7 @@ export function TaskDetail({
   const [commentSegments, setCommentSegments] = useState<InlineMediaSegment[]>(
     () => createInlineMediaSegments(
       taskboardStorage.getItem(`taskboard.comment-draft.${task.id}`) ?? "",
+      referenceTasks,
     ),
   );
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
@@ -458,7 +490,7 @@ export function TaskDetail({
     if (document.activeElement !== titleRef.current) setTitle(task.title);
     if (taskChanged || !editingDescription) {
       setDescription(task.description);
-      setDescriptionSegments(createInlineMediaSegments(task.description));
+      setDescriptionSegments(createInlineMediaSegments(task.description, referenceTasks));
     }
     if (taskChanged) {
       setEditingDescription(false);
@@ -661,7 +693,7 @@ export function TaskDetail({
       if (!saved) return;
       setCurrentTask(saved);
       setDescription(saved.description);
-      setDescriptionSegments(createInlineMediaSegments(saved.description));
+      setDescriptionSegments(createInlineMediaSegments(saved.description, referenceTasks));
       setAttachments((current) => [
         ...current,
         ...uploaded.filter((attachment) => !current.some((item) => item.id === attachment.id)),
@@ -736,7 +768,7 @@ export function TaskDetail({
     });
   }
 
-  function handleSubmitShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleSubmitShortcut(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       void submitComment();
@@ -747,7 +779,7 @@ export function TaskDetail({
     if (savingCommentId !== null) return;
     editingUploadedAttachmentsRef.current.clear();
     setEditingId(comment.id);
-    setEditingSegments(createInlineMediaSegments(comment.body));
+    setEditingSegments(createInlineMediaSegments(comment.body, referenceTasks));
     setActiveMenuId(null);
   }
 
@@ -938,6 +970,7 @@ export function TaskDetail({
                       ref={descriptionComposerRef}
                       segments={descriptionSegments}
                       mentionTasks={tasks}
+                      referenceTasks={referenceTasks}
                       placeholder={text("添加描述…", "Add description…")}
                       ariaLabel={text("议题描述", "Issue description")}
                       disabled={savingProperty === "description"}
@@ -946,7 +979,11 @@ export function TaskDetail({
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.preventDefault();
-                          setDescriptionSegments(createInlineMediaSegments(currentTask.description));
+                          event.stopPropagation();
+                          setDescriptionSegments(createInlineMediaSegments(
+                            currentTask.description,
+                            referenceTasks,
+                          ));
                           setEditingDescription(false);
                         }
                       }}
@@ -960,19 +997,23 @@ export function TaskDetail({
                     aria-label={text("编辑议题描述", "Edit issue description")}
                     onClick={() => {
                       if (window.getSelection()?.isCollapsed === false) return;
-                      setDescriptionSegments(createInlineMediaSegments(description));
+                      setDescriptionSegments(createInlineMediaSegments(description, referenceTasks));
                       setEditingDescription(true);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setDescriptionSegments(createInlineMediaSegments(description));
+                        setDescriptionSegments(createInlineMediaSegments(description, referenceTasks));
                         setEditingDescription(true);
                       }
                     }}
                   >
                     {description
-                      ? <DescriptionDocument value={description} tasks={tasks} onOpenTask={onOpenTask} />
+                      ? <DescriptionDocument
+                          value={description}
+                          referenceTasks={referenceTasks}
+                          onOpenTask={onOpenTask}
+                        />
                       : text("添加描述…", "Add description…")}
                   </div>
                 )}
@@ -1257,13 +1298,19 @@ export function TaskDetail({
                             className="comment-inline-media"
                             segments={editingSegments}
                             mentionTasks={tasks}
+                            referenceTasks={referenceTasks}
                             placeholder={text("编辑评论", "Edit comment")}
                             ariaLabel={text("编辑评论", "Edit comment")}
                             disabled={savingCommentId === comment.id}
                             onChange={setEditingSegments}
                             onError={setCommentsError}
                             onKeyDown={(event) => {
-                              if (event.key === "Escape") endCommentEdit();
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                endCommentEdit();
+                                return;
+                              }
                               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                                 event.preventDefault();
                                 void saveComment(comment);
@@ -1321,7 +1368,11 @@ export function TaskDetail({
                       ) : (
                         comment.body && (
                           <div className="comment-body">
-                            <DescriptionDocument value={comment.body} tasks={tasks} onOpenTask={onOpenTask} />
+                            <DescriptionDocument
+                              value={comment.body}
+                              referenceTasks={referenceTasks}
+                              onOpenTask={onOpenTask}
+                            />
                           </div>
                         )
                       )}
@@ -1396,6 +1447,7 @@ export function TaskDetail({
                   className="comment-inline-media"
                   segments={commentSegments}
                   mentionTasks={tasks}
+                  referenceTasks={referenceTasks}
                   placeholder={text("留下评论…", "Leave a comment…")}
                   ariaLabel={text("留下评论", "Leave a comment")}
                   onChange={setCommentSegments}
@@ -1606,34 +1658,36 @@ export function TaskDetail({
                 onDeleteLabel={currentTask.source === "jira" ? undefined : onDeleteLabel}
               />
             </div>
-            <label className="detail-property-row development-property">
-              <span className="detail-property-icon" aria-hidden="true">
-                <LinearIcon name="branch" />
-              </span>
+            <div className="detail-property-row development-property">
               <span className="detail-property-label">{text("开发上下文", "Development context")}</span>
-              <select
+              <TaskPropertyPicker
                 value={contextValue(currentTask.developmentContext)}
+                options={[
+                  {
+                    value: "",
+                    label: developmentScanLoading
+                      ? text("正在扫描 Git…", "Scanning Git…")
+                      : text("未绑定", "Not linked"),
+                    icon: <LinearIcon name="branch" />,
+                  },
+                  ...developmentOptions.map((context) => ({
+                    value: contextValue(context),
+                    label: contextLabel(context, text),
+                    icon: <LinearIcon name={context.type === "branch" ? "branch" : "folder"} />,
+                  })),
+                ]}
+                open={propertyMenu === "development"}
                 disabled={developmentScanLoading || savingProperty === "developmentContext"}
+                className="detail-property-picker"
+                triggerClassName="detail-property-trigger"
+                ariaLabel={text("开发上下文", "Development context")}
                 title={currentTask.developmentContext?.type === "worktree" ? currentTask.developmentContext.path : undefined}
-                onChange={(event) => void saveTask({
-                  developmentContext: event.target.value ? JSON.parse(event.target.value) as DevelopmentContext : null,
+                onOpenChange={(open) => setPropertyMenu(open ? "development" : null)}
+                onChange={(value) => void saveTask({
+                  developmentContext: value ? JSON.parse(value) as DevelopmentContext : null,
                 }, "developmentContext")}
-              >
-                <option value="">{developmentScanLoading
-                  ? text("正在扫描 Git…", "Scanning Git…")
-                  : text("未绑定", "Not linked")}</option>
-                <optgroup label={text("代码分支", "Code branches")}>
-                  {developmentOptions.filter((context) => context.type === "branch").map((context) => (
-                    <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Worktree">
-                  {developmentOptions.filter((context) => context.type === "worktree").map((context) => (
-                    <option value={contextValue(context)} key={contextValue(context)}>{contextLabel(context, text)}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </label>
+              />
+            </div>
             <label className="detail-property-row">
               <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
@@ -1659,14 +1713,25 @@ export function TaskDetail({
                 }, "dueDate")}
               />
             </label>
-            <label className="detail-property-row">
-              <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="recurrence" /></span>
+            <div className="detail-property-row">
               <span className="detail-property-label">{text("重复", "Recurrence")}</span>
-              <select
+              <TaskPropertyPicker
                 value={currentTask.recurrence?.unit ?? ""}
+                options={[
+                  { value: "", label: text("不重复", "Does not repeat"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "day", label: text("每天", "Daily"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "week", label: text("每周", "Weekly"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "month", label: text("每月", "Monthly"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "year", label: text("每年", "Yearly"), icon: <LinearIcon name="recurrence" /> },
+                ]}
+                open={propertyMenu === "recurrence"}
                 disabled={savingProperty === "recurrence"}
-                onChange={(event) => {
-                  const unit = event.target.value as Recurrence["unit"] | "";
+                className="detail-property-picker"
+                triggerClassName="detail-property-trigger"
+                ariaLabel={text("重复", "Recurrence")}
+                onOpenChange={(open) => setPropertyMenu(open ? "recurrence" : null)}
+                onChange={(value) => {
+                  const unit = value as Recurrence["unit"] | "";
                   const changes: Partial<TaskDraft> = {
                     recurrence: unit ? { interval: 1, unit } : null,
                   };
@@ -1678,14 +1743,8 @@ export function TaskDetail({
                   }
                   void saveTask(changes, "recurrence");
                 }}
-              >
-                <option value="">{text("不重复", "Does not repeat")}</option>
-                <option value="day">{text("每天", "Daily")}</option>
-                <option value="week">{text("每周", "Weekly")}</option>
-                <option value="month">{text("每月", "Monthly")}</option>
-                <option value="year">{text("每年", "Yearly")}</option>
-              </select>
-            </label>
+              />
+            </div>
             <IssueRelationSidebar
               task={currentTask}
               tasks={tasks}
