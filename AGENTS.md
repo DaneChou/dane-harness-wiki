@@ -70,12 +70,15 @@ Make the smallest root-cause change. Do not add unrelated refactors, abstraction
 - Wait for the complete Pro answer. Do not use an instant-answer result. Check at approximately five-minute intervals when necessary; a complete review can take more than 30 minutes.
 - Simple mechanical changes, documentation, README updates, version-only changes, and already-approved code followed only by trivial edits can skip Pro review.
 - Fix actionable blockers in the same PR. Repeat Pro review only when the new implementation complexity warrants it.
+- For UI work, complete the full function and its direct verification first. Run any complexity-based Pro review before asking the user to confirm the final visual style.
+- After Pro approval, visual-only adjustments made for the user's final UI confirmation do not require another Pro review. The coordinator still checks that the delta is limited to the requested UI and reruns the relevant direct verification.
 - Close temporary review browser tabs after review finishes.
 
 ## 7. Acceptance and issue status
 
 - Reviewer approval means ready for user inspection, not user acceptance.
-- Put user-visible changes into the Taskboard-launched Codex App so the user can inspect the current code.
+- For UI work, put the complete reviewed function into the Taskboard-launched Codex App and ask the user to confirm the final visual style only after implementation and any required Pro review are complete.
+- Do not merge UI work until the user confirms its style. After visual-only feedback is applied and directly verified, the change can proceed without repeating Pro review.
 - After implementation and required review pass, move the issue to `in_review`.
 - Never move an issue to `done` unless the user explicitly accepts it or asks for completion.
 - If the user explicitly authorizes finishing and releasing the whole batch without another pause, that instruction authorizes the remaining review, merge, and release steps, but still does not authorize marking issues `done`.
