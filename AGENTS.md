@@ -74,8 +74,8 @@ Make the smallest root-cause change. Do not add unrelated refactors, abstraction
 - Logic-only changes on a UI surface do not need separate user UI confirmation when they do not cause a meaningful visual change. This includes interaction logic, data behavior, toggle behavior, popover close conditions, and copy-and-paste behavior.
 - Small, low-risk, and visually unambiguous changes can skip user UI confirmation after the coordinator checks the real path and visual evidence. Examples include a local font-size, spacing, alignment, or color adjustment.
 - Require user UI confirmation before merge when the change adds UI, meaningfully changes layout, information hierarchy, or the presentation of a core interaction, has multiple reasonable visual choices, or the user explicitly asks to confirm the style.
-- For work that requires user UI confirmation, complete the full function and its direct verification first. Run any complexity-based Pro review before asking the user to confirm the final visual style.
-- After Pro approval, visual-only adjustments made for the user's final UI confirmation do not require another Pro review. The coordinator still checks that the delta is limited to the requested UI and reruns the relevant direct verification.
+- User UI confirmation is a final acceptance gate, not an intermediate development checkpoint. For work that requires it, ask only after the full function is complete, direct verification passes, and any complexity-based Pro review passes. Never ask the user to confirm a partially implemented UI.
+- After Pro approval, visual-only adjustments made from the user's final UI feedback do not require another Pro review. The coordinator checks that the delta is limited to the requested visual change, reruns the real path, and can then proceed to merge. If the adjustment changes functional logic or introduces new complex risk, reassess whether code review or Pro review is required.
 - Close temporary review browser tabs after review finishes.
 
 ## 7. Acceptance and issue status
