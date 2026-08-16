@@ -1135,6 +1135,12 @@ kbd {
   background: transparent;
 }
 
+.board-card-display-trigger > svg {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+}
+
 .task-filter-trigger.is-active {
   background: var(--accent-soft);
 }
@@ -2124,8 +2130,7 @@ kbd {
   pointer-events: auto;
 }
 
-.due-date-chip input,
-.task-participants-control select {
+.due-date-chip input {
   position: absolute;
   inset: 0;
   z-index: 1;
@@ -2139,7 +2144,7 @@ kbd {
 }
 
 .due-date-chip:has(input:focus-visible),
-.task-participants-control:has(select:focus-visible),
+.task-assignee-trigger:focus-visible,
 .card-label-trigger:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
@@ -2172,6 +2177,19 @@ kbd {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+}
+
+.task-assignee-trigger {
+  display: inline-flex;
+  align-items: center;
+  min-width: 16px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
 }
 
 .card-topline {
@@ -2225,6 +2243,19 @@ kbd {
   font-size: 13px;
   font-weight: 500;
   line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.task-card-description {
+  display: -webkit-box;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
