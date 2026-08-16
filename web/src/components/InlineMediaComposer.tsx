@@ -471,6 +471,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
   }, ref) {
     const rootRef = useRef<HTMLDivElement>(null);
     const atomHosts = useRef(new Map<string, HTMLElement>());
+    const nativeSegments = useRef(new Map<string, InlineMediaSegment>());
     const pendingSelection = useRef<number | null>(null);
     const pendingMentionUpdate = useRef(false);
     const pendingAtomHostRevision = useRef(0);
@@ -509,11 +510,13 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const nextAtomHosts = new Map<string, HTMLElement>();
 
       for (const segment of segments) {
+        nativeSegments.current.set(segment.id, segment);
         const element = document.createElement("span");
         element.dataset.inlineMediaSegment = segment.id;
         if (segment.type === "text") {
           element.className = "inline-media-text";
-          element.textContent = segment.text;
+          if (segment.text) element.textContent = segment.text;
+          else element.append(document.createElement("br"));
         } else {
           element.className = segment.type === "issue-reference"
             ? "inline-media-atom"
@@ -909,11 +912,11 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const targetSegment = startElement?.dataset.inlineMediaSegment
         ? segments.find((segment) => segment.id === startElement.dataset.inlineMediaSegment)
         : null;
-      const nativeTextEdit = targetSegment?.type === "text"
-        && startElement === endElement
-        && (
-          ["insertText", "insertReplacementText"].includes(input.inputType)
-          || input.inputType.startsWith("delete")
+      const nativeTextEdit = input.inputType.startsWith("delete")
+        || (
+          targetSegment?.type === "text"
+          && startElement === endElement
+          && ["insertText", "insertReplacementText"].includes(input.inputType)
         );
       if (nativeTextEdit) return;
       let insertion: InlineMediaSegment[] | null = null;
@@ -967,8 +970,10 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     function syncSegmentsFromDom() {
       const root = rootRef.current;
       if (!root) return;
-      const existing = new Map(segments.map((segment) => [segment.id, segment]));
+      const existing = nativeSegments.current;
+      for (const segment of segments) existing.set(segment.id, segment);
       const next: InlineMediaSegment[] = [];
+      const nextAtomHosts = new Map<string, HTMLElement>();
       for (const child of root.childNodes) {
         if (child instanceof Text) {
           if (child.data) next.push(textSegment(child.data));
@@ -981,16 +986,24 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           next.push({ ...segment, text: child.textContent ?? "" });
         } else if (segment) {
           next.push(segment);
+          nextAtomHosts.set(segment.id, child);
         } else if (child.tagName === "BR" && root.childNodes.length > 1) {
           next.push(textSegment("\n"));
         } else if (child.textContent) {
           next.push(textSegment(child.textContent));
         }
       }
+      if (next.length === 0) {
+        const text = segments.find((segment): segment is InlineTextSegment => segment.type === "text");
+        if (text) next.push({ ...text, text: "" });
+      }
+      const normalized = normalizeSegments(next);
+      for (const segment of normalized) existing.set(segment.id, segment);
+      atomHosts.current = nextAtomHosts;
       nativeInputPending.current = true;
       pendingSelection.current = null;
       pendingMentionUpdate.current = true;
-      onChange(normalizeSegments(next));
+      onChange(normalized);
     }
 
     const isEmpty = segments.every((segment) => (
