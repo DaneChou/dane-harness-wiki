@@ -896,6 +896,32 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       if (disabled || composing.current) return;
       const targetRange = input.getTargetRanges()[0];
       if (!targetRange) return;
+      const root = rootRef.current;
+      const emptySegment = segments.length === 1 && segments[0].type === "text"
+        && segments[0].text.length === 0
+        ? segments[0]
+        : null;
+      if (
+        root
+        && emptySegment
+        && targetRange.startContainer === root
+        && root.childNodes.length === 1
+        && root.firstChild instanceof HTMLBRElement
+        && ["insertText", "insertReplacementText"].includes(input.inputType)
+      ) {
+        const element = document.createElement("span");
+        element.dataset.inlineMediaSegment = emptySegment.id;
+        element.className = "inline-media-text";
+        element.append(document.createElement("br"));
+        root.replaceChildren(element);
+        const range = document.createRange();
+        range.setStart(element, 0);
+        range.collapse(true);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        return;
+      }
       const start = logicalOffsetForPoint(
         targetRange.startContainer,
         targetRange.startOffset,
@@ -912,12 +938,18 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const targetSegment = startElement?.dataset.inlineMediaSegment
         ? segments.find((segment) => segment.id === startElement.dataset.inlineMediaSegment)
         : null;
-      const nativeTextEdit = input.inputType.startsWith("delete")
-        || (
-          targetSegment?.type === "text"
-          && startElement === endElement
-          && ["insertText", "insertReplacementText"].includes(input.inputType)
-        );
+      const sameTextSegment = targetSegment?.type === "text" && startElement === endElement;
+      const fullDelete = start === 0 && end > start && end === segmentsLength(segments);
+      const nativeTextEdit = (
+        sameTextSegment
+        && (
+          input.inputType.startsWith("delete")
+          || ["insertText", "insertReplacementText"].includes(input.inputType)
+        )
+      ) || (
+        input.inputType.startsWith("delete")
+        && fullDelete
+      );
       if (nativeTextEdit) return;
       let insertion: InlineMediaSegment[] | null = null;
       if (["insertText", "insertReplacementText"].includes(input.inputType)) {
