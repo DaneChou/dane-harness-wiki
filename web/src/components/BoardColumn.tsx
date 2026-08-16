@@ -58,7 +58,7 @@ export function StatusIcon({ status }: { status: TaskStatus }) {
   return <TaskboardIcon name={STATUS_ICONS[status]} />;
 }
 
-function ColumnStatusIcon({ status }: { status: TaskStatus }) {
+export function ColumnStatusIcon({ status }: { status: TaskStatus }) {
   return <TaskboardIcon name={COLUMN_STATUS_ICONS[status]} />;
 }
 
