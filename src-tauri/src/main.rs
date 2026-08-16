@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use base64::Engine;
 #[cfg(target_os = "macos")]
 use dispatch2::{run_on_main, MainThreadBound};
+use futures_util::StreamExt;
+use minisign_verify::{PublicKey, Signature};
 #[cfg(target_os = "macos")]
 use objc2::{
     define_class, msg_send,
@@ -15,6 +18,7 @@ use objc2_app_kit::{
 };
 #[cfg(target_os = "macos")]
 use objc2_foundation::{NSObject, NSSize, NSString};
+use reqwest::header::{HeaderValue, ACCEPT};
 use serde::{Deserialize, Serialize};
 #[cfg(target_os = "macos")]
 use std::cell::RefCell;
@@ -102,7 +106,7 @@ struct LauncherState {
 #[cfg(target_os = "macos")]
 struct UpdateDialogTargetIvars {
     response: RefCell<Option<std::sync::mpsc::Sender<bool>>>,
-    cancel: RefCell<Option<tauri::async_runtime::Sender<()>>>,
+    cancel: RefCell<Option<(tauri::async_runtime::Sender<()>, Arc<AtomicBool>)>>,
 }
 
 #[cfg(target_os = "macos")]
@@ -128,7 +132,8 @@ define_class!(
 
         #[unsafe(method(cancelUpdate:))]
         fn cancel_update(&self, _sender: &AnyObject) {
-            if let Some(cancel) = self.ivars().cancel.borrow_mut().take() {
+            if let Some((cancel, cancel_requested)) = self.ivars().cancel.borrow_mut().take() {
+                cancel_requested.store(true, Ordering::SeqCst);
                 let _ = cancel.try_send(());
             }
         }
@@ -151,8 +156,12 @@ impl UpdateDialogTarget {
         }
     }
 
-    fn set_cancel(&self, cancel: tauri::async_runtime::Sender<()>) {
-        *self.ivars().cancel.borrow_mut() = Some(cancel);
+    fn set_cancel(
+        &self,
+        cancel: tauri::async_runtime::Sender<()>,
+        cancel_requested: Arc<AtomicBool>,
+    ) {
+        *self.ivars().cancel.borrow_mut() = Some((cancel, cancel_requested));
     }
 
     fn clear_cancel(&self) {
@@ -226,12 +235,17 @@ impl UpdateDialog {
         }
     }
 
-    fn show_progress(&self, message: &str, cancel: tauri::async_runtime::Sender<()>) {
+    fn show_progress(
+        &self,
+        message: &str,
+        cancel: tauri::async_runtime::Sender<()>,
+        cancel_requested: Arc<AtomicBool>,
+    ) {
         let native = Arc::clone(&self.native);
         let message = message.to_owned();
         run_on_main(move |mtm| {
             let native = native.get(mtm);
-            native.target.set_cancel(cancel);
+            native.target.set_cancel(cancel, cancel_requested);
             native
                 .alert
                 .setInformativeText(&NSString::from_str(&message));
@@ -296,7 +310,13 @@ impl UpdateDialog {
         None
     }
 
-    fn show_progress(&self, _message: &str, _cancel: tauri::async_runtime::Sender<()>) {}
+    fn show_progress(
+        &self,
+        _message: &str,
+        _cancel: tauri::async_runtime::Sender<()>,
+        _cancel_requested: Arc<AtomicBool>,
+    ) {
+    }
 
     fn set_progress(&self, _message: &str, _progress: Option<u64>, _cancellable: bool) {}
 
@@ -1142,6 +1162,96 @@ async fn check_for_startup_update(
     Ok(update)
 }
 
+async fn download_update<C: FnMut(usize, Option<u64>), D: FnOnce()>(
+    app: &AppHandle,
+    update: &Update,
+    cancel_requested: &AtomicBool,
+    mut on_chunk: C,
+    on_download_finish: D,
+) -> Result<Option<Vec<u8>>, String> {
+    let pubkey = app
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|value| value.get("pubkey"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("Updater public key is unavailable")?;
+    let mut headers = update.headers.clone();
+    if !headers.contains_key(ACCEPT) {
+        headers.insert(ACCEPT, HeaderValue::from_static("application/octet-stream"));
+    }
+    let mut request = reqwest::Client::builder().user_agent("tauri-plugin-updater/2.10.1");
+    if let Some(timeout) = update.timeout {
+        request = request.timeout(timeout);
+    }
+    if update.no_proxy {
+        request = request.no_proxy();
+    } else if let Some(proxy) = &update.proxy {
+        request =
+            request.proxy(reqwest::Proxy::all(proxy.as_str()).map_err(|error| error.to_string())?);
+    }
+    let response = request
+        .build()
+        .map_err(|error| error.to_string())?
+        .get(update.download_url.clone())
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Download request failed with status: {}",
+            response.status()
+        ));
+    }
+    let content_length = response
+        .headers()
+        .get("Content-Length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok());
+    let mut buffer = Vec::new();
+    let mut stream = response.bytes_stream();
+    loop {
+        if cancel_requested.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        let Some(chunk) = stream.next().await else {
+            break;
+        };
+        let chunk = chunk.map_err(|error| error.to_string())?;
+        if cancel_requested.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        on_chunk(chunk.len(), content_length);
+        if cancel_requested.load(Ordering::SeqCst) {
+            return Ok(None);
+        }
+        buffer.extend_from_slice(&chunk);
+    }
+    if cancel_requested.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
+    on_download_finish();
+    if cancel_requested.load(Ordering::SeqCst) {
+        return Ok(None);
+    }
+    let pubkey = base64::engine::general_purpose::STANDARD
+        .decode(pubkey)
+        .map_err(|error| error.to_string())?;
+    let pubkey = std::str::from_utf8(&pubkey).map_err(|error| error.to_string())?;
+    let pubkey = PublicKey::decode(pubkey).map_err(|error| error.to_string())?;
+    let signature = base64::engine::general_purpose::STANDARD
+        .decode(&update.signature)
+        .map_err(|error| error.to_string())?;
+    let signature = std::str::from_utf8(&signature).map_err(|error| error.to_string())?;
+    let signature = Signature::decode(signature).map_err(|error| error.to_string())?;
+    pubkey
+        .verify(&buffer, &signature, true)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(buffer))
+}
+
 async fn install_update(
     app: &AppHandle,
     state: &Arc<LauncherState>,
@@ -1155,7 +1265,12 @@ async fn install_update(
         snapshot.update_available = false;
     });
     let (cancel, mut cancel_receiver) = tauri::async_runtime::channel(1);
-    update_dialog.show_progress(&snapshot.update_message, cancel);
+    let cancel_requested = Arc::new(AtomicBool::new(false));
+    update_dialog.show_progress(
+        &snapshot.update_message,
+        cancel,
+        Arc::clone(&cancel_requested),
+    );
     let progress_app = app.clone();
     let progress_state = Arc::clone(state);
     let progress_version = update_version.clone();
@@ -1165,7 +1280,10 @@ async fn install_update(
     let finish_dialog = update_dialog.clone();
     let mut downloaded = 0_u64;
     let download_result = {
-        let download = update.download(
+        let download = download_update(
+            app,
+            &update,
+            &cancel_requested,
             move |chunk_length, content_length| {
                 downloaded = downloaded.saturating_add(chunk_length as u64);
                 let progress = content_length.filter(|total| *total > 0).map(|total| {
@@ -1193,15 +1311,19 @@ async fn install_update(
         );
         let mut download = std::pin::pin!(download);
         poll_fn(|cx| {
-            if let Poll::Ready(Some(())) = cancel_receiver.poll_recv(cx) {
-                return Poll::Ready(None);
+            if cancel_requested.load(Ordering::SeqCst)
+                || matches!(cancel_receiver.poll_recv(cx), Poll::Ready(Some(())))
+            {
+                return Poll::Ready(Ok(None));
             }
             match download.as_mut().poll(cx) {
                 Poll::Ready(result) => {
-                    if let Poll::Ready(Some(())) = cancel_receiver.poll_recv(cx) {
-                        Poll::Ready(None)
+                    if cancel_requested.load(Ordering::SeqCst)
+                        || matches!(cancel_receiver.poll_recv(cx), Poll::Ready(Some(())))
+                    {
+                        Poll::Ready(Ok(None))
                     } else {
-                        Poll::Ready(Some(result))
+                        Poll::Ready(result)
                     }
                 }
                 Poll::Pending => Poll::Pending,
@@ -1210,7 +1332,7 @@ async fn install_update(
         .await
     };
     let bytes = match download_result {
-        None => {
+        Ok(None) => {
             append_log(
                 state,
                 &format!("Update {update_version} download cancelled by user"),
@@ -1222,15 +1344,15 @@ async fn install_update(
             });
             return Ok(());
         }
-        Some(Ok(bytes)) => bytes,
-        Some(Err(error)) => {
+        Ok(Some(bytes)) => bytes,
+        Err(error) => {
             append_log(state, &format!("Update download failed: {error}"));
             state.update_in_progress.store(false, Ordering::SeqCst);
             update_snapshot(app, state, |snapshot| {
                 snapshot.update_message = format!("更新下载或签名验证失败：{error}");
                 snapshot.update_available = true;
             });
-            return Err(error.to_string());
+            return Err(error);
         }
     };
 
