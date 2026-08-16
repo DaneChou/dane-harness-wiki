@@ -58,7 +58,7 @@ Make the smallest root-cause change. Do not add unrelated refactors, abstraction
 ## 5. Implement, verify, and report
 
 - Keep the issue `in_progress` during implementation.
-- Verify the direct user path. For UI work, use the real browser/App surface and provide visual evidence for user confirmation.
+- Verify the direct user path. For changes on a UI surface, use the real browser/App surface. Capture visual evidence when the result has visual impact; this evidence supports review and does not by itself require a separate user UI confirmation.
 - Report changed files, commit, exact head SHA, direct verification, PR, CI state, and remaining limitations in the issue.
 - Show ongoing status in the Taskboard opened through the injected Codex App.
 - Execution conversations do not merge, release, mark `done`, or claim user acceptance.
@@ -70,15 +70,20 @@ Make the smallest root-cause change. Do not add unrelated refactors, abstraction
 - Wait for the complete Pro answer. Do not use an instant-answer result. Check at approximately five-minute intervals when necessary; a complete review can take more than 30 minutes.
 - Simple mechanical changes, documentation, README updates, version-only changes, and already-approved code followed only by trivial edits can skip Pro review.
 - Fix actionable blockers in the same PR. Repeat Pro review only when the new implementation complexity warrants it.
-- For UI work, complete the full function and its direct verification first. Run any complexity-based Pro review before asking the user to confirm the final visual style.
+- Decide the UI confirmation gate from the actual visual impact and risk. Do not trigger it mechanically because code is in a UI component or changes a UI file.
+- Logic-only changes on a UI surface do not need separate user UI confirmation when they do not cause a meaningful visual change. This includes interaction logic, data behavior, toggle behavior, popover close conditions, and copy-and-paste behavior.
+- Small, low-risk, and visually unambiguous changes can skip user UI confirmation after the coordinator checks the real path and visual evidence. Examples include a local font-size, spacing, alignment, or color adjustment.
+- Require user UI confirmation before merge when the change adds UI, meaningfully changes layout, information hierarchy, or the presentation of a core interaction, has multiple reasonable visual choices, or the user explicitly asks to confirm the style.
+- For work that requires user UI confirmation, complete the full function and its direct verification first. Run any complexity-based Pro review before asking the user to confirm the final visual style.
 - After Pro approval, visual-only adjustments made for the user's final UI confirmation do not require another Pro review. The coordinator still checks that the delta is limited to the requested UI and reruns the relevant direct verification.
 - Close temporary review browser tabs after review finishes.
 
 ## 7. Acceptance and issue status
 
 - Reviewer approval means ready for user inspection, not user acceptance.
-- For UI work, put the complete reviewed function into the Taskboard-launched Codex App and ask the user to confirm the final visual style only after implementation and any required Pro review are complete.
-- Do not merge UI work until the user confirms its style. After visual-only feedback is applied and directly verified, the change can proceed without repeating Pro review.
+- When work meets the UI confirmation gate, put the complete reviewed function into the Taskboard-launched Codex App and ask the user to confirm the final visual style only after implementation and any required Pro review are complete.
+- Do not merge work that meets the UI confirmation gate until the user confirms its style. After visual-only feedback is applied and directly verified, the change can proceed without repeating Pro review.
+- UI-surface work that does not meet the confirmation gate can proceed after the coordinator verifies the real path, visual impact, scope, and required review without a separate user UI pause.
 - After implementation and required review pass, move the issue to `in_review`.
 - Never move an issue to `done` unless the user explicitly accepts it or asks for completion.
 - If the user explicitly authorizes finishing and releasing the whole batch without another pause, that instruction authorizes the remaining review, merge, and release steps, but still does not authorize marking issues `done`.
