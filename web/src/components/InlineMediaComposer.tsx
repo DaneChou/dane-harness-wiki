@@ -475,6 +475,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const pendingMentionUpdate = useRef(false);
     const pendingAtomHostRevision = useRef(0);
     const composing = useRef(false);
+    const nativeInputPending = useRef(false);
     const [atomHostRevision, refreshAtomHosts] = useState(0);
     const [mention, setMention] = useState<IssueMention | null>(null);
     const [activeMentionIndex, setActiveMentionIndex] = useState(0);
@@ -495,6 +496,15 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     useLayoutEffect(() => {
       const root = rootRef.current;
       if (!root) return;
+      if (nativeInputPending.current) {
+        nativeInputPending.current = false;
+        pendingSelection.current = null;
+        if (pendingMentionUpdate.current) {
+          pendingMentionUpdate.current = false;
+          updateMentionFromSelection();
+        }
+        return;
+      }
       const fragment = document.createDocumentFragment();
       const nextAtomHosts = new Map<string, HTMLElement>();
 
@@ -881,19 +891,37 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
 
     function handleBeforeInput(input: InputEvent) {
       if (disabled || composing.current) return;
-      const range = currentLogicalRange();
-      if (!range) return;
-      let { start, end } = range;
+      const targetRange = input.getTargetRanges()[0];
+      if (!targetRange) return;
+      const start = logicalOffsetForPoint(
+        targetRange.startContainer,
+        targetRange.startOffset,
+        "start",
+      );
+      const end = logicalOffsetForPoint(
+        targetRange.endContainer,
+        targetRange.endOffset,
+        "end",
+      );
+      if (start === null || end === null) return;
+      const startElement = segmentElement(targetRange.startContainer);
+      const endElement = segmentElement(targetRange.endContainer);
+      const targetSegment = startElement?.dataset.inlineMediaSegment
+        ? segments.find((segment) => segment.id === startElement.dataset.inlineMediaSegment)
+        : null;
+      const nativeTextEdit = targetSegment?.type === "text"
+        && startElement === endElement
+        && (
+          ["insertText", "insertReplacementText"].includes(input.inputType)
+          || input.inputType.startsWith("delete")
+        );
+      if (nativeTextEdit) return;
       let insertion: InlineMediaSegment[] | null = null;
       if (["insertText", "insertReplacementText"].includes(input.inputType)) {
         insertion = [textSegment(input.data ?? "")];
       } else if (["insertLineBreak", "insertParagraph"].includes(input.inputType)) {
         insertion = [textSegment("\n")];
       } else if (input.inputType.startsWith("delete")) {
-        if (start === end && input.inputType.includes("Backward")) start = Math.max(0, start - 1);
-        if (start === end && input.inputType.includes("Forward")) {
-          end = Math.min(segmentsLength(segments), end + 1);
-        }
         insertion = [];
       }
       if (insertion === null) return;
@@ -959,8 +987,8 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           next.push(textSegment(child.textContent));
         }
       }
-      const range = currentLogicalRange();
-      if (range) pendingSelection.current = range.end;
+      nativeInputPending.current = true;
+      pendingSelection.current = null;
       pendingMentionUpdate.current = true;
       onChange(normalizeSegments(next));
     }
@@ -1029,7 +1057,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
               serializeInlineMediaRange(segments, range.start, range.end),
             );
           }}
-          onKeyUp={updateMentionFromSelection}
+          onKeyUp={(event) => {
+            if (event.key !== "Escape") updateMentionFromSelection();
+          }}
           onPointerUp={() => {
             syncAtomSelection();
             updateMentionFromSelection();
