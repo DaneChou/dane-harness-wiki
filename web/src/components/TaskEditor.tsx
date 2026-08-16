@@ -91,6 +91,7 @@ export interface NewTaskEditorDraft {
 interface TaskEditorProps {
   task: Task | null;
   tasks: Task[];
+  referenceTasks: Task[];
   initialStatus: TaskStatus;
   initialDraft: NewTaskEditorDraft | null;
   labels: string[];
@@ -146,6 +147,7 @@ function contextLabel(
 export function TaskEditor({
   task,
   tasks,
+  referenceTasks,
   initialStatus,
   initialDraft,
   labels: availableLabels,
@@ -517,6 +519,7 @@ export function TaskEditor({
               className="composer-description inline-media-description"
               segments={descriptionSegments}
               mentionTasks={tasks}
+              referenceTasks={referenceTasks}
               placeholder={text("添加描述…", "Add description…")}
               ariaLabel={text("描述", "Description")}
               disabled={saving}
@@ -640,9 +643,16 @@ export function TaskEditor({
 
             {!task && selectedRelationChips.map(({ type, issue }) => {
               const identifier = issue.externalKey ?? issue.identifier;
+              const relationLabel = type === "subIssue"
+                ? text("子", "Sub")
+                : type === "parent"
+                  ? text("父", "Parent")
+                  : text("关联", "Related");
               return (
                 <span className="property-control property-relation-chip" key={`${type}:${issue.id}`}>
+                  <span className="property-relation-kind">{relationLabel}</span>
                   <span>{identifier}</span>
+                  <span className="property-relation-tooltip" role="tooltip">{issue.title}</span>
                   <button
                     className="property-relation-remove"
                     type="button"
