@@ -444,7 +444,6 @@ export function TaskDetail({
   >(null);
   const [savingProperty, setSavingProperty] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [attachmentsLoading, setAttachmentsLoading] = useState(true);
   const [attachmentsError, setAttachmentsError] = useState<TaskDetailError | null>(null);
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
   const [pendingAttachmentDelete, setPendingAttachmentDelete] = useState<Attachment | null>(null);
@@ -539,17 +538,14 @@ export function TaskDetail({
 
   useEffect(() => {
     const controller = new AbortController();
-    setAttachmentsLoading(true);
     setAttachmentsError(null);
     void listAttachments(task.id, controller.signal).then(
       (nextAttachments) => {
         setAttachments(nextAttachments.filter((attachment) => !attachment.commentId));
-        setAttachmentsLoading(false);
       },
       (error) => {
         if ((error as Error).name === "AbortError") return;
         setAttachmentsError(messageFor(error));
-        setAttachmentsLoading(false);
       },
     );
     return () => controller.abort();
@@ -1031,26 +1027,13 @@ export function TaskDetail({
                   </div>
                 )}
               </div>
-            </article>
-
-            <IssueSubIssues
-              task={currentTask}
-              tasks={tasks}
-              onOpenTask={onOpenTask}
-              onAddRelation={(anchor, type, relatedTaskId) => applyRelationMutation(
-                () => onAddRelation(anchor, type, relatedTaskId),
-              )}
-              onRemoveRelation={(anchor, type, relatedTaskId) => applyRelationMutation(
-                () => onRemoveRelation(anchor, type, relatedTaskId),
-              )}
-            />
-
-            <section className="issue-attachments" aria-labelledby="attachments-heading">
-              <header className="attachments-heading">
-                <div>
-                  <h2 id="attachments-heading">{text("附件", "Attachments")}</h2>
-                  <span>{visibleTaskAttachments.length}</span>
-                </div>
+              <div className="attachments-heading issue-attachment-controls">
+                {visibleTaskAttachments.length > 0 && (
+                  <div>
+                    <h2 id="attachments-heading">{text("附件", "Attachments")}</h2>
+                    <span>{visibleTaskAttachments.length}</span>
+                  </div>
+                )}
                 <button
                   className="attachment-add-button"
                   type="button"
@@ -1071,56 +1054,50 @@ export function TaskDetail({
                     if (event.currentTarget.files) void uploadFiles(event.currentTarget.files);
                   }}
                 />
-              </header>
-
-              {attachmentsLoading ? (
-                <div className="attachments-loading" aria-label={text("正在加载附件", "Loading attachments")} aria-busy="true"><i /><i /></div>
-              ) : visibleTaskAttachments.length > 0 ? (
-                <ul className="attachment-list">
-                  {visibleTaskAttachments.map((attachment) => (
-                    <li key={attachment.id}>
-                      <a
-                        className="attachment-link"
-                        href={attachmentDownloadUrl(attachment)}
-                        download={attachment.filename}
-                        title={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
-                        onClick={(event) => handleAttachmentDownload(event, attachment)}
-                      >
-                        <span className="attachment-file-icon" aria-hidden="true">
-                          <LinearIcon name="file" />
-                        </span>
-                        <span className="attachment-copy">
-                          <strong>{attachment.filename}</strong>
-                          <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
-                        </span>
-                      </a>
-                      <div className="attachment-actions">
+              </div>
+              {visibleTaskAttachments.length > 0 && (
+                <section className="issue-attachments" aria-labelledby="attachments-heading">
+                  <ul className="attachment-list">
+                    {visibleTaskAttachments.map((attachment) => (
+                      <li key={attachment.id}>
                         <a
+                          className="attachment-link"
                           href={attachmentDownloadUrl(attachment)}
                           download={attachment.filename}
-                          aria-label={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
-                          title={text("下载附件", "Download attachment")}
+                          title={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
                           onClick={(event) => handleAttachmentDownload(event, attachment)}
                         >
-                          <LinearIcon name="openExternal" />
+                          <span className="attachment-file-icon" aria-hidden="true">
+                            <LinearIcon name="file" />
+                          </span>
+                          <span className="attachment-copy">
+                            <strong>{attachment.filename}</strong>
+                            <span>{fileSize(attachment.size)} · {relativeTime(attachment.createdAt, locale)}</span>
+                          </span>
                         </a>
-                        <button
-                          type="button"
-                          aria-label={text(`删除 ${attachment.filename}`, `Delete ${attachment.filename}`)}
-                          title={text("删除附件", "Delete attachment")}
-                          onClick={() => setPendingAttachmentDelete(attachment)}
-                        >
-                          <LinearIcon name="trash" />
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="attachments-empty">{text(
-                  "添加图片、文档或其他文件，单个文件不超过 25 MB。",
-                  "Add images, documents, or other files up to 25 MB each.",
-                )}</p>
+                        <div className="attachment-actions">
+                          <a
+                            href={attachmentDownloadUrl(attachment)}
+                            download={attachment.filename}
+                            aria-label={text(`下载 ${attachment.filename}`, `Download ${attachment.filename}`)}
+                            title={text("下载附件", "Download attachment")}
+                            onClick={(event) => handleAttachmentDownload(event, attachment)}
+                          >
+                            <LinearIcon name="openExternal" />
+                          </a>
+                          <button
+                            type="button"
+                            aria-label={text(`删除 ${attachment.filename}`, `Delete ${attachment.filename}`)}
+                            title={text("删除附件", "Delete attachment")}
+                            onClick={() => setPendingAttachmentDelete(attachment)}
+                          >
+                            <LinearIcon name="trash" />
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
               )}
               {attachmentsError && (
                 <div className="attachments-error" role="alert">
@@ -1129,7 +1106,19 @@ export function TaskDetail({
                     : text(attachmentsError[0], attachmentsError[1])}
                 </div>
               )}
-            </section>
+            </article>
+
+            <IssueSubIssues
+              task={currentTask}
+              tasks={tasks}
+              onOpenTask={onOpenTask}
+              onAddRelation={(anchor, type, relatedTaskId) => applyRelationMutation(
+                () => onAddRelation(anchor, type, relatedTaskId),
+              )}
+              onRemoveRelation={(anchor, type, relatedTaskId) => applyRelationMutation(
+                () => onRemoveRelation(anchor, type, relatedTaskId),
+              )}
+            />
 
             <section className="activity-section" aria-labelledby="activity-heading">
               <header className="activity-heading">

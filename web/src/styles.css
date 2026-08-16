@@ -2956,8 +2956,8 @@ kbd {
   color: var(--text-tertiary);
 }
 
-.issue-attachments {
-  padding: 0 14px 30px;
+.issue-editor .issue-attachments {
+  padding: 0;
 }
 
 .issue-sub-issues {
@@ -3262,6 +3262,10 @@ kbd {
   min-height: 28px;
   gap: 12px;
   margin-bottom: 7px;
+}
+
+.issue-attachment-controls .attachment-add-button {
+  margin-left: auto;
 }
 
 .attachments-heading > div {
