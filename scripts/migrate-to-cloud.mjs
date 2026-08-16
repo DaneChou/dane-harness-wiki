@@ -253,6 +253,24 @@ async function readSnapshot(databasePath) {
   }
 }
 
+function fillMissingAttachmentKinds(tables) {
+  const taskDescriptions = new Map(
+    tables.tasks.map((task) => [task.id, task.description]),
+  );
+  const commentBodies = new Map(
+    tables.comments.map((comment) => [comment.id, comment.body]),
+  );
+  tables.attachments = tables.attachments.map((attachment) => {
+    if (attachment.kind != null) return attachment;
+    const body = attachment.comment_id == null
+      ? taskDescriptions.get(attachment.task_id)
+      : commentBodies.get(attachment.comment_id);
+    const inline = attachment.content_type.toLowerCase().startsWith("image/")
+      && body.includes(`api/attachments/${attachment.id}/content`);
+    return { ...attachment, kind: inline ? "inline" : "attachment" };
+  });
+}
+
 function assertCountsMatch(expected, actual) {
   const expectedProjects = Object.keys(expected).sort();
   const actualProjects = Object.keys(actual ?? {}).sort();
@@ -343,6 +361,7 @@ export async function createCloudMigrationBundle({
   attachmentsDirectory,
 }) {
   const tables = await readSnapshot(databasePath);
+  fillMissingAttachmentKinds(tables);
   tables.projects = projectRowsWithLabels(tables).map((project) => ({
     ...project,
     workspace_path: null,
@@ -699,6 +718,7 @@ export async function readCloudMigrationBundle(inputDirectory) {
     }
     tables[table] = rows;
   }
+  fillMissingAttachmentKinds(tables);
 
   const attachments = [];
   for (const entry of manifest.attachments ?? []) {
