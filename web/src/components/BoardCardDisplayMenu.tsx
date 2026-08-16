@@ -38,9 +38,6 @@ export function BoardCardDisplayMenu({
         setOpen(false);
       }
     }
-    function closeFromViewportChange() {
-      setOpen(false);
-    }
     function closeFromEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       setOpen(false);
@@ -48,13 +45,9 @@ export function BoardCardDisplayMenu({
     }
     document.addEventListener("pointerdown", closeFromOutside);
     document.addEventListener("keydown", closeFromEscape);
-    window.addEventListener("resize", closeFromViewportChange);
-    window.addEventListener("scroll", closeFromViewportChange, true);
     return () => {
       document.removeEventListener("pointerdown", closeFromOutside);
       document.removeEventListener("keydown", closeFromEscape);
-      window.removeEventListener("resize", closeFromViewportChange);
-      window.removeEventListener("scroll", closeFromViewportChange, true);
     };
   }, [open]);
 
