@@ -186,8 +186,9 @@ test("comments stage, upload, render and delete their own attachments", () => {
   assert.match(apiSource, /export async function uploadCommentAttachment/);
   assert.match(apiSource, /\/api\/comments\/\$\{encodeURIComponent\(commentId\)\}\/attachments/);
   assert.match(detailSource, /pendingCommentFiles/);
-  assert.match(detailSource, /uploadCommentAttachment\(comment\.id, file\)/);
-  assert.match(detailSource, /comment\.attachments[\s\S]*?\.filter\([\s\S]*?\.map\(\(attachment\) =>/);
+  assert.match(detailSource, /uploadCommentAttachment\(comment\.id, file, "attachment"\)/);
+  assert.match(detailSource, /comment\.attachments\.some\(\(attachment\) => attachment\.kind === "attachment"\)/);
+  assert.match(detailSource, /comment\.attachments[\s\S]*?\.filter\(\(attachment\) => attachment\.kind === "attachment"\)[\s\S]*?\.map\(\(attachment\) =>/);
   assert.match(detailSource, /setPendingAttachmentDelete\(attachment\)/);
 });
 
