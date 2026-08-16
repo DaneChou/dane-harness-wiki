@@ -81,6 +81,7 @@ type TaskDetailError = string | readonly [string, string];
 interface TaskDetailProps {
   task: Task;
   tasks: Task[];
+  referenceTasks: Task[];
   currentUser: ActorIdentity;
   availableLabels: string[];
   developmentScan: DevelopmentScan;
@@ -312,7 +313,10 @@ function ActivityChangeIcon({ field, before, after }: {
   return <LinearIcon name="write" />;
 }
 
-function referencedTask(href: string, tasks: Task[]): Task | null {
+function referencedTask(
+  href: string,
+  referenceTasks: Task[],
+): { identifier: string; task: Task | null } | null {
   try {
     const base = new URL(document.baseURI);
     base.search = "";
@@ -322,7 +326,10 @@ function referencedTask(href: string, tasks: Task[]): Task | null {
     const identifier = readIssueIdentifier(url.search);
     const projectId = url.searchParams.get("project");
     if (!identifier || !projectId) return null;
-    return tasks.find((task) => task.projectId === projectId && task.identifier === identifier) ?? null;
+    const task = referenceTasks.find((candidate) => (
+      candidate.projectId === projectId && candidate.identifier === identifier
+    )) ?? null;
+    return { identifier: task?.externalKey ?? identifier, task };
   } catch {
     return null;
   }
@@ -330,19 +337,27 @@ function referencedTask(href: string, tasks: Task[]): Task | null {
 
 function DescriptionDocument({
   value,
-  tasks,
+  referenceTasks,
   onOpenTask,
 }: {
   value: string;
-  tasks: Task[];
+  referenceTasks: Task[];
   onOpenTask: (task: TaskRelationSummary) => void;
 }) {
   return (
     <MarkdownDocument
       value={value}
       renderLink={(href) => {
-        const task = href ? referencedTask(href, tasks) : null;
-        if (!task) return null;
+        const reference = href ? referencedTask(href, referenceTasks) : null;
+        if (!reference) return null;
+        const { task } = reference;
+        if (!task) {
+          return (
+            <span className="issue-reference-inline">
+              <span className="issue-reference-id">{reference.identifier}</span>
+            </span>
+          );
+        }
         return (
           <span className={`issue-reference-inline issue-reference-status-${task.status}`}>
             <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
@@ -354,9 +369,9 @@ function DescriptionDocument({
         );
       }}
       onLinkClick={(event, href) => {
-        const task = href ? referencedTask(href, tasks) : null;
+        const reference = href ? referencedTask(href, referenceTasks) : null;
         if (
-          !task
+          !reference
           || event.button !== 0
           || event.metaKey
           || event.ctrlKey
@@ -364,7 +379,7 @@ function DescriptionDocument({
           || event.altKey
         ) return;
         event.preventDefault();
-        onOpenTask(task);
+        if (reference.task) onOpenTask(reference.task);
       }}
     />
   );
@@ -396,6 +411,7 @@ function ConversationLink({
 export function TaskDetail({
   task,
   tasks,
+  referenceTasks,
   currentUser,
   availableLabels,
   developmentScan,
@@ -420,7 +436,7 @@ export function TaskDetail({
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [descriptionSegments, setDescriptionSegments] = useState<InlineMediaSegment[]>(
-    () => createInlineMediaSegments(task.description, tasks),
+    () => createInlineMediaSegments(task.description, referenceTasks),
   );
   const [editingDescription, setEditingDescription] = useState(false);
   const [propertyMenu, setPropertyMenu] = useState<
@@ -440,7 +456,7 @@ export function TaskDetail({
   const [commentSegments, setCommentSegments] = useState<InlineMediaSegment[]>(
     () => createInlineMediaSegments(
       taskboardStorage.getItem(`taskboard.comment-draft.${task.id}`) ?? "",
-      tasks,
+      referenceTasks,
     ),
   );
   const [pendingCommentFiles, setPendingCommentFiles] = useState<File[]>([]);
@@ -474,7 +490,7 @@ export function TaskDetail({
     if (document.activeElement !== titleRef.current) setTitle(task.title);
     if (taskChanged || !editingDescription) {
       setDescription(task.description);
-      setDescriptionSegments(createInlineMediaSegments(task.description, tasks));
+      setDescriptionSegments(createInlineMediaSegments(task.description, referenceTasks));
     }
     if (taskChanged) {
       setEditingDescription(false);
@@ -677,7 +693,7 @@ export function TaskDetail({
       if (!saved) return;
       setCurrentTask(saved);
       setDescription(saved.description);
-      setDescriptionSegments(createInlineMediaSegments(saved.description, tasks));
+      setDescriptionSegments(createInlineMediaSegments(saved.description, referenceTasks));
       setAttachments((current) => [
         ...current,
         ...uploaded.filter((attachment) => !current.some((item) => item.id === attachment.id)),
@@ -752,7 +768,7 @@ export function TaskDetail({
     });
   }
 
-  function handleSubmitShortcut(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function handleSubmitShortcut(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       void submitComment();
@@ -763,7 +779,7 @@ export function TaskDetail({
     if (savingCommentId !== null) return;
     editingUploadedAttachmentsRef.current.clear();
     setEditingId(comment.id);
-    setEditingSegments(createInlineMediaSegments(comment.body, tasks));
+    setEditingSegments(createInlineMediaSegments(comment.body, referenceTasks));
     setActiveMenuId(null);
   }
 
@@ -954,6 +970,7 @@ export function TaskDetail({
                       ref={descriptionComposerRef}
                       segments={descriptionSegments}
                       mentionTasks={tasks}
+                      referenceTasks={referenceTasks}
                       placeholder={text("添加描述…", "Add description…")}
                       ariaLabel={text("议题描述", "Issue description")}
                       disabled={savingProperty === "description"}
@@ -962,7 +979,11 @@ export function TaskDetail({
                       onKeyDown={(event) => {
                         if (event.key === "Escape") {
                           event.preventDefault();
-                          setDescriptionSegments(createInlineMediaSegments(currentTask.description, tasks));
+                          event.stopPropagation();
+                          setDescriptionSegments(createInlineMediaSegments(
+                            currentTask.description,
+                            referenceTasks,
+                          ));
                           setEditingDescription(false);
                         }
                       }}
@@ -976,19 +997,23 @@ export function TaskDetail({
                     aria-label={text("编辑议题描述", "Edit issue description")}
                     onClick={() => {
                       if (window.getSelection()?.isCollapsed === false) return;
-                      setDescriptionSegments(createInlineMediaSegments(description, tasks));
+                      setDescriptionSegments(createInlineMediaSegments(description, referenceTasks));
                       setEditingDescription(true);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setDescriptionSegments(createInlineMediaSegments(description, tasks));
+                        setDescriptionSegments(createInlineMediaSegments(description, referenceTasks));
                         setEditingDescription(true);
                       }
                     }}
                   >
                     {description
-                      ? <DescriptionDocument value={description} tasks={tasks} onOpenTask={onOpenTask} />
+                      ? <DescriptionDocument
+                          value={description}
+                          referenceTasks={referenceTasks}
+                          onOpenTask={onOpenTask}
+                        />
                       : text("添加描述…", "Add description…")}
                   </div>
                 )}
@@ -1273,13 +1298,19 @@ export function TaskDetail({
                             className="comment-inline-media"
                             segments={editingSegments}
                             mentionTasks={tasks}
+                            referenceTasks={referenceTasks}
                             placeholder={text("编辑评论", "Edit comment")}
                             ariaLabel={text("编辑评论", "Edit comment")}
                             disabled={savingCommentId === comment.id}
                             onChange={setEditingSegments}
                             onError={setCommentsError}
                             onKeyDown={(event) => {
-                              if (event.key === "Escape") endCommentEdit();
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                endCommentEdit();
+                                return;
+                              }
                               if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
                                 event.preventDefault();
                                 void saveComment(comment);
@@ -1337,7 +1368,11 @@ export function TaskDetail({
                       ) : (
                         comment.body && (
                           <div className="comment-body">
-                            <DescriptionDocument value={comment.body} tasks={tasks} onOpenTask={onOpenTask} />
+                            <DescriptionDocument
+                              value={comment.body}
+                              referenceTasks={referenceTasks}
+                              onOpenTask={onOpenTask}
+                            />
                           </div>
                         )
                       )}
@@ -1412,6 +1447,7 @@ export function TaskDetail({
                   className="comment-inline-media"
                   segments={commentSegments}
                   mentionTasks={tasks}
+                  referenceTasks={referenceTasks}
                   placeholder={text("留下评论…", "Leave a comment…")}
                   ariaLabel={text("留下评论", "Leave a comment")}
                   onChange={setCommentSegments}

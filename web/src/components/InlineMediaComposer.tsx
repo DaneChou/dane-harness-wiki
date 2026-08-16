@@ -48,7 +48,8 @@ interface IssueReferenceSegment {
   id: string;
   type: "issue-reference";
   markdown: string;
-  taskId: string;
+  identifier: string;
+  taskId: string | null;
 }
 
 interface MarkdownAstNode {
@@ -79,13 +80,14 @@ export interface InlineMediaComposerHandle {
 interface InlineMediaComposerProps {
   segments: InlineMediaSegment[];
   mentionTasks?: readonly Task[];
+  referenceTasks: readonly Task[];
   placeholder: string;
   ariaLabel: string;
   disabled?: boolean;
   className?: string;
   onChange: (segments: InlineMediaSegment[]) => void;
   onError: (message: InlineMediaError | null) => void;
-  onKeyDown?: KeyboardEventHandler<HTMLTextAreaElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
 }
 
 interface IssueMention {
@@ -121,12 +123,18 @@ function imageSegment(file: File): InlineImageSegment {
 
 export function createInlineMediaSegments(
   text = "",
-  mentionTasks: readonly Task[] = EMPTY_MENTION_TASKS,
+  referenceTasks: readonly Task[] = EMPTY_MENTION_TASKS,
 ): InlineMediaSegment[] {
   const segments: InlineMediaSegment[] = [];
   const items: Array<
     | { type: "persisted-image"; start: number; end: number; alt: string; url: string }
-    | { type: "issue-reference"; start: number; end: number; taskId: string }
+    | {
+        type: "issue-reference";
+        start: number;
+        end: number;
+        identifier: string;
+        taskId: string | null;
+      }
   > = [];
   const root = inlineMediaMarkdownParser.parse(text);
   const getDefinition = definitions(root);
@@ -159,16 +167,17 @@ export function createInlineMediaSegments(
       const projectId = new URLSearchParams(node.url).get("project");
       const identifier = readIssueIdentifier(node.url);
       const task = projectId && identifier
-        ? mentionTasks.find((candidate) => (
+        ? referenceTasks.find((candidate) => (
             candidate.projectId === projectId && candidate.identifier === identifier
           ))
         : null;
-      if (task) {
+      if (projectId && identifier) {
         items.push({
           type: "issue-reference",
           start: node.position.start.offset,
           end: node.position.end.offset,
-          taskId: task.id,
+          identifier: task?.externalKey ?? identifier,
+          taskId: task?.id ?? null,
         });
       }
     }
@@ -193,6 +202,7 @@ export function createInlineMediaSegments(
         id: segmentId("issue"),
         type: "issue-reference",
         markdown: text.slice(item.start, item.end),
+        identifier: item.identifier,
         taskId: item.taskId,
       });
     }
@@ -337,33 +347,41 @@ function IssueReferenceChip({
   onRemove,
 }: {
   segment: IssueReferenceSegment;
-  task: Task;
+  task: Task | null;
   disabled: boolean;
   onRemove: () => void;
 }) {
   const { text } = useTaskboardI18n();
-  const displayIdentifier = task.externalKey ?? task.identifier;
+  const displayIdentifier = task?.externalKey ?? segment.identifier;
 
   return (
     <button
       type="button"
-      className={`issue-reference-inline inline-media-issue-reference issue-reference-status-${task.status}`}
+      className={`issue-reference-inline inline-media-issue-reference${task ? ` issue-reference-status-${task.status}` : ""}`}
       disabled={disabled}
-      aria-label={text(
-        `${displayIdentifier} ${task.title}，按退格键或删除键移除`,
-        `${displayIdentifier} ${task.title}, press Backspace or Delete to remove`,
-      )}
+      aria-label={task
+        ? text(
+            `${displayIdentifier} ${task.title}，按退格键或删除键移除`,
+            `${displayIdentifier} ${task.title}, press Backspace or Delete to remove`,
+          )
+        : text(
+            `${displayIdentifier}，按退格键或删除键移除`,
+            `${displayIdentifier}, press Backspace or Delete to remove`,
+          )}
       onKeyDown={(event) => {
+        if (event.defaultPrevented) return;
         if (event.key !== "Backspace" && event.key !== "Delete") return;
         event.preventDefault();
         onRemove();
       }}
     >
-      <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-        <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
-      </span>
+      {task && (
+        <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
+          <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
+        </span>
+      )}
       <span className="issue-reference-id">{displayIdentifier}</span>
-      <span className="issue-reference-title">{task.title}</span>
+      {task && <span className="issue-reference-title">{task.title}</span>}
     </button>
   );
 }
@@ -372,6 +390,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
   function InlineMediaComposer({
     segments,
     mentionTasks = EMPTY_MENTION_TASKS,
+    referenceTasks,
     placeholder,
     ariaLabel,
     disabled = false,
@@ -380,6 +399,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     onError,
     onKeyDown,
   }, ref) {
+    const rootRef = useRef<HTMLDivElement>(null);
     const textareas = useRef(new Map<string, HTMLTextAreaElement>());
     const pendingFocus = useRef<{ id: string; offset: number } | null>(null);
     const { text } = useTaskboardI18n();
@@ -418,6 +438,13 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     useEffect(() => {
       if (disabled || mentionTasks.length === 0) setMention(null);
     }, [disabled, mentionTasks.length]);
+
+    useEffect(() => {
+      if (!allSelected) return;
+      const exitAllSelection = () => setAllSelected(false);
+      document.addEventListener("pointerdown", exitAllSelection, true);
+      return () => document.removeEventListener("pointerdown", exitAllSelection, true);
+    }, [allSelected]);
 
     useImperativeHandle(ref, () => ({
       focus() {
@@ -530,6 +557,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         id: segmentId("issue"),
         type: "issue-reference",
         markdown: `[@${displayIdentifier}](?${route})`,
+        identifier: displayIdentifier,
         taskId: task.id,
       };
       const after = textSegment(`${insertSpace ? " " : ""}${suffix}`);
@@ -545,13 +573,62 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       segment: InlineTextSegment,
       index: number,
     ) {
+      if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
+      if (
+        event.key === "Backspace"
+        && event.currentTarget.selectionStart === 0
+        && event.currentTarget.selectionEnd === 0
+        && segments[index - 1]?.type === "issue-reference"
+      ) {
+        event.preventDefault();
+        removeIssueReference(segments[index - 1].id);
+        return;
+      }
+      if (
+        event.key === "Delete"
+        && event.currentTarget.selectionStart === segment.text.length
+        && event.currentTarget.selectionEnd === segment.text.length
+        && segments[index + 1]?.type === "issue-reference"
+      ) {
+        event.preventDefault();
+        removeIssueReference(segments[index + 1].id);
+        return;
+      }
+    }
+
+    function selectNearestTextSegment(target: EventTarget | null) {
+      const root = rootRef.current;
+      if (!root || !(target instanceof Element)) return;
+      let segmentElement = target;
+      while (segmentElement.parentElement && segmentElement.parentElement !== root) {
+        segmentElement = segmentElement.parentElement;
+      }
+      const childIndex = segmentElement.parentElement === root
+        ? Array.from(root.children).indexOf(segmentElement)
+        : 0;
+      const origin = Math.min(Math.max(childIndex, 0), segments.length - 1);
+      for (let distance = 0; distance < segments.length; distance += 1) {
+        const indexes = distance === 0 ? [origin] : [origin - distance, origin + distance];
+        for (const index of indexes) {
+          const candidate = segments[index];
+          if (candidate?.type !== "text") continue;
+          const textarea = textareas.current.get(candidate.id);
+          if (!textarea) continue;
+          textarea.focus();
+          textarea.setSelectionRange(0, candidate.text.length);
+          return;
+        }
+      }
+    }
+
+    function handleComposerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
       if (event.nativeEvent.isComposing || event.keyCode === 229) {
         onKeyDown?.(event);
         return;
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "a") {
         event.preventDefault();
-        event.currentTarget.setSelectionRange(0, segment.text.length);
+        selectNearestTextSegment(event.target);
         setAllSelected(true);
         setMention(null);
         return;
@@ -563,7 +640,16 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       }
       if (
         allSelected
-        && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)
+        && [
+          "ArrowUp",
+          "ArrowDown",
+          "ArrowLeft",
+          "ArrowRight",
+          "Home",
+          "End",
+          "PageUp",
+          "PageDown",
+        ].includes(event.key)
       ) {
         setAllSelected(false);
       }
@@ -585,26 +671,6 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       if (mention && event.key === "Escape") {
         event.preventDefault();
         setMention(null);
-        return;
-      }
-      if (
-        event.key === "Backspace"
-        && event.currentTarget.selectionStart === 0
-        && event.currentTarget.selectionEnd === 0
-        && segments[index - 1]?.type === "issue-reference"
-      ) {
-        event.preventDefault();
-        removeIssueReference(segments[index - 1].id);
-        return;
-      }
-      if (
-        event.key === "Delete"
-        && event.currentTarget.selectionStart === segment.text.length
-        && event.currentTarget.selectionEnd === segment.text.length
-        && segments[index + 1]?.type === "issue-reference"
-      ) {
-        event.preventDefault();
-        removeIssueReference(segments[index + 1].id);
         return;
       }
       onKeyDown?.(event);
@@ -653,7 +719,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       }
 
       const pastedText = event.clipboardData.getData("text/plain");
-      const insertion = createInlineMediaSegments(pastedText, mentionTasks);
+      const insertion = createInlineMediaSegments(pastedText, referenceTasks);
       if (!insertion.some((candidate) => candidate.type !== "text")) return;
       event.preventDefault();
 
@@ -698,15 +764,20 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
 
     return (
       <div
+        ref={rootRef}
         className={`inline-media-composer${hasIssueReferences ? " has-issue-references" : ""}${allSelected ? " is-all-selected" : ""} ${className}`.trim()}
         aria-label={ariaLabel}
+        onKeyDownCapture={handleComposerKeyDown}
         onCopy={(event) => {
           if (!allSelected) return;
           event.preventDefault();
           event.clipboardData.setData("text/plain", serializeInlineMedia(segments));
         }}
-        onPointerDown={() => setAllSelected(false)}
-        onFocusCapture={() => setAllSelected(false)}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setAllSelected(false);
+          }
+        }}
       >
         {segments.map((segment, index) => (
           segment.type === "text" ? (
@@ -754,7 +825,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             <IssueReferenceChip
               key={segment.id}
               segment={segment}
-              task={mentionTasks.find((task) => task.id === segment.taskId)!}
+              task={segment.taskId
+                ? referenceTasks.find((task) => task.id === segment.taskId) ?? null
+                : null}
               disabled={disabled}
               onRemove={() => removeIssueReference(segment.id)}
             />
