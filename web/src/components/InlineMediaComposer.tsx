@@ -10,6 +10,7 @@ import {
   type KeyboardEvent,
   type KeyboardEventHandler,
 } from "react";
+import { createPortal } from "react-dom";
 import { definitions } from "mdast-util-definitions";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
@@ -95,7 +96,8 @@ interface IssueMention {
   start: number;
   end: number;
   query: string;
-  anchor: HTMLTextAreaElement;
+  anchor: HTMLElement;
+  anchorRect: DOMRect;
 }
 
 let segmentSequence = 0;
@@ -275,10 +277,68 @@ function normalizeSegments(segments: InlineMediaSegment[]): InlineMediaSegment[]
   return normalized;
 }
 
-function resizeTextarea(element: HTMLTextAreaElement | null) {
-  if (!element) return;
-  element.style.height = "0px";
-  element.style.height = `${element.scrollHeight}px`;
+function segmentLength(segment: InlineMediaSegment): number {
+  return segment.type === "text" ? segment.text.length : 1;
+}
+
+function segmentsLength(segments: InlineMediaSegment[]): number {
+  return segments.reduce((length, segment) => length + segmentLength(segment), 0);
+}
+
+function serializeInlineMediaRange(
+  segments: InlineMediaSegment[],
+  start: number,
+  end: number,
+): string {
+  let offset = 0;
+  return segments.map((segment) => {
+    const length = segmentLength(segment);
+    const segmentStart = offset;
+    const segmentEnd = offset + length;
+    offset = segmentEnd;
+    if (end <= segmentStart || start >= segmentEnd) return "";
+    if (segment.type !== "text") return serializeInlineMedia([segment]);
+    return segment.text.slice(
+      Math.max(start - segmentStart, 0),
+      Math.min(end - segmentStart, length),
+    );
+  }).join("");
+}
+
+function replaceInlineMediaRange(
+  segments: InlineMediaSegment[],
+  start: number,
+  end: number,
+  insertion: InlineMediaSegment[],
+): { segments: InlineMediaSegment[]; caret: number } {
+  const before: InlineMediaSegment[] = [];
+  const after: InlineMediaSegment[] = [];
+  let offset = 0;
+
+  for (const segment of segments) {
+    const length = segmentLength(segment);
+    const segmentStart = offset;
+    const segmentEnd = offset + length;
+    offset = segmentEnd;
+    if (segmentEnd <= start) before.push(segment);
+    else if (segment.type === "text" && segmentStart < start) {
+      before.push({ ...segment, text: segment.text.slice(0, start - segmentStart) });
+    }
+    if (segmentStart >= end) after.push(segment);
+    else if (segment.type === "text" && segmentEnd > end) {
+      after.push({ ...segment, text: segment.text.slice(end - segmentStart) });
+    }
+  }
+
+  const usedIds = new Set([...before, ...insertion].map((segment) => segment.id));
+  const uniqueAfter = after.map((segment) => {
+    if (!usedIds.has(segment.id)) return segment;
+    return { ...segment, id: segmentId(segment.type === "text" ? "text" : "segment") };
+  });
+  return {
+    segments: normalizeSegments([...before, ...insertion, ...uniqueAfter]),
+    caret: segmentsLength(before) + segmentsLength(insertion),
+  };
 }
 
 function PendingImageBlock({
@@ -300,8 +360,12 @@ function PendingImageBlock({
   }, [segment.file]);
 
   return (
-    <figure className="inline-media-image">
-      {previewUrl && <img src={previewUrl} alt={segment.file.name} />}
+    <figure
+      className="inline-media-image"
+      contentEditable={false}
+      data-inline-media-segment={segment.id}
+    >
+      {previewUrl && <img src={previewUrl} alt={segment.file.name} draggable={false} />}
       <button
         type="button"
         disabled={disabled}
@@ -326,8 +390,12 @@ function PersistedImageBlock({
   const { text } = useTaskboardI18n();
 
   return (
-    <figure className="inline-media-image">
-      <img src={resolvePersistedAttachmentUrl(segment.url)} alt={segment.alt} />
+    <figure
+      className="inline-media-image"
+      contentEditable={false}
+      data-inline-media-segment={segment.id}
+    >
+      <img src={resolvePersistedAttachmentUrl(segment.url)} alt={segment.alt} draggable={false} />
       <button
         type="button"
         disabled={disabled}
@@ -358,6 +426,8 @@ function IssueReferenceChip({
     <button
       type="button"
       className={`issue-reference-inline inline-media-issue-reference${task ? ` issue-reference-status-${task.status}` : ""}`}
+      contentEditable={false}
+      data-inline-media-segment={segment.id}
       disabled={disabled}
       aria-label={task
         ? text(
@@ -400,12 +470,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     onKeyDown,
   }, ref) {
     const rootRef = useRef<HTMLDivElement>(null);
-    const textareas = useRef(new Map<string, HTMLTextAreaElement>());
-    const pendingFocus = useRef<{ id: string; offset: number } | null>(null);
-    const { text } = useTaskboardI18n();
+    const atomHosts = useRef(new Map<string, HTMLElement>());
+    const pendingSelection = useRef<number | null>(null);
+    const pendingMentionUpdate = useRef(false);
+    const pendingAtomHostRevision = useRef(0);
+    const composing = useRef(false);
+    const [atomHostRevision, refreshAtomHosts] = useState(0);
     const [mention, setMention] = useState<IssueMention | null>(null);
     const [activeMentionIndex, setActiveMentionIndex] = useState(0);
-    const [allSelected, setAllSelected] = useState(false);
     const mentionResults = useMemo(() => {
       if (!mention) return [];
       const query = mention.query.toLocaleLowerCase();
@@ -421,15 +493,42 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     );
 
     useLayoutEffect(() => {
-      for (const element of textareas.current.values()) resizeTextarea(element);
-      const focus = pendingFocus.current;
-      if (!focus) return;
-      const target = textareas.current.get(focus.id);
-      if (!target) return;
-      target.focus();
-      target.setSelectionRange(focus.offset, focus.offset);
-      pendingFocus.current = null;
+      const root = rootRef.current;
+      if (!root) return;
+      const fragment = document.createDocumentFragment();
+      const nextAtomHosts = new Map<string, HTMLElement>();
+
+      for (const segment of segments) {
+        const element = document.createElement("span");
+        element.dataset.inlineMediaSegment = segment.id;
+        if (segment.type === "text") {
+          element.className = "inline-media-text";
+          element.textContent = segment.text;
+        } else {
+          element.className = segment.type === "issue-reference"
+            ? "inline-media-atom"
+            : "inline-media-atom inline-media-image-atom";
+          element.contentEditable = "false";
+          nextAtomHosts.set(segment.id, element);
+        }
+        fragment.append(element);
+      }
+
+      root.replaceChildren(fragment);
+      atomHosts.current = nextAtomHosts;
+      pendingAtomHostRevision.current = atomHostRevision + 1;
+      refreshAtomHosts(pendingAtomHostRevision.current);
     }, [segments]);
+
+    useLayoutEffect(() => {
+      if (atomHostRevision !== pendingAtomHostRevision.current) return;
+      if (pendingSelection.current === null) return;
+      setCollapsedSelection(pendingSelection.current);
+      pendingSelection.current = null;
+      if (!pendingMentionUpdate.current) return;
+      pendingMentionUpdate.current = false;
+      updateMentionFromSelection();
+    }, [atomHostRevision, segments]);
 
     useEffect(() => {
       setActiveMentionIndex(0);
@@ -440,16 +539,33 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     }, [disabled, mentionTasks.length]);
 
     useEffect(() => {
-      if (!allSelected) return;
-      const exitAllSelection = () => setAllSelected(false);
-      document.addEventListener("pointerdown", exitAllSelection, true);
-      return () => document.removeEventListener("pointerdown", exitAllSelection, true);
-    }, [allSelected]);
+      const root = rootRef.current;
+      if (!root) return;
+      root.addEventListener("beforeinput", handleBeforeInput);
+      return () => root.removeEventListener("beforeinput", handleBeforeInput);
+    }, [disabled, onChange, segments]);
+
+    useEffect(() => {
+      function collapseFromOutsidePointer(event: PointerEvent) {
+        const root = rootRef.current;
+        if (!root || root.contains(event.target as Node)) return;
+        collapseComposerSelection("focus");
+      }
+
+      document.addEventListener("pointerdown", collapseFromOutsidePointer, true);
+      return () => document.removeEventListener("pointerdown", collapseFromOutsidePointer, true);
+    }, [atomHostRevision, segments]);
+
+    useEffect(() => {
+      document.addEventListener("selectionchange", syncAtomSelection);
+      syncAtomSelection();
+      return () => document.removeEventListener("selectionchange", syncAtomSelection);
+    }, [atomHostRevision, segments]);
 
     useImperativeHandle(ref, () => ({
       focus() {
-        const firstText = segments.find((segment) => segment.type === "text");
-        if (firstText) textareas.current.get(firstText.id)?.focus();
+        rootRef.current?.focus();
+        setCollapsedSelection(segmentsLength(segments));
       },
       addImages(files) {
         const selected = Array.from(files).filter((file) => file.type.startsWith("image/"));
@@ -477,68 +593,217 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       },
     }), [onChange, onError, segments]);
 
-    function changeText(id: string, text: string) {
-      if (allSelected) {
-        setAllSelected(false);
-        onChange([{ id, type: "text", text }]);
-        return;
+    function segmentElement(node: Node | null): HTMLElement | null {
+      const root = rootRef.current;
+      if (!root || !node || !root.contains(node)) return null;
+      const element = node instanceof Element ? node : node.parentElement;
+      return element?.closest<HTMLElement>("[data-inline-media-segment]") ?? null;
+    }
+
+    function segmentOffset(id: string): number {
+      let offset = 0;
+      for (const segment of segments) {
+        if (segment.id === id) return offset;
+        offset += segmentLength(segment);
       }
-      onChange(segments.map((segment) => (
-        segment.id === id && segment.type === "text" ? { ...segment, text } : segment
-      )));
+      return offset;
     }
 
-    function clearAll() {
-      const empty = textSegment();
-      pendingFocus.current = { id: empty.id, offset: 0 };
-      setAllSelected(false);
+    function logicalOffsetForPoint(
+      node: Node,
+      offset: number,
+      edge: "start" | "end",
+    ): number | null {
+      const root = rootRef.current;
+      if (!root || !root.contains(node)) return null;
+      if (node === root) {
+        for (let index = offset; index < root.childNodes.length; index += 1) {
+          const child = root.childNodes[index];
+          const element = child instanceof HTMLElement
+            ? child.closest<HTMLElement>("[data-inline-media-segment]")
+            : null;
+          const id = element?.dataset.inlineMediaSegment;
+          if (id) return segmentOffset(id);
+        }
+        return segmentsLength(segments);
+      }
+      const element = segmentElement(node);
+      const id = element?.dataset.inlineMediaSegment;
+      if (!element || !id) return null;
+      const segment = segments.find((candidate) => candidate.id === id);
+      if (!segment) return null;
+      const start = segmentOffset(id);
+      if (segment.type !== "text") return start + (edge === "end" ? 1 : 0);
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      range.setEnd(node, offset);
+      return start + range.toString().length;
+    }
+
+    function currentLogicalRange(): { start: number; end: number } | null {
+      const selection = window.getSelection();
+      if (!selection || selection.rangeCount === 0) return null;
+      const range = selection.getRangeAt(0);
+      const start = logicalOffsetForPoint(range.startContainer, range.startOffset, "start");
+      if (start === null) return null;
+      if (range.collapsed) return { start, end: start };
+      const end = logicalOffsetForPoint(range.endContainer, range.endOffset, "end");
+      return end === null ? null : { start, end };
+    }
+
+    function elementForSegment(id: string): HTMLElement | null {
+      const root = rootRef.current;
+      if (!root) return null;
+      return Array.from(root.querySelectorAll<HTMLElement>("[data-inline-media-segment]"))
+        .find((element) => element.dataset.inlineMediaSegment === id) ?? null;
+    }
+
+    function domPointAtOffset(offset: number): { node: Node; offset: number } | null {
+      const root = rootRef.current;
+      if (!root) return null;
+      let current = 0;
+      for (const segment of segments) {
+        const element = elementForSegment(segment.id);
+        if (!element) continue;
+        const length = segmentLength(segment);
+        if (segment.type === "text" && offset <= current + length) {
+          const textNode = element.firstChild;
+          if (textNode instanceof Text) {
+            return { node: textNode, offset: Math.max(0, Math.min(offset - current, textNode.length)) };
+          }
+          return { node: element, offset: 0 };
+        }
+        const childIndex = Array.from(root.childNodes).indexOf(element);
+        if (segment.type !== "text" && offset <= current) {
+          return { node: root, offset: Math.max(childIndex, 0) };
+        }
+        if (segment.type !== "text" && offset <= current + length) {
+          return { node: root, offset: Math.max(childIndex + 1, 0) };
+        }
+        current += length;
+      }
+      return { node: root, offset: root.childNodes.length };
+    }
+
+    function setCollapsedSelection(offset: number) {
+      const root = rootRef.current;
+      const point = domPointAtOffset(offset);
+      if (!root || !point) return;
+      root.focus();
+      const range = document.createRange();
+      range.setStart(point.node, point.offset);
+      range.collapse(true);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      syncAtomSelection();
+    }
+
+    function collapseComposerSelection(edge: "start" | "end" | "focus"): boolean {
+      const root = rootRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.rangeCount === 0 || selection.isCollapsed) return false;
+      const range = selection.getRangeAt(0);
+      if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) return false;
+      if (edge === "focus" && selection.focusNode && root.contains(selection.focusNode)) {
+        selection.collapse(selection.focusNode, selection.focusOffset);
+        syncAtomSelection();
+        return true;
+      }
+      const collapsed = range.cloneRange();
+      collapsed.collapse(edge === "start");
+      selection.removeAllRanges();
+      selection.addRange(collapsed);
+      syncAtomSelection();
+      return true;
+    }
+
+    function syncAtomSelection() {
+      const range = currentLogicalRange();
+      let offset = 0;
+      for (const segment of segments) {
+        const length = segmentLength(segment);
+        if (segment.type !== "text") {
+          elementForSegment(segment.id)?.classList.toggle(
+            "is-range-selected",
+            range !== null && range.start < offset + length && range.end > offset,
+          );
+        }
+        offset += length;
+      }
+    }
+
+    function applyRangeReplacement(
+      start: number,
+      end: number,
+      insertion: InlineMediaSegment[],
+      updateMention = true,
+    ) {
+      const replacement = replaceInlineMediaRange(segments, start, end, insertion);
+      pendingSelection.current = replacement.caret;
+      pendingMentionUpdate.current = updateMention;
       setMention(null);
-      onChange([empty]);
+      onChange(replacement.segments);
     }
 
-    function removeIssueReference(id: string) {
+    function removeSegment(id: string) {
       const index = segments.findIndex((segment) => segment.id === id);
       if (index < 0) return;
-      const previous = segments[index - 1];
-      const next = segments[index + 1];
-      const nextSegments = normalizeSegments(segments.filter((segment) => segment.id !== id));
-      const focusId = previous?.type === "text"
-        ? previous.id
-        : next?.type === "text"
-          ? next.id
-          : null;
-      if (focusId) {
-        pendingFocus.current = {
-          id: focusId,
-          offset: previous?.type === "text" ? previous.text.length : 0,
-        };
-      }
-      setMention(null);
-      onChange(nextSegments);
+      const start = segmentsLength(segments.slice(0, index));
+      applyRangeReplacement(start, start + segmentLength(segments[index]), [], false);
     }
 
-    function updateMention(
-      segment: InlineTextSegment,
-      value: string,
-      textarea: HTMLTextAreaElement,
-    ) {
-      if (mentionTasks.length === 0 || textarea.selectionStart !== textarea.selectionEnd) {
+    function updateMentionFromSelection() {
+      const root = rootRef.current;
+      const selection = window.getSelection();
+      if (!root || mentionTasks.length === 0 || !selection || selection.rangeCount === 0) {
         setMention(null);
         return;
       }
-      const end = textarea.selectionStart;
-      const prefix = value.slice(0, end);
+      const range = selection.getRangeAt(0);
+      if (!range.collapsed) {
+        setMention(null);
+        return;
+      }
+      const element = segmentElement(range.startContainer);
+      const id = element?.dataset.inlineMediaSegment;
+      const segment = id
+        ? segments.find((candidate): candidate is InlineTextSegment => (
+            candidate.id === id && candidate.type === "text"
+          ))
+        : null;
+      if (!element || !segment) {
+        setMention(null);
+        return;
+      }
+      const prefixRange = document.createRange();
+      prefixRange.selectNodeContents(element);
+      prefixRange.setEnd(range.startContainer, range.startOffset);
+      const end = prefixRange.toString().length;
+      const prefix = segment.text.slice(0, end);
       const match = /(?:^|\s)@([^\s@]*)$/.exec(prefix);
       if (!match) {
         setMention(null);
         return;
       }
+      const start = prefix.lastIndexOf("@");
+      const anchorRange = document.createRange();
+      const textNode = element.firstChild;
+      if (textNode instanceof Text) {
+        anchorRange.setStart(textNode, Math.min(start, textNode.length));
+        anchorRange.collapse(true);
+      } else {
+        anchorRange.selectNodeContents(element);
+        anchorRange.collapse(true);
+      }
+      const anchorRect = anchorRange.getBoundingClientRect();
       setMention({
         segmentId: segment.id,
-        start: prefix.lastIndexOf("@"),
+        start,
         end,
         query: match[1],
-        anchor: textarea,
+        anchor: root,
+        anchorRect,
       });
     }
 
@@ -552,7 +817,6 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const route = new URLSearchParams({ project: task.projectId, issue: task.identifier });
       const suffix = segment.text.slice(mention.end);
       const insertSpace = !/^\s/.test(suffix);
-      const before = { ...segment, text: segment.text.slice(0, mention.start) };
       const reference: IssueReferenceSegment = {
         id: segmentId("issue"),
         type: "issue-reference",
@@ -560,65 +824,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         identifier: displayIdentifier,
         taskId: task.id,
       };
-      const after = textSegment(`${insertSpace ? " " : ""}${suffix}`);
-      pendingFocus.current = { id: after.id, offset: insertSpace ? 1 : 0 };
-      setMention(null);
-      onChange(normalizeSegments(segments.flatMap((candidate) => (
-        candidate.id === segment.id ? [before, reference, after] : [candidate]
-      ))));
-    }
-
-    function handleTextareaKeyDown(
-      event: KeyboardEvent<HTMLTextAreaElement>,
-      segment: InlineTextSegment,
-      index: number,
-    ) {
-      if (event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
-      if (
-        event.key === "Backspace"
-        && event.currentTarget.selectionStart === 0
-        && event.currentTarget.selectionEnd === 0
-        && segments[index - 1]?.type === "issue-reference"
-      ) {
-        event.preventDefault();
-        removeIssueReference(segments[index - 1].id);
-        return;
-      }
-      if (
-        event.key === "Delete"
-        && event.currentTarget.selectionStart === segment.text.length
-        && event.currentTarget.selectionEnd === segment.text.length
-        && segments[index + 1]?.type === "issue-reference"
-      ) {
-        event.preventDefault();
-        removeIssueReference(segments[index + 1].id);
-        return;
-      }
-    }
-
-    function selectNearestTextSegment(target: EventTarget | null) {
-      const root = rootRef.current;
-      if (!root || !(target instanceof Element)) return;
-      let segmentElement = target;
-      while (segmentElement.parentElement && segmentElement.parentElement !== root) {
-        segmentElement = segmentElement.parentElement;
-      }
-      const childIndex = segmentElement.parentElement === root
-        ? Array.from(root.children).indexOf(segmentElement)
-        : 0;
-      const origin = Math.min(Math.max(childIndex, 0), segments.length - 1);
-      for (let distance = 0; distance < segments.length; distance += 1) {
-        const indexes = distance === 0 ? [origin] : [origin - distance, origin + distance];
-        for (const index of indexes) {
-          const candidate = segments[index];
-          if (candidate?.type !== "text") continue;
-          const textarea = textareas.current.get(candidate.id);
-          if (!textarea) continue;
-          textarea.focus();
-          textarea.setSelectionRange(0, candidate.text.length);
-          return;
-        }
-      }
+      const start = segmentOffset(segment.id) + mention.start;
+      const insertion = [reference, textSegment(insertSpace ? " " : "")];
+      applyRangeReplacement(start, start + mention.end - mention.start, insertion, false);
     }
 
     function handleComposerKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -628,30 +836,25 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "a") {
         event.preventDefault();
-        selectNearestTextSegment(event.target);
-        setAllSelected(true);
+        const root = rootRef.current;
+        if (!root) return;
+        root.focus();
+        const range = document.createRange();
+        range.selectNodeContents(root);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        syncAtomSelection();
         setMention(null);
         return;
       }
-      if (allSelected && (event.key === "Backspace" || event.key === "Delete")) {
-        event.preventDefault();
-        clearAll();
-        return;
-      }
       if (
-        allSelected
-        && [
-          "ArrowUp",
-          "ArrowDown",
-          "ArrowLeft",
-          "ArrowRight",
-          "Home",
-          "End",
-          "PageUp",
-          "PageDown",
-        ].includes(event.key)
+        (event.key === "PageUp" || event.key === "PageDown")
+        && collapseComposerSelection(event.key === "PageUp" ? "start" : "end")
       ) {
-        setAllSelected(false);
+        event.preventDefault();
+        setMention(null);
+        return;
       }
       if (mention && event.key === "ArrowDown" && mentionResults.length > 0) {
         event.preventDefault();
@@ -676,10 +879,31 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       onKeyDown?.(event);
     }
 
-    function pasteContent(
-      event: ClipboardEvent<HTMLTextAreaElement>,
-      segment: InlineTextSegment,
-    ) {
+    function handleBeforeInput(input: InputEvent) {
+      if (disabled || composing.current) return;
+      const range = currentLogicalRange();
+      if (!range) return;
+      let { start, end } = range;
+      let insertion: InlineMediaSegment[] | null = null;
+      if (["insertText", "insertReplacementText"].includes(input.inputType)) {
+        insertion = [textSegment(input.data ?? "")];
+      } else if (["insertLineBreak", "insertParagraph"].includes(input.inputType)) {
+        insertion = [textSegment("\n")];
+      } else if (input.inputType.startsWith("delete")) {
+        if (start === end && input.inputType.includes("Backward")) start = Math.max(0, start - 1);
+        if (start === end && input.inputType.includes("Forward")) {
+          end = Math.min(segmentsLength(segments), end + 1);
+        }
+        insertion = [];
+      }
+      if (insertion === null) return;
+      input.preventDefault();
+      applyRangeReplacement(start, end, insertion);
+    }
+
+    function pasteContent(event: ClipboardEvent<HTMLDivElement>) {
+      const range = currentLogicalRange();
+      if (!range) return;
       const clipboardFiles = clipboardImages(event.clipboardData);
       if (clipboardFiles.length > 0) {
         event.preventDefault();
@@ -702,141 +926,127 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         });
         if (images.length === 0) return;
         onError(null);
-
-        const textarea = event.currentTarget;
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const before = { ...segment, text: segment.text.slice(0, start) };
-        const after = textSegment(segment.text.slice(end));
-        const insertion = images.map(imageSegment);
-        const next = segments.flatMap((candidate) => (
-          candidate.id === segment.id ? [before, ...insertion, after] : [candidate]
-        ));
-        pendingFocus.current = { id: after.id, offset: 0 };
-        setAllSelected(false);
-        onChange(next);
+        applyRangeReplacement(range.start, range.end, images.map(imageSegment), false);
         return;
       }
 
       const pastedText = event.clipboardData.getData("text/plain");
       const insertion = createInlineMediaSegments(pastedText, referenceTasks);
-      if (!insertion.some((candidate) => candidate.type !== "text")) return;
       event.preventDefault();
-
-      const textarea = event.currentTarget;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      if (allSelected) {
-        const finalText = insertion.at(-1) as InlineTextSegment;
-        pendingFocus.current = { id: finalText.id, offset: finalText.text.length };
-        setAllSelected(false);
-        setMention(null);
-        onChange(insertion);
-        return;
-      }
-
-      const firstText = insertion[0] as InlineTextSegment;
-      const finalText = insertion.at(-1) as InlineTextSegment;
-      const focusOffset = finalText.text.length;
-      insertion[0] = {
-        ...segment,
-        text: segment.text.slice(0, start) + firstText.text,
-      };
-      insertion[insertion.length - 1] = {
-        ...finalText,
-        text: finalText.text + segment.text.slice(end),
-      };
-      pendingFocus.current = { id: finalText.id, offset: focusOffset };
-      setMention(null);
-      onChange(segments.flatMap((candidate) => (
-        candidate.id === segment.id ? insertion : [candidate]
-      )));
+      applyRangeReplacement(range.start, range.end, insertion);
     }
 
-    function removeImage(id: string) {
-      onChange(normalizeSegments(segments.filter((segment) => segment.id !== id)));
+    function syncSegmentsFromDom() {
+      const root = rootRef.current;
+      if (!root) return;
+      const existing = new Map(segments.map((segment) => [segment.id, segment]));
+      const next: InlineMediaSegment[] = [];
+      for (const child of root.childNodes) {
+        if (child instanceof Text) {
+          if (child.data) next.push(textSegment(child.data));
+          continue;
+        }
+        if (!(child instanceof HTMLElement)) continue;
+        const id = child.dataset.inlineMediaSegment;
+        const segment = id ? existing.get(id) : null;
+        if (segment?.type === "text") {
+          next.push({ ...segment, text: child.textContent ?? "" });
+        } else if (segment) {
+          next.push(segment);
+        } else if (child.tagName === "BR" && root.childNodes.length > 1) {
+          next.push(textSegment("\n"));
+        } else if (child.textContent) {
+          next.push(textSegment(child.textContent));
+        }
+      }
+      const range = currentLogicalRange();
+      if (range) pendingSelection.current = range.end;
+      pendingMentionUpdate.current = true;
+      onChange(normalizeSegments(next));
     }
 
     const isEmpty = segments.every((segment) => (
       segment.type === "text" ? segment.text.length === 0 : false
     ));
-    const hasIssueReferences = segments.some((segment) => segment.type === "issue-reference");
+    const atomPortals = segments.flatMap((segment) => {
+      if (segment.type === "text") return [];
+      const host = atomHosts.current.get(segment.id);
+      if (!host) return [];
+      const content = segment.type === "pending-image" ? (
+        <PendingImageBlock
+          segment={segment}
+          disabled={disabled}
+          onRemove={() => removeSegment(segment.id)}
+        />
+      ) : segment.type === "persisted-image" ? (
+        <PersistedImageBlock
+          segment={segment}
+          disabled={disabled}
+          onRemove={() => removeSegment(segment.id)}
+        />
+      ) : (
+        <IssueReferenceChip
+          segment={segment}
+          task={segment.taskId
+            ? referenceTasks.find((task) => task.id === segment.taskId) ?? null
+            : null}
+          disabled={disabled}
+          onRemove={() => removeSegment(segment.id)}
+        />
+      );
+      return [createPortal(content, host, segment.id)];
+    });
 
     return (
-      <div
-        ref={rootRef}
-        className={`inline-media-composer${hasIssueReferences ? " has-issue-references" : ""}${allSelected ? " is-all-selected" : ""} ${className}`.trim()}
-        aria-label={ariaLabel}
-        onKeyDownCapture={handleComposerKeyDown}
-        onCopy={(event) => {
-          if (!allSelected) return;
-          event.preventDefault();
-          event.clipboardData.setData("text/plain", serializeInlineMedia(segments));
-        }}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setAllSelected(false);
-          }
-        }}
-      >
-        {segments.map((segment, index) => (
-          segment.type === "text" ? (
-            <textarea
-              key={segment.id}
-              ref={(element) => {
-                if (element) textareas.current.set(segment.id, element);
-                else textareas.current.delete(segment.id);
-              }}
-              value={segment.text}
-              rows={1}
-              disabled={disabled}
-              aria-label={index === 0 ? ariaLabel : text(`${ariaLabel}续写`, `${ariaLabel} continuation`)}
-              placeholder={isEmpty && index === 0 ? placeholder : undefined}
-              onChange={(event) => {
-                changeText(segment.id, event.target.value);
-                resizeTextarea(event.currentTarget);
-                updateMention(segment, event.target.value, event.currentTarget);
-              }}
-              onPaste={(event) => pasteContent(event, segment)}
-              onKeyDown={(event) => handleTextareaKeyDown(event, segment, index)}
-              onKeyUp={(event) => {
-                if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
-                  updateMention(segment, event.currentTarget.value, event.currentTarget);
-                }
-              }}
-              onClick={(event) => updateMention(segment, event.currentTarget.value, event.currentTarget)}
-              onBlur={() => setMention(null)}
-            />
-          ) : segment.type === "pending-image" ? (
-            <PendingImageBlock
-              key={segment.id}
-              segment={segment}
-              disabled={disabled}
-              onRemove={() => removeImage(segment.id)}
-            />
-          ) : segment.type === "persisted-image" ? (
-            <PersistedImageBlock
-              key={segment.id}
-              segment={segment}
-              disabled={disabled}
-              onRemove={() => removeImage(segment.id)}
-            />
-          ) : (
-            <IssueReferenceChip
-              key={segment.id}
-              segment={segment}
-              task={segment.taskId
-                ? referenceTasks.find((task) => task.id === segment.taskId) ?? null
-                : null}
-              disabled={disabled}
-              onRemove={() => removeIssueReference(segment.id)}
-            />
-          )
-        ))}
+      <>
+        <div
+          ref={rootRef}
+          className={`inline-media-composer ${className}`.trim()}
+          contentEditable={!disabled}
+          suppressContentEditableWarning
+          role="textbox"
+          aria-multiline="true"
+          aria-label={ariaLabel}
+          aria-disabled={disabled}
+          data-empty={isEmpty ? "true" : undefined}
+          data-placeholder={placeholder}
+          onKeyDownCapture={handleComposerKeyDown}
+          onInput={() => {
+            if (!composing.current) syncSegmentsFromDom();
+          }}
+          onCompositionStart={() => { composing.current = true; }}
+          onCompositionEnd={() => {
+            composing.current = false;
+            syncSegmentsFromDom();
+          }}
+          onPaste={pasteContent}
+          onCopy={(event) => {
+            const range = currentLogicalRange();
+            if (!range || range.start === range.end) return;
+            event.preventDefault();
+            event.clipboardData.setData(
+              "text/plain",
+              serializeInlineMediaRange(segments, range.start, range.end),
+            );
+          }}
+          onKeyUp={updateMentionFromSelection}
+          onPointerUp={() => {
+            syncAtomSelection();
+            updateMentionFromSelection();
+          }}
+          onBlur={(event) => {
+            setMention(null);
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              collapseComposerSelection("focus");
+            }
+          }}
+        >
+          {atomPortals}
+        </div>
         {mention && (
           <IssueMentionMenu
             anchor={mention.anchor}
-            anchorOffset={mention.start}
+            anchorRect={mention.anchorRect}
             tasks={mentionResults}
             activeIndex={selectedMentionIndex}
             onActiveIndexChange={setActiveMentionIndex}
@@ -844,7 +1054,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             onClose={() => setMention(null)}
           />
         )}
-      </div>
+      </>
     );
   },
 );
