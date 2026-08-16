@@ -2164,10 +2164,10 @@ export function App() {
     if (creating && (attachments.length > 0 || inlineImages.length > 0)) {
       const [results, inlineResults] = await Promise.all([
           Promise.allSettled(
-            attachments.map((file) => uploadAttachment(saved.id, file)),
+            attachments.map((file) => uploadAttachment(saved.id, file, "attachment")),
           ),
           Promise.allSettled(
-            inlineImages.map((image) => uploadAttachment(saved.id, image.file)),
+            inlineImages.map((image) => uploadAttachment(saved.id, image.file, "inline")),
           ),
       ]);
       failedAttachments = results.filter((result) => result.status === "rejected").length;

@@ -662,7 +662,11 @@ export async function listAttachments(taskId: string, signal?: AbortSignal): Pro
   return data.attachments;
 }
 
-export async function uploadAttachment(taskId: string, file: File): Promise<Attachment> {
+export async function uploadAttachment(
+  taskId: string,
+  file: File,
+  kind: Attachment["kind"],
+): Promise<Attachment> {
   const data = await request<{ attachment: Attachment }>(
     `/api/tasks/${encodeURIComponent(taskId)}/attachments`,
     {
@@ -670,6 +674,7 @@ export async function uploadAttachment(taskId: string, file: File): Promise<Atta
       headers: {
         "Content-Type": file.type || "application/octet-stream",
         "X-Taskboard-Filename": encodeURIComponent(file.name),
+        "X-Taskboard-Attachment-Kind": kind,
       },
       body: file,
     },
@@ -677,7 +682,11 @@ export async function uploadAttachment(taskId: string, file: File): Promise<Atta
   return data.attachment;
 }
 
-export async function uploadCommentAttachment(commentId: string, file: File): Promise<Attachment> {
+export async function uploadCommentAttachment(
+  commentId: string,
+  file: File,
+  kind: Attachment["kind"],
+): Promise<Attachment> {
   const data = await request<{ attachment: Attachment }>(
     `/api/comments/${encodeURIComponent(commentId)}/attachments`,
     {
@@ -685,6 +694,7 @@ export async function uploadCommentAttachment(commentId: string, file: File): Pr
       headers: {
         "Content-Type": file.type || "application/octet-stream",
         "X-Taskboard-Filename": encodeURIComponent(file.name),
+        "X-Taskboard-Attachment-Kind": kind,
       },
       body: file,
     },
@@ -720,8 +730,4 @@ export function resolvePersistedAttachmentUrl(value: string): string {
     return value;
   }
   return value;
-}
-
-export function markdownIncludesAttachment(markdown: string, attachment: Attachment): boolean {
-  return markdown.includes(`api/attachments/${encodeURIComponent(attachment.id)}/content`);
 }

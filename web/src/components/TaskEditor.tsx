@@ -185,6 +185,7 @@ export function TaskEditor({
   const [createMore, setCreateMore] = useState(false);
   const [menu, setMenu] = useState<"status" | "priority" | "assignee" | "labels" | "development" | "more" | "due" | "recurrence" | null>(null);
   const [relationMenu, setRelationMenu] = useState<DraftRelationMenu | null>(null);
+  const [moreMenuPosition, setMoreMenuPosition] = useState<{ right: number; bottom: number } | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<TaskEditorError | null>(null);
@@ -277,7 +278,10 @@ export function TaskEditor({
   }, [menu]);
 
   useEffect(() => {
-    if (menu !== "more") setRelationMenu(null);
+    if (menu !== "more") {
+      setRelationMenu(null);
+      setMoreMenuPosition(null);
+    }
   }, [menu]);
 
   function toggleDraftRelation(candidate: Task) {
@@ -292,6 +296,20 @@ export function TaskEditor({
         ? current.filter((id) => id !== candidate.id)
         : [...current, candidate.id]);
     }
+  }
+
+  function toggleMoreMenu() {
+    setRelationMenu(null);
+    if (menu === "more") {
+      setMenu(null);
+      return;
+    }
+    const rect = moreMenuRef.current?.getBoundingClientRect();
+    setMoreMenuPosition(rect ? {
+      right: window.innerWidth - rect.right,
+      bottom: window.innerHeight - rect.top + 8,
+    } : null);
+    setMenu("more");
   }
 
   useEffect(() => {
@@ -673,9 +691,19 @@ export function TaskEditor({
             })}
 
             <div className="composer-menu-anchor" ref={moreMenuRef}>
-              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={() => { setRelationMenu(null); setMenu(menu === "more" ? null : "more"); }}><LinearIcon name="more" /></button>
+              <button className="property-control property-more" type="button" aria-label={text("更多属性", "More properties")} onClick={toggleMoreMenu}><LinearIcon name="more" /></button>
               {menu === "more" && (
-                <div className="composer-popover more-popover" role="menu">
+                <div
+                  className="composer-popover more-popover"
+                  role="menu"
+                  style={moreMenuPosition ? {
+                    position: "fixed",
+                    top: "auto",
+                    right: moreMenuPosition.right,
+                    bottom: moreMenuPosition.bottom,
+                    left: "auto",
+                  } : undefined}
+                >
                   <button type="button" onClick={() => setMenu("due")}><span><LinearIcon name="calendarAdd" /></span><strong>{text("设置截止日期", "Set due date")}</strong><kbd>⇧ D</kbd><b><LinearIcon name="chevronRight" /></b></button>
                   <button type="button" onClick={() => setMenu("recurrence")}><span><LinearIcon name="recurrence" /></span><strong>{text("设置重复…", "Set recurrence…")}</strong><b><LinearIcon name="chevronRight" /></b></button>
                   {!task && (

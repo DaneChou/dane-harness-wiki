@@ -384,7 +384,7 @@ const CLOUD_COLUMNS = {
     "author_avatar_url", "version", "created_at", "updated_at",
   ],
   task_relations: ["relation_type", "source_task_id", "target_task_id", "created_at"],
-  attachments: ["id", "task_id", "comment_id", "filename", "content_type", "size", "created_at"],
+  attachments: ["id", "task_id", "comment_id", "kind", "filename", "content_type", "size", "created_at"],
   workflow_workspaces: ["project_id", "workspace", "version", "updated_at"],
 };
 

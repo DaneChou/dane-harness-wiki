@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   type KeyboardEventHandler,
 } from "react";
@@ -103,6 +104,8 @@ interface IssueMention {
 let segmentSequence = 0;
 const inlineMediaMarkdownParser = unified().use(remarkParse).use(remarkGfm);
 const EMPTY_MENTION_TASKS: readonly Task[] = [];
+const INLINE_MEDIA_CLIPBOARD_MIME = "application/x-taskboard-inline-media";
+let inlineMediaClipboard: { id: string; segments: InlineMediaSegment[] } | null = null;
 
 function segmentId(prefix: string): string {
   segmentSequence += 1;
@@ -285,24 +288,44 @@ function segmentsLength(segments: InlineMediaSegment[]): number {
   return segments.reduce((length, segment) => length + segmentLength(segment), 0);
 }
 
-function serializeInlineMediaRange(
+function inlineMediaRangeSegments(
   segments: InlineMediaSegment[],
   start: number,
   end: number,
-): string {
+): InlineMediaSegment[] {
   let offset = 0;
-  return segments.map((segment) => {
+  return segments.flatMap<InlineMediaSegment>((segment): InlineMediaSegment[] => {
     const length = segmentLength(segment);
     const segmentStart = offset;
     const segmentEnd = offset + length;
     offset = segmentEnd;
-    if (end <= segmentStart || start >= segmentEnd) return "";
-    if (segment.type !== "text") return serializeInlineMedia([segment]);
-    return segment.text.slice(
-      Math.max(start - segmentStart, 0),
-      Math.min(end - segmentStart, length),
-    );
+    if (end <= segmentStart || start >= segmentEnd) return [];
+    if (segment.type !== "text") return [segment];
+    return [{
+      ...segment,
+      text: segment.text.slice(
+        Math.max(start - segmentStart, 0),
+        Math.min(end - segmentStart, length),
+      ),
+    }];
+  });
+}
+
+function inlineMediaClipboardText(segments: InlineMediaSegment[]): string {
+  return segments.map((segment) => {
+    if (segment.type === "text") return segment.text;
+    if (segment.type === "pending-image") return segment.file.name;
+    if (segment.type === "persisted-image") return segment.alt;
+    return segment.identifier;
   }).join("");
+}
+
+function cloneInlineMediaSegments(segments: InlineMediaSegment[]): InlineMediaSegment[] {
+  return segments.map((segment) => {
+    if (segment.type === "text") return textSegment(segment.text);
+    if (segment.type === "pending-image") return imageSegment(segment.file);
+    return { ...segment, id: segmentId(segment.type === "persisted-image" ? "image" : "issue") };
+  });
 }
 
 function replaceInlineMediaRange(
@@ -575,33 +598,38 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       return () => document.removeEventListener("selectionchange", syncAtomSelection);
     }, [atomHostRevision, segments]);
 
+    function insertableImages(files: FileList | File[]): File[] | null {
+      const selected = Array.from(files).filter((file) => file.type.startsWith("image/"));
+      if (selected.length === 0) return [];
+
+      const oversized = selected.find((file) => file.size > MAX_ATTACHMENT_SIZE);
+      if (oversized) {
+        onError([
+          `“${oversized.name}” 超过 25 MB，无法上传。`,
+          `“${oversized.name}” is larger than 25 MB and cannot be uploaded.`,
+        ]);
+        return null;
+      }
+
+      const existing = new Set(inlineMediaImages(segments).map((image) => fileKey(image.file)));
+      const images = selected.filter((file) => {
+        const key = fileKey(file);
+        if (existing.has(key)) return false;
+        existing.add(key);
+        return true;
+      });
+      if (images.length > 0) onError(null);
+      return images;
+    }
+
     useImperativeHandle(ref, () => ({
       focus() {
         rootRef.current?.focus();
         setCollapsedSelection(segmentsLength(segments));
       },
       addImages(files) {
-        const selected = Array.from(files).filter((file) => file.type.startsWith("image/"));
-        if (selected.length === 0) return;
-
-        const oversized = selected.find((file) => file.size > MAX_ATTACHMENT_SIZE);
-        if (oversized) {
-          onError([
-            `“${oversized.name}” 超过 25 MB，无法上传。`,
-            `“${oversized.name}” is larger than 25 MB and cannot be uploaded.`,
-          ]);
-          return;
-        }
-
-        const existing = new Set(inlineMediaImages(segments).map((image) => fileKey(image.file)));
-        const images = selected.filter((file) => {
-          const key = fileKey(file);
-          if (existing.has(key)) return false;
-          existing.add(key);
-          return true;
-        });
-        if (images.length === 0) return;
-        onError(null);
+        const images = insertableImages(files);
+        if (!images || images.length === 0) return;
         onChange(normalizeSegments([...segments, ...images.map(imageSegment)]));
       },
     }), [onChange, onError, segments]);
@@ -981,28 +1009,22 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     function pasteContent(event: ClipboardEvent<HTMLDivElement>) {
       const range = currentLogicalRange();
       if (!range) return;
+      const clipboardId = event.clipboardData.getData(INLINE_MEDIA_CLIPBOARD_MIME);
+      if (clipboardId && inlineMediaClipboard?.id === clipboardId) {
+        event.preventDefault();
+        applyRangeReplacement(
+          range.start,
+          range.end,
+          cloneInlineMediaSegments(inlineMediaClipboard.segments),
+          false,
+        );
+        return;
+      }
       const clipboardFiles = clipboardImages(event.clipboardData);
       if (clipboardFiles.length > 0) {
         event.preventDefault();
-
-        const oversized = clipboardFiles.find((file) => file.size > MAX_ATTACHMENT_SIZE);
-        if (oversized) {
-          onError([
-            `“${oversized.name}” 超过 25 MB，无法上传。`,
-            `“${oversized.name}” is larger than 25 MB and cannot be uploaded.`,
-          ]);
-          return;
-        }
-
-        const existing = new Set(inlineMediaImages(segments).map((image) => fileKey(image.file)));
-        const images = clipboardFiles.filter((file) => {
-          const key = fileKey(file);
-          if (existing.has(key)) return false;
-          existing.add(key);
-          return true;
-        });
-        if (images.length === 0) return;
-        onError(null);
+        const images = insertableImages(clipboardFiles);
+        if (!images || images.length === 0) return;
         applyRangeReplacement(range.start, range.end, images.map(imageSegment), false);
         return;
       }
@@ -1011,6 +1033,26 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const insertion = createInlineMediaSegments(pastedText, referenceTasks);
       event.preventDefault();
       applyRangeReplacement(range.start, range.end, insertion);
+    }
+
+    function dragContent(event: DragEvent<HTMLDivElement>) {
+      if (Array.from(event.dataTransfer.items).some((item) => (
+        item.kind === "file" && item.type.startsWith("image/")
+      ))) event.preventDefault();
+    }
+
+    function dropContent(event: DragEvent<HTMLDivElement>) {
+      const images = insertableImages(event.dataTransfer.files);
+      if (!images || images.length === 0) return;
+      event.preventDefault();
+      const caretRange = (document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+      }).caretRangeFromPoint?.(event.clientX, event.clientY);
+      const offset = caretRange
+        ? logicalOffsetForPoint(caretRange.startContainer, caretRange.startOffset, "start")
+        : null;
+      const insertionOffset = offset ?? currentLogicalRange()?.end ?? segmentsLength(segments);
+      applyRangeReplacement(insertionOffset, insertionOffset, images.map(imageSegment), false);
     }
 
     function syncSegmentsFromDom() {
@@ -1109,15 +1151,18 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             composing.current = false;
             syncSegmentsFromDom();
           }}
+          onDragOver={dragContent}
+          onDrop={dropContent}
           onPaste={pasteContent}
           onCopy={(event) => {
             const range = currentLogicalRange();
             if (!range || range.start === range.end) return;
+            const copiedSegments = inlineMediaRangeSegments(segments, range.start, range.end);
+            const clipboardId = segmentId("clipboard");
+            inlineMediaClipboard = { id: clipboardId, segments: copiedSegments };
             event.preventDefault();
-            event.clipboardData.setData(
-              "text/plain",
-              serializeInlineMediaRange(segments, range.start, range.end),
-            );
+            event.clipboardData.setData(INLINE_MEDIA_CLIPBOARD_MIME, clipboardId);
+            event.clipboardData.setData("text/plain", inlineMediaClipboardText(copiedSegments));
           }}
           onKeyUp={(event) => {
             if (event.key !== "Escape") updateMentionFromSelection();
