@@ -9,7 +9,6 @@ import {
   listAttachments,
   listComments,
   listTaskActivities,
-  markdownIncludesAttachment,
   resolveTaskboardUrl,
   uploadAttachment,
   uploadCommentAttachment,
@@ -475,7 +474,7 @@ export function TaskDetail({
   const editingComposerRef = useRef<InlineMediaComposerHandle>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const commentAttachmentInputRef = useRef<HTMLInputElement>(null);
-  const editCommentImageInputRef = useRef<HTMLInputElement>(null);
+  const editCommentAttachmentInputRef = useRef<HTMLInputElement>(null);
   const editingUploadedAttachmentsRef = useRef<Map<string, Attachment>>(new Map());
   const draft = serializeInlineMedia(commentSegments);
   const commentInlineImages = inlineMediaImages(commentSegments);
@@ -675,7 +674,7 @@ export function TaskDetail({
     onError(null);
     try {
       const uploaded = await Promise.all(
-        inlineImages.map((image) => uploadAttachment(currentTask.id, image.file)),
+        inlineImages.map((image) => uploadAttachment(currentTask.id, image.file, "inline")),
       );
       const resolvedDescription = resolveInlineMediaMarkdown(
         draftDescription,
@@ -711,10 +710,10 @@ export function TaskDetail({
       const comment = await createComment(task.id, body);
       const [results, inlineAttachments] = await Promise.all([
         Promise.allSettled(
-          pendingCommentFiles.map((file) => uploadCommentAttachment(comment.id, file)),
+          pendingCommentFiles.map((file) => uploadCommentAttachment(comment.id, file, "attachment")),
         ),
         Promise.all(
-          commentInlineImages.map((image) => uploadCommentAttachment(comment.id, image.file)),
+          commentInlineImages.map((image) => uploadCommentAttachment(comment.id, image.file, "inline")),
         ),
       ]);
       const uploaded = results.flatMap((result) => result.status === "fulfilled" ? [result.value] : []);
@@ -797,7 +796,7 @@ export function TaskDetail({
       for (const image of editingInlineImages) {
         let attachment = editingUploadedAttachmentsRef.current.get(image.id);
         if (!attachment) {
-          attachment = await uploadCommentAttachment(comment.id, image.file);
+          attachment = await uploadCommentAttachment(comment.id, image.file, "inline");
           editingUploadedAttachmentsRef.current.set(image.id, attachment);
         }
         uploaded.push(attachment);
@@ -847,7 +846,7 @@ export function TaskDetail({
     setAttachmentsError(null);
     try {
       for (const file of selected) {
-        const attachment = await uploadAttachment(task.id, file);
+        const attachment = await uploadAttachment(task.id, file, "attachment");
         setAttachments((current) => current.some((item) => item.id === attachment.id)
           ? current
           : [...current, attachment]);
@@ -857,6 +856,36 @@ export function TaskDetail({
     } finally {
       setUploadingAttachments(false);
       if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+    }
+  }
+
+  async function uploadEditCommentFiles(comment: Comment, files: FileList) {
+    const selected = Array.from(files);
+    if (selected.length === 0 || savingCommentId !== null) return;
+    const oversized = selected.find((file) => file.size > MAX_ATTACHMENT_SIZE);
+    if (oversized) {
+      setCommentsError([
+        `“${oversized.name}” 超过 25 MB，无法上传。`,
+        `“${oversized.name}” is larger than 25 MB and cannot be uploaded.`,
+      ]);
+      if (editCommentAttachmentInputRef.current) editCommentAttachmentInputRef.current.value = "";
+      return;
+    }
+
+    setSavingCommentId(comment.id);
+    setCommentsError(null);
+    try {
+      for (const file of selected) {
+        const attachment = await uploadCommentAttachment(comment.id, file, "attachment");
+        setComments((current) => current.map((item) => item.id === comment.id
+          ? { ...item, attachments: [...item.attachments, attachment] }
+          : item));
+      }
+    } catch (error) {
+      setCommentsError(messageFor(error));
+    } finally {
+      setSavingCommentId(null);
+      if (editCommentAttachmentInputRef.current) editCommentAttachmentInputRef.current.value = "";
     }
   }
 
@@ -899,7 +928,7 @@ export function TaskDetail({
       actors.findIndex((candidate) => actorKey(candidate) === actorKey(actor)) === index
     ));
   const visibleTaskAttachments = attachments.filter(
-    (attachment) => !markdownIncludesAttachment(description, attachment),
+    (attachment) => attachment.kind === "attachment",
   );
   const activityTimeline = [
     ...taskActivities.flatMap((activity) => activity.changes.map((change, index) => ({
@@ -1314,21 +1343,19 @@ export function TaskDetail({
                                 disabled={savingCommentId === comment.id}
                                 aria-label={text("添加评论附件", "Add comment attachments")}
                                 title={text("添加附件", "Add attachments")}
-                                onClick={() => editCommentImageInputRef.current?.click()}
+                                onClick={() => editCommentAttachmentInputRef.current?.click()}
                               >
                                 <LinearIcon name="attachment" />
                               </button>
                               <input
-                                ref={editCommentImageInputRef}
+                                ref={editCommentAttachmentInputRef}
                                 type="file"
-                                accept="image/*"
                                 multiple
                                 hidden
                                 onChange={(event) => {
                                   if (event.currentTarget.files) {
-                                    editingComposerRef.current?.addImages(event.currentTarget.files);
+                                    void uploadEditCommentFiles(comment, event.currentTarget.files);
                                   }
-                                  event.currentTarget.value = "";
                                 }}
                               />
                             </div>
@@ -1365,12 +1392,10 @@ export function TaskDetail({
                           </div>
                         )
                       )}
-                      {comment.attachments.some(
-                        (attachment) => !markdownIncludesAttachment(comment.body, attachment),
-                      ) && (
+                      {comment.attachments.some((attachment) => attachment.kind === "attachment") && (
                         <ul className="comment-attachment-list" aria-label={text("评论附件", "Comment attachments")}>
                           {comment.attachments
-                            .filter((attachment) => !markdownIncludesAttachment(comment.body, attachment))
+                            .filter((attachment) => attachment.kind === "attachment")
                             .map((attachment) => (
                               <li key={attachment.id}>
                                 <a

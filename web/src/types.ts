@@ -322,6 +322,7 @@ export interface Attachment {
   id: string;
   taskId: string;
   commentId: string | null;
+  kind: "inline" | "attachment";
   filename: string;
   contentType: string;
   size: number;

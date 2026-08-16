@@ -3998,6 +3998,7 @@ kbd {
 }
 
 .inline-media-composer {
+  position: relative;
   width: 100%;
   border: 0;
   outline: 0;
@@ -4010,9 +4011,12 @@ kbd {
 }
 
 .inline-media-composer[data-empty="true"]::before {
+  position: absolute;
   content: attr(data-placeholder);
   color: var(--text-tertiary);
   pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .comment-edit-actions {
@@ -6325,6 +6329,7 @@ kbd {
   min-height: 118px;
   margin-top: 2px;
   padding: 6px 0 12px;
+  font-size: 15px;
 }
 
 .inline-media-description[data-empty="true"] {
