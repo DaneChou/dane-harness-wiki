@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
 import { attachmentContentUrl, resolvePersistedAttachmentUrl } from "../api";
 import {
   TASK_PRIORITIES,
@@ -46,6 +49,37 @@ interface TaskCardProps {
   onDragStart: (task: Task, height: number) => void;
   onDragEnd: () => void;
   onOpenConversation: (conversation: TaskConversationItem) => void;
+}
+
+interface TaskCardMarkdownNode {
+  type: string;
+  value?: string;
+  children?: TaskCardMarkdownNode[];
+}
+
+const taskCardMarkdownParser = unified().use(remarkParse).use(remarkGfm);
+
+function taskBodyText(value: string) {
+  function visibleText(node: TaskCardMarkdownNode): string {
+    if (node.type === "image" || node.type === "imageReference" || node.type === "definition") {
+      return "";
+    }
+    if (node.type === "break") return " ";
+    if (node.value !== undefined) return node.value;
+    const separator = node.type === "root"
+      || node.type === "blockquote"
+      || node.type === "list"
+      || node.type === "listItem"
+      || node.type === "table"
+      || node.type === "tableRow"
+      ? " "
+      : "";
+    return node.children?.map(visibleText).join(separator) ?? "";
+  }
+
+  return visibleText(taskCardMarkdownParser.parse(value) as TaskCardMarkdownNode)
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function calendarDate(value: string, locale: string) {
@@ -392,12 +426,10 @@ export function TaskCard({
   const showsInlineParticipants = variant === "main"
     && task.participants.length > 0;
   const image = showCover ? firstTaskImage(task) : null;
-  const body = showBody
-    ? task.description
-        .replace(/!\[[^\]]*\]\((?:<[^>]+>|[^\s)]+)(?:\s+["'][^)]*["'])?\)/g, " ")
-        .replace(/\s+/g, " ")
-        .trim()
-    : "";
+  const body = useMemo(
+    () => showBody ? taskBodyText(task.description) : "",
+    [showBody, task.description],
+  );
   const hasProperties = task.priority !== "none" || task.labels.length > 0 || task.dueDate;
   const showsProperties = !processingCard
     && (hasProperties || showsInlineParticipants || showsConversation);
