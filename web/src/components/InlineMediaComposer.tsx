@@ -606,6 +606,17 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       },
     }), [onChange, onError, segments]);
 
+    function directRootTextSegment(): InlineTextSegment | null {
+      const root = rootRef.current;
+      const segment = segments.length === 1 && segments[0].type === "text"
+        ? segments[0]
+        : null;
+      if (!root || !segment || root.childNodes.length !== 1) return null;
+      return root.firstChild instanceof Text || root.firstChild instanceof HTMLBRElement
+        ? segment
+        : null;
+    }
+
     function segmentElement(node: Node | null): HTMLElement | null {
       const root = rootRef.current;
       if (!root || !node || !root.contains(node)) return null;
@@ -629,6 +640,16 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     ): number | null {
       const root = rootRef.current;
       if (!root || !root.contains(node)) return null;
+      const directText = directRootTextSegment();
+      if (directText) {
+        const child = root.firstChild;
+        if (node === child && child instanceof Text) {
+          return Math.max(0, Math.min(offset, child.length));
+        }
+        if (node === root) {
+          return child instanceof Text && offset > 0 ? directText.text.length : 0;
+        }
+      }
       if (node === root) {
         for (let index = offset; index < root.childNodes.length; index += 1) {
           const child = root.childNodes[index];
@@ -674,6 +695,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     function domPointAtOffset(offset: number): { node: Node; offset: number } | null {
       const root = rootRef.current;
       if (!root) return null;
+      const directText = directRootTextSegment();
+      if (directText) {
+        const child = root.firstChild;
+        if (child instanceof Text) {
+          return { node: child, offset: Math.max(0, Math.min(offset, child.length)) };
+        }
+        return { node: root, offset: 0 };
+      }
       let current = 0;
       for (const segment of segments) {
         const element = elementForSegment(segment.id);
@@ -778,8 +807,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         setMention(null);
         return;
       }
-      const element = segmentElement(range.startContainer);
-      const id = element?.dataset.inlineMediaSegment;
+      const directText = directRootTextSegment();
+      const element = segmentElement(range.startContainer) ?? (directText ? root : null);
+      const id = element === root ? directText?.id : element?.dataset.inlineMediaSegment;
       const segment = id
         ? segments.find((candidate): candidate is InlineTextSegment => (
             candidate.id === id && candidate.type === "text"
@@ -897,31 +927,6 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const targetRange = input.getTargetRanges()[0];
       if (!targetRange) return;
       const root = rootRef.current;
-      const emptySegment = segments.length === 1 && segments[0].type === "text"
-        && segments[0].text.length === 0
-        ? segments[0]
-        : null;
-      if (
-        root
-        && emptySegment
-        && targetRange.startContainer === root
-        && root.childNodes.length === 1
-        && root.firstChild instanceof HTMLBRElement
-        && ["insertText", "insertReplacementText"].includes(input.inputType)
-      ) {
-        const element = document.createElement("span");
-        element.dataset.inlineMediaSegment = emptySegment.id;
-        element.className = "inline-media-text";
-        element.append(document.createElement("br"));
-        root.replaceChildren(element);
-        const range = document.createRange();
-        range.setStart(element, 0);
-        range.collapse(true);
-        const selection = window.getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        return;
-      }
       const start = logicalOffsetForPoint(
         targetRange.startContainer,
         targetRange.startOffset,
@@ -935,10 +940,19 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       if (start === null || end === null) return;
       const startElement = segmentElement(targetRange.startContainer);
       const endElement = segmentElement(targetRange.endContainer);
+      const directText = directRootTextSegment();
+      const directTextTarget = Boolean(
+        root
+        && directText
+        && [targetRange.startContainer, targetRange.endContainer].every((node) => (
+          node === root || node.parentNode === root
+        )),
+      );
       const targetSegment = startElement?.dataset.inlineMediaSegment
         ? segments.find((segment) => segment.id === startElement.dataset.inlineMediaSegment)
-        : null;
-      const sameTextSegment = targetSegment?.type === "text" && startElement === endElement;
+        : directTextTarget ? directText : null;
+      const sameTextSegment = targetSegment?.type === "text"
+        && (directTextTarget || startElement === endElement);
       const fullDelete = start === 0 && end > start && end === segmentsLength(segments);
       const nativeTextEdit = (
         sameTextSegment
@@ -1004,11 +1018,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       if (!root) return;
       const existing = nativeSegments.current;
       for (const segment of segments) existing.set(segment.id, segment);
+      const directText = directRootTextSegment();
       const next: InlineMediaSegment[] = [];
       const nextAtomHosts = new Map<string, HTMLElement>();
       for (const child of root.childNodes) {
         if (child instanceof Text) {
-          if (child.data) next.push(textSegment(child.data));
+          if (child.data) {
+            next.push(directText ? { ...directText, text: child.data } : textSegment(child.data));
+          }
           continue;
         }
         if (!(child instanceof HTMLElement)) continue;
