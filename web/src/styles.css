@@ -1135,10 +1135,15 @@ kbd {
   background: transparent;
 }
 
+.task-filter-trigger.board-card-display-trigger {
+  justify-content: center;
+  color: var(--text-primary);
+}
+
 .board-card-display-trigger > svg {
   width: 14px;
   height: 14px;
-  color: var(--text-tertiary);
+  color: inherit;
 }
 
 .task-filter-trigger.is-active {
