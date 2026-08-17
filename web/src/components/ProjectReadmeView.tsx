@@ -12,60 +12,6 @@ interface ProjectReadmeViewProps {
   onError?: (error: string) => void;
 }
 
-function defaultReadmeTemplate(projectName: string, isChinese: boolean): string {
-  if (isChinese) {
-    return `# ${projectName}
-
-## 📖 项目概述
-简要描述项目的核心目标、主要功能以及面向的使用者。
-
-## 🛠️ 技术栈与依赖
-- 核心语言与框架：
-- 数据存储与中间件：
-- 开发与构建工具：
-
-## 🚀 快速开始与开发指南
-\`\`\`bash
-# 安装依赖
-npm install
-
-# 启动本地开发服务
-npm run dev
-\`\`\`
-
-## 📌 协作规范与 Agent 指南
-1. **分支与 PR 规范**：功能分支格式 \`feat/*\` 或 \`fix/*\`。
-2. **测试与质量要求**：提交代码前确保本地测试与构建通过。
-3. **架构与细节文档**：详细技术规格与长篇文档请放于本地代码库 \`docs/\` 目录。
-`;
-  }
-
-  return `# ${projectName}
-
-## 📖 Project Overview
-Briefly describe the project's core objectives, key features, and target users.
-
-## 🛠️ Tech Stack & Architecture
-- Frameworks & Libraries:
-- Storage & Infrastructure:
-- Development Tools:
-
-## 🚀 Quick Start & Development
-\`\`\`bash
-# Install dependencies
-npm install
-
-# Start local development server
-npm run dev
-\`\`\`
-
-## 📌 Collaboration & Agent Guidelines
-1. **Branch & PR Conventions**: Feature branches should use \`feat/*\` or \`fix/*\`.
-2. **Quality & Testing**: Ensure local tests and lint checks pass before pushing.
-3. **Detailed Documentation**: Detailed technical specifications and guides should reside in the repository's \`docs/\` folder.
-`;
-}
-
 export function ProjectReadmeView({
   project,
   currentUser: _currentUser,
@@ -107,13 +53,8 @@ export function ProjectReadmeView({
     };
   }, [project.id, onError]);
 
-  function handleStartEditing(initialTemplate = false) {
-    if (initialTemplate && (!draftContent || !draftContent.trim())) {
-      const template = defaultReadmeTemplate(project.name, language === "zh");
-      setDraftContent(template);
-    } else {
-      setDraftContent(readme?.content ?? "");
-    }
+  function handleStartEditing() {
+    setDraftContent(readme?.content ?? "");
     setEditing(true);
     setEditTab("write");
     setSaveError(null);
@@ -166,7 +107,7 @@ export function ProjectReadmeView({
     return (
       <div className="project-readme-loading">
         <div className="project-readme-spinner" />
-        <p>{text("正在加载项目说明…", "Loading project README…")}</p>
+        <p>{text("正在加载 Readme…", "Loading Readme…")}</p>
       </div>
     );
   }
@@ -212,7 +153,7 @@ export function ProjectReadmeView({
             <button
               type="button"
               className="button secondary project-readme-edit-btn"
-              onClick={() => handleStartEditing(false)}
+              onClick={handleStartEditing}
             >
               <LinearIcon name="write" />
               <span>{hasContent ? text("编辑 Readme", "Edit Readme") : text("编写 Readme", "Write Readme")}</span>
@@ -281,10 +222,10 @@ export function ProjectReadmeView({
                 value={draftContent}
                 onChange={(e) => setDraftContent(e.target.value)}
                 placeholder={text(
-                  "支持标准 Markdown 语法、GFM 表格、代码高亮与 Mermaid 架构流程图…",
-                  "Supports standard Markdown, GFM tables, code syntax highlighting, and Mermaid diagrams…",
+                  "输入项目 Readme 内容，支持 Markdown 语法…",
+                  "Enter project Readme content in Markdown…",
                 )}
-                aria-label={text("项目说明内容", "Project README content")}
+                aria-label={text("项目 Readme 内容", "Project Readme content")}
                 rows={24}
               />
               <div className="project-readme-editor-footer">
@@ -299,7 +240,7 @@ export function ProjectReadmeView({
           ) : (
             <div className="project-readme-preview-wrapper markdown-preview-surface">
               {draftContent.trim() ? (
-                <MarkdownDocument markdown={draftContent} />
+                <MarkdownDocument value={draftContent} />
               ) : (
                 <p className="project-readme-preview-empty">
                   {text("暂无预览内容", "No content to preview")}
@@ -310,7 +251,7 @@ export function ProjectReadmeView({
         </div>
       ) : hasContent ? (
         <div className="project-readme-content-wrapper markdown-preview-surface">
-          <MarkdownDocument markdown={readme!.content} />
+          <MarkdownDocument value={readme?.content ?? ""} />
         </div>
       ) : (
         <div className="project-readme-empty-state">
@@ -329,7 +270,7 @@ export function ProjectReadmeView({
           <button
             type="button"
             className="button primary project-readme-create-btn"
-            onClick={() => handleStartEditing(true)}
+            onClick={handleStartEditing}
           >
             <LinearIcon name="plus" />
             <span>{text("开始编写 Readme", "Create Project Readme")}</span>
