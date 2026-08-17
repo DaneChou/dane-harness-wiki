@@ -3428,14 +3428,6 @@ export function App() {
         {selectedProjectId && !detailTask && <div className="board-toolbar">
           <div className="view-tabs" aria-label={text("看板视图", "Board views")}>
             <button
-              className={`view-tab${boardView === "readme" ? " active" : ""}`}
-              type="button"
-              aria-pressed={boardView === "readme"}
-              onClick={() => selectBoardView("readme")}
-            >
-              Readme
-            </button>
-            <button
               className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
               type="button"
               aria-pressed={boardView === "dashboard"}
@@ -3466,6 +3458,14 @@ export function App() {
               onClick={() => selectBoardView("gantt")}
             >
               {text("甘特图", "Gantt")}
+            </button>
+            <button
+              className={`view-tab${boardView === "readme" ? " active" : ""}`}
+              type="button"
+              aria-pressed={boardView === "readme"}
+              onClick={() => selectBoardView("readme")}
+            >
+              Readme
             </button>
             {SHOW_WORKFLOW_BOARD_ENTRY && (
               <button

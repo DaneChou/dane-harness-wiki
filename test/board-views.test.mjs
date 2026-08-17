@@ -23,11 +23,11 @@ test("the taskboard defaults to issues and exposes the current project views", (
     /function readProjectBoardView\(projectId: string\): BoardView \{\s*const view = [^;]+;\s*return [\s\S]*?\? view\s*: "issues";\s*\}/,
   );
   assert.match(appSource, /useState<BoardView>\(\(\) => readProjectBoardView\(initialProjectId\)\)/);
-  assert.match(appSource, />\s*Readme\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("仪表盘", "Dashboard"\)\}\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("议题看板", "Issue board"\)\}\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("列表视图", "List"\)\}\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("甘特图", "Gantt"\)\}\s*<\/button>/);
+  assert.match(appSource, />\s*Readme\s*<\/button>/);
   assert.match(appSource, /aria-pressed=\{boardView === "issues"\}/);
   assert.match(appSource, /onClick=\{\(\) => selectBoardView\("issues"\)\}/);
   assert.match(appSource, /const SHOW_WORKFLOW_BOARD_ENTRY = false/);
