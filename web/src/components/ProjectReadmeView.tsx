@@ -176,7 +176,7 @@ export function ProjectReadmeView({
       <div className="project-readme-header">
         <div className="project-readme-title-group">
           <span className="project-readme-icon" aria-hidden="true">
-            <LinearIcon name="docs" />
+            <LinearIcon name="file" />
           </span>
           <div className="project-readme-title-info">
             <h1 className="project-readme-heading">
@@ -214,7 +214,7 @@ export function ProjectReadmeView({
               className="button secondary project-readme-edit-btn"
               onClick={() => handleStartEditing(false)}
             >
-              <LinearIcon name="edit" />
+              <LinearIcon name="write" />
               <span>{hasContent ? text("编辑 Readme", "Edit Readme") : text("编写 Readme", "Write Readme")}</span>
             </button>
           ) : (
@@ -227,7 +227,7 @@ export function ProjectReadmeView({
                   className={`project-readme-tab${editTab === "write" ? " is-active" : ""}`}
                   onClick={() => setEditTab("write")}
                 >
-                  <LinearIcon name="edit" />
+                  <LinearIcon name="write" />
                   <span>{text("编辑", "Write")}</span>
                 </button>
                 <button
@@ -237,7 +237,7 @@ export function ProjectReadmeView({
                   className={`project-readme-tab${editTab === "preview" ? " is-active" : ""}`}
                   onClick={() => setEditTab("preview")}
                 >
-                  <LinearIcon name="eye" />
+                  <LinearIcon name="file" />
                   <span>{text("预览", "Preview")}</span>
                 </button>
               </div>
@@ -315,7 +315,7 @@ export function ProjectReadmeView({
       ) : (
         <div className="project-readme-empty-state">
           <div className="project-readme-empty-icon">
-            <LinearIcon name="docs" />
+            <LinearIcon name="file" />
           </div>
           <h2 className="project-readme-empty-title">
             {text("项目暂无 Readme", "No Readme for this project yet")}
@@ -331,7 +331,7 @@ export function ProjectReadmeView({
             className="button primary project-readme-create-btn"
             onClick={() => handleStartEditing(true)}
           >
-            <LinearIcon name="create" />
+            <LinearIcon name="plus" />
             <span>{text("开始编写 Readme", "Create Project Readme")}</span>
           </button>
         </div>
