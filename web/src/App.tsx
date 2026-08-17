@@ -64,6 +64,7 @@ import { BoardColumn } from "./components/BoardColumn";
 import type { AiChatOpenThreadRequest } from "./components/AiChat";
 import { BoardCardDisplayMenu } from "./components/BoardCardDisplayMenu";
 import { DashboardView } from "./components/DashboardView";
+import { ProjectReadmeView } from "./components/ProjectReadmeView";
 import { IssueListView } from "./components/IssueListView";
 import { JiraConnectionDialog } from "./components/JiraConnectionDialog";
 import { OtherTasksPanel } from "./components/OtherTasksPanel";
@@ -141,7 +142,7 @@ import { createRevisionPoller, getRevisionPollingInterval } from "./revisionPoll
 
 type ConnectionState = "connecting" | "live" | "reconnecting";
 type Theme = "light" | "dark";
-type BoardView = "dashboard" | "issues" | "list" | "gantt" | "workflow";
+type BoardView = "readme" | "dashboard" | "issues" | "list" | "gantt" | "workflow";
 type DetailSourceScroll =
   | { projectId: string; view: "issues"; status: TaskStatus; scrollTop: number }
   | { projectId: string; view: "list"; scrollTop: number };
@@ -338,7 +339,7 @@ function readIssueActivityKeys(storageKey: string): Record<string, string> {
 
 function readProjectBoardView(projectId: string): BoardView {
   const view = taskboardStorage.getItem(`${PROJECT_VIEW_KEY_PREFIX}${projectId}`);
-  return view === "dashboard" || view === "list" || view === "gantt" || view === "issues"
+  return view === "readme" || view === "dashboard" || view === "list" || view === "gantt" || view === "issues"
     ? view
     : "issues";
 }
@@ -3427,6 +3428,14 @@ export function App() {
         {selectedProjectId && !detailTask && <div className="board-toolbar">
           <div className="view-tabs" aria-label={text("看板视图", "Board views")}>
             <button
+              className={`view-tab${boardView === "readme" ? " active" : ""}`}
+              type="button"
+              aria-pressed={boardView === "readme"}
+              onClick={() => selectBoardView("readme")}
+            >
+              {text("说明文档", "README")}
+            </button>
+            <button
               className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
               type="button"
               aria-pressed={boardView === "dashboard"}
@@ -3629,6 +3638,13 @@ export function App() {
               {text("导入当前项目任务状态", "Import current project task status")}
             </button>
           </div>
+        ) : boardView === "readme" && selectedProject ? (
+          <ProjectReadmeView
+            key={selectedProjectId}
+            project={selectedProject}
+            currentUser={currentUser}
+            onError={setActionError}
+          />
         ) : boardView === "dashboard" ? (
           <DashboardView
             key={selectedProjectId}

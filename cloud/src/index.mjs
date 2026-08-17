@@ -2406,6 +2406,90 @@ async function saveWorkflow(env, projectId, expectedVersion, workspace) {
   return getWorkflow(env, projectId);
 }
 
+async function getProjectReadme(env, projectId) {
+  const project = await getProject(env, projectId);
+  if (!project) {
+    throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
+  }
+  const row = await env.DB.prepare(`
+    SELECT project_id, content, version, created_at, updated_at
+    FROM project_readmes
+    WHERE project_id = ?
+  `).bind(projectId).first();
+  return row
+    ? {
+      projectId: row.project_id,
+      content: row.content,
+      version: row.version,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }
+    : { projectId, content: "", version: 1, createdAt: null, updatedAt: null };
+}
+
+async function saveProjectReadme(env, projectId, content, expectedVersion) {
+  const project = await getProject(env, projectId);
+  if (!project) {
+    throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
+  }
+  const timestamp = now();
+  const current = await env.DB.prepare(`
+    SELECT version FROM project_readmes WHERE project_id = ?
+  `).bind(projectId).first();
+  if (expectedVersion !== undefined) {
+    const actualVersion = current?.version ?? 1;
+    if (actualVersion !== expectedVersion) {
+      throw new ApiError(409, "VERSION_CONFLICT", "Project README changed since it was last read", {
+        expectedVersion,
+        actualVersion,
+      });
+    }
+  }
+  if (current) {
+    const versionCondition = expectedVersion !== undefined ? " AND version = ?" : "";
+    const params = expectedVersion !== undefined
+      ? [content, timestamp, projectId, expectedVersion]
+      : [content, timestamp, projectId];
+    const result = await env.DB.prepare(`
+      UPDATE project_readmes
+      SET content = ?, version = version + 1, updated_at = ?
+      WHERE project_id = ?${versionCondition}
+    `).bind(...params).run();
+    if (!changed(result)) {
+      const latest = await env.DB.prepare(`
+        SELECT version FROM project_readmes WHERE project_id = ?
+      `).bind(projectId).first();
+      throw new ApiError(
+        409,
+        "VERSION_CONFLICT",
+        "Project README changed since it was last read",
+        { expectedVersion, actualVersion: latest?.version ?? 1 },
+      );
+    }
+  } else {
+    try {
+      await env.DB.prepare(`
+        INSERT INTO project_readmes (project_id, content, version, created_at, updated_at)
+        VALUES (?, ?, 1, ?, ?)
+      `).bind(projectId, content, timestamp, timestamp).run();
+    } catch (error) {
+      if (String(error.message).includes("UNIQUE constraint failed")) {
+        const latest = await env.DB.prepare(`
+          SELECT version FROM project_readmes WHERE project_id = ?
+        `).bind(projectId).first();
+        throw new ApiError(
+          409,
+          "VERSION_CONFLICT",
+          "Project README changed since it was last read",
+          { expectedVersion, actualVersion: latest?.version ?? 1 },
+        );
+      }
+      throw error;
+    }
+  }
+  return getProjectReadme(env, projectId);
+}
+
 async function listTaskActivities(env, taskId) {
   const task = await requireTaskRow(env, taskId);
   const rows = await all(env.DB.prepare(`
@@ -2782,6 +2866,30 @@ async function routeApi(request, env, actor, url) {
       const workspace = parseWorkflowWorkspace(body.workspace);
       return json(200, {
         workflow: await saveWorkflow(env, projectId, version, workspace),
+      });
+    }
+    methodNotAllowed(["GET", "PUT"]);
+  }
+
+  const projectReadmeMatch = pathname.match(
+    /^\/api\/projects\/([^/]+)\/readme$/,
+  );
+  if (projectReadmeMatch) {
+    requireNoQuery(url, "Project README routes");
+    const projectId = validateProjectId(
+      decodePathPart(projectReadmeMatch[1], "Project id"),
+    );
+    if (request.method === "GET") {
+      return json(200, { readme: await getProjectReadme(env, projectId) });
+    }
+    if (request.method === "PUT") {
+      const body = await readJson(request);
+      assertPlainObject(body);
+      assertAllowedKeys(body, new Set(["version", "content"]));
+      const version = body.version === undefined ? undefined : parseVersion(body.version);
+      const content = stringField(body.content ?? "", "content", { maxLength: 500_000 });
+      return json(200, {
+        readme: await saveProjectReadme(env, projectId, content, version),
       });
     }
     methodNotAllowed(["GET", "PUT"]);

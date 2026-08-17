@@ -501,6 +501,14 @@ function parseProjectLabel(body) {
   return stringField(body.label, "label", { required: true, maxLength: 64 });
 }
 
+function parseProjectReadmeSave(body) {
+  assertPlainObject(body);
+  assertAllowedKeys(body, new Set(["content", "version"]));
+  const content = stringField(body.content ?? "", "content", { maxLength: 500_000 });
+  const version = body.version === undefined ? undefined : parseVersion(body.version);
+  return { content, version };
+}
+
 function parseThreadId(value) {
   if (value === undefined) return undefined;
   return stringField(value, "threadId", { required: true, maxLength: 256 });
@@ -2304,6 +2312,33 @@ export function createTaskboardServer(options = {}) {
             workflowVersion: workflow.version,
           });
           return sendJson(response, 200, { workflow });
+        }
+        return methodNotAllowed(response, ["GET", "PUT"]);
+      }
+
+      const projectReadmeRoute = pathname.match(/^\/api\/projects\/([^/]+)\/readme$/);
+      if (projectReadmeRoute) {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Project README routes do not accept query parameters");
+        }
+        let projectId;
+        try {
+          projectId = decodeURIComponent(projectReadmeRoute[1]);
+        } catch {
+          throw new ApiError(400, "INVALID_PATH", "Project id contains invalid encoding");
+        }
+        validateProjectId(projectId);
+        if (request.method === "GET") {
+          return sendJson(response, 200, { readme: database.getProjectReadme(projectId) });
+        }
+        if (request.method === "PUT") {
+          const input = parseProjectReadmeSave(await readJson(request));
+          const readme = database.saveProjectReadme(projectId, input.content, input.version);
+          events.emit("project.readme.updated", {
+            projectId,
+            readmeVersion: readme.version,
+          });
+          return sendJson(response, 200, { readme });
         }
         return methodNotAllowed(response, ["GET", "PUT"]);
       }
