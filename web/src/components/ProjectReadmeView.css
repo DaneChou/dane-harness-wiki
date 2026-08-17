@@ -30,9 +30,7 @@
 }
 
 @keyframes project-readme-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  to { transform: rotate(360deg); }
 }
 
 .project-readme-header {
@@ -93,12 +91,7 @@
   font-weight: 500;
 }
 
-.project-readme-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
+.project-readme-actions,
 .project-readme-edit-actions {
   display: flex;
   align-items: center;
@@ -107,12 +100,11 @@
 
 .project-readme-tab-toggle {
   display: inline-flex;
-  align-items: center;
   padding: 2px;
   background: var(--surface-hover, rgba(0, 0, 0, 0.04));
   border-radius: 6px;
   border: 1px solid var(--border);
-  margin-right: 8px;
+  margin-right: 4px;
 }
 
 .project-readme-tab {
@@ -156,31 +148,28 @@
   border: 1px solid rgba(220, 38, 38, 0.2);
 }
 
-.project-readme-content-wrapper {
+.project-readme-content-wrapper,
+.project-readme-preview-wrapper {
   padding: 24px 28px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  min-height: 400px;
+  min-height: 380px;
 }
 
 .project-readme-editor-wrapper {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  width: 100%;
 }
 
 .project-readme-textarea-wrapper {
   display: flex;
   flex-direction: column;
-  width: 100%;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .project-readme-textarea {
@@ -191,7 +180,7 @@
   outline: none;
   background: transparent;
   color: var(--text-primary);
-  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
   font-size: 13.5px;
   line-height: 1.6;
   resize: vertical;
@@ -207,14 +196,6 @@
   border-top: 1px solid var(--border);
   font-size: 11.5px;
   color: var(--text-tertiary);
-}
-
-.project-readme-preview-wrapper {
-  padding: 24px 28px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  min-height: 380px;
 }
 
 .project-readme-preview-empty {
