@@ -3628,6 +3628,13 @@ export function App() {
             >
               {text("导入当前项目任务状态", "Import current project task status")}
             </button>
+            <button
+              className="button secondary"
+              type="button"
+              onClick={() => setEditor({ task: null, status: "todo" })}
+            >
+              {text("添加议题", "Add issue")}
+            </button>
           </div>
         ) : boardView === "dashboard" ? (
           <DashboardView
