@@ -700,8 +700,12 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         element.dataset.inlineMediaSegment = segment.id;
         if (segment.type === "text") {
           element.className = "inline-media-text";
-          if (segment.text) element.textContent = segment.text;
-          else element.append(document.createElement("br"));
+          if (segment.text) {
+            element.textContent = segment.text;
+            if (segment.text.endsWith("\n")) element.append(document.createElement("br"));
+          } else {
+            element.append(document.createElement("br"));
+          }
         } else {
           element.className = segment.type === "issue-reference"
             ? "inline-media-atom"
