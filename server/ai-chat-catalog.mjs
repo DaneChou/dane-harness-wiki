@@ -228,6 +228,7 @@ function listSkills(codexExecutable, workspacePath, processEnv) {
       cwd: workspacePath,
       env: processEnv,
       stdio: ["pipe", "pipe", "ignore"],
+      windowsHide: true,
     });
     let buffer = "";
     let settled = false;
@@ -819,6 +820,7 @@ export async function discoverAiCatalog({
       encoding: "utf8",
       timeout: CATALOG_TIMEOUT_MS,
       maxBuffer: CATALOG_MAX_BUFFER,
+      windowsHide: true,
     }),
     listSkills(codexExecutable, workspacePath, environment),
     loadSlashCommands(),

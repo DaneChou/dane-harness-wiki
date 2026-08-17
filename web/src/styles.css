@@ -4924,6 +4924,12 @@ kbd {
   font-size: 11px;
 }
 
+.page-empty-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .page-empty code {
   margin-bottom: 12px;
   padding: 5px 7px;
