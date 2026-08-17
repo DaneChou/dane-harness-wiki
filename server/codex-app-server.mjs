@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
+import { executableCommand } from "../shared/executable-command.mjs";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const MAX_STDOUT_BUFFER = 4 * 1024 * 1024;
@@ -93,7 +94,8 @@ export class CodexAppServer {
     if (this.closing) throw new CodexAppServerError("Codex app-server is closing");
 
     this.starting = new Promise((resolve, reject) => {
-      const child = spawn(this.executable, ["app-server", "--stdio"], {
+      const command = executableCommand(this.executable, ["app-server", "--stdio"]);
+      const child = spawn(command.executable, command.args, {
         env: this.processEnv,
         stdio: ["pipe", "pipe", "pipe"],
       });
