@@ -6644,6 +6644,11 @@ kbd {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent);
 }
 
+.inline-media-atom.is-range-selected > .inline-media-composer-reference {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 62%, transparent);
+}
+
 .inline-media-image-atom.is-range-selected > .inline-media-image {
   border-radius: 8px;
   outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
@@ -6656,6 +6661,34 @@ kbd {
   border: 0;
   font-family: inherit;
   cursor: text;
+}
+
+.inline-media-composer-reference {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 4px;
+  padding: 1px 5px;
+  border: 0;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: color-mix(in srgb, var(--accent) 78%, var(--text-primary));
+  font: inherit;
+  line-height: inherit;
+  vertical-align: baseline;
+  cursor: text;
+}
+
+.inline-media-composer-reference > svg {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+}
+
+.inline-media-composer-reference > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .inline-media-image {
@@ -8417,6 +8450,43 @@ kbd {
   color: var(--text-tertiary);
   font-size: 13px;
   text-align: center;
+}
+
+.composer-completion-menu {
+  padding: 5px;
+}
+
+.composer-completion-group + .composer-completion-group {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: var(--border-hairline) solid var(--border);
+}
+
+.composer-completion-group > header {
+  padding: 6px 12px 4px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.composer-completion-state {
+  margin: 0;
+  padding: 18px 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  text-align: center;
+}
+
+.composer-completion-state.is-error {
+  color: var(--danger);
+}
+
+.composer-completion-diagnostics {
+  margin: -10px 12px 12px;
+  padding-left: 18px;
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .ai-chat-composer-toolbar {
