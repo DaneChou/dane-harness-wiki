@@ -3433,7 +3433,7 @@ export function App() {
               aria-pressed={boardView === "readme"}
               onClick={() => selectBoardView("readme")}
             >
-              {text("说明文档", "README")}
+              Readme
             </button>
             <button
               className={`view-tab${boardView === "dashboard" ? " active" : ""}`}

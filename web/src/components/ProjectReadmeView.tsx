@@ -180,7 +180,7 @@ export function ProjectReadmeView({
           </span>
           <div className="project-readme-title-info">
             <h1 className="project-readme-heading">
-              {text("项目说明", "Project README")}
+              Readme
             </h1>
             <div className="project-readme-meta">
               <span className="project-readme-project-badge">{project.name}</span>
@@ -215,7 +215,7 @@ export function ProjectReadmeView({
               onClick={() => handleStartEditing(false)}
             >
               <LinearIcon name="edit" />
-              <span>{hasContent ? text("编辑说明", "Edit README") : text("编写说明", "Write README")}</span>
+              <span>{hasContent ? text("编辑 Readme", "Edit Readme") : text("编写 Readme", "Write Readme")}</span>
             </button>
           ) : (
             <div className="project-readme-edit-actions">
@@ -318,12 +318,12 @@ export function ProjectReadmeView({
             <LinearIcon name="docs" />
           </div>
           <h2 className="project-readme-empty-title">
-            {text("项目暂无说明文档", "No README for this project yet")}
+            {text("项目暂无 Readme", "No Readme for this project yet")}
           </h2>
           <p className="project-readme-empty-desc">
             {text(
-              "为项目撰写全局说明文档，记录项目目标、技术栈、架构与规范，方便团队协作者与 Agent 快速上手。",
-              "Create a project README to document goals, architecture, tech stack, and conventions for collaborators and AI agents.",
+              "为项目撰写全局 Readme，记录项目目标、技术栈、架构与规范，方便团队协作者与 Agent 快速上手。",
+              "Create a project Readme to document goals, architecture, tech stack, and conventions for collaborators and AI agents.",
             )}
           </p>
           <button
@@ -332,7 +332,7 @@ export function ProjectReadmeView({
             onClick={() => handleStartEditing(true)}
           >
             <LinearIcon name="create" />
-            <span>{text("开始编写项目说明", "Create Project README")}</span>
+            <span>{text("开始编写 Readme", "Create Project Readme")}</span>
           </button>
         </div>
       )}
