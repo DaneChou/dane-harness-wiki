@@ -359,14 +359,11 @@ function DescriptionDocument({
         const selection = event.currentTarget.ownerDocument.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
         const range = selection.getRangeAt(0);
-        if (!range.intersectsNode(event.currentTarget)) return;
+        if (
+          !event.currentTarget.contains(range.startContainer)
+          || !event.currentTarget.contains(range.endContainer)
+        ) return;
         const selectedRange = range.cloneRange();
-        if (!event.currentTarget.contains(selectedRange.startContainer)) {
-          selectedRange.setStart(event.currentTarget, 0);
-        }
-        if (!event.currentTarget.contains(selectedRange.endContainer)) {
-          selectedRange.setEnd(event.currentTarget, event.currentTarget.childNodes.length);
-        }
         const wrapper = event.currentTarget.ownerDocument.createElement("div");
         wrapper.append(selectedRange.cloneContents());
         const segments = createInlineMediaSegmentsFromHtml(wrapper.innerHTML, referenceTasks);

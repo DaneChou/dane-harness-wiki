@@ -417,7 +417,7 @@ export function createInlineMediaSegmentsFromHtml(
     }
     if (node.nodeType !== Node.ELEMENT_NODE) return;
     const element = node as HTMLElement;
-    if (["BUTTON", "SCRIPT", "STYLE"].includes(element.tagName)) return;
+    if (["SCRIPT", "STYLE"].includes(element.tagName)) return;
 
     const inlineMarkdown = element.dataset.taskboardInlineMediaMarkdown;
     if (inlineMarkdown) {
@@ -425,22 +425,29 @@ export function createInlineMediaSegmentsFromHtml(
       structured = true;
       return;
     }
+    if (element.tagName === "BUTTON") return;
     if (element.tagName === "A") {
       const href = element.getAttribute("href") ?? "";
-      const queryIndex = href.indexOf("?");
-      const search = queryIndex >= 0 ? href.slice(queryIndex) : "";
-      const identifier = readIssueIdentifier(search);
-      const projectId = new URLSearchParams(search).get("project");
-      if (identifier && projectId) {
-        const task = referenceTasks.find((candidate) => (
-          candidate.projectId === projectId && candidate.identifier === identifier
-        ));
-        const displayIdentifier = task?.externalKey ?? identifier;
-        const route = new URLSearchParams({ project: projectId, issue: identifier });
-        markdown += `[@${displayIdentifier}](?${route})`;
-        structured = true;
-        return;
-      }
+      try {
+        const base = new URL(window.document.baseURI);
+        base.search = "";
+        base.hash = "";
+        const url = new URL(href, base);
+        if (url.origin === base.origin && url.pathname === base.pathname) {
+          const identifier = readIssueIdentifier(url.search);
+          const projectId = url.searchParams.get("project");
+          if (identifier && projectId) {
+            const task = referenceTasks.find((candidate) => (
+              candidate.projectId === projectId && candidate.identifier === identifier
+            ));
+            const displayIdentifier = task?.externalKey ?? identifier;
+            const route = new URLSearchParams({ project: projectId, issue: identifier });
+            markdown += `[@${displayIdentifier}](?${route})`;
+            structured = true;
+            return;
+          }
+        }
+      } catch {}
     }
     if (element.tagName === "IMG") {
       const source = element.getAttribute("src");
@@ -605,6 +612,7 @@ function IssueReferenceChip({
       className={`issue-reference-inline inline-media-issue-reference${task ? ` issue-reference-status-${task.status}` : ""}`}
       contentEditable={false}
       data-inline-media-segment={segment.id}
+      data-taskboard-inline-media-markdown={segment.markdown}
       disabled={disabled}
       aria-label={task
         ? text(
@@ -698,7 +706,8 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           element.className = segment.type === "issue-reference"
             ? "inline-media-atom"
             : "inline-media-atom inline-media-image-atom";
-          element.contentEditable = "false";
+          if (segment.type === "pending-image") element.contentEditable = "false";
+          else element.dataset.taskboardInlineMediaMarkdown = segment.markdown;
           nextAtomHosts.set(segment.id, element);
         }
         fragment.append(element);
@@ -1182,11 +1191,15 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         );
         return;
       }
-      const htmlSegments = createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
-      if (htmlSegments) {
-        event.preventDefault();
-        applyRangeReplacement(range.start, range.end, htmlSegments, false);
-        return;
+      const taskboardHtml = clipboardId
+        || clipboardHtml.includes("data-taskboard-inline-media-markdown");
+      if (taskboardHtml) {
+        const htmlSegments = createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
+        if (htmlSegments) {
+          event.preventDefault();
+          applyRangeReplacement(range.start, range.end, htmlSegments, false);
+          return;
+        }
       }
       const clipboardFiles = clipboardImages(event.clipboardData);
       if (clipboardFiles.length > 0) {
@@ -1194,6 +1207,12 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         const images = insertableImages(clipboardFiles);
         if (!images || images.length === 0) return;
         applyRangeReplacement(range.start, range.end, images.map(imageSegment), false);
+        return;
+      }
+      const htmlSegments = createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
+      if (htmlSegments) {
+        event.preventDefault();
+        applyRangeReplacement(range.start, range.end, htmlSegments, false);
         return;
       }
 
@@ -1323,6 +1342,13 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           onDrop={dropContent}
           onPaste={pasteContent}
           onCopy={(event) => {
+            const selection = event.currentTarget.ownerDocument.getSelection();
+            if (!selection || selection.rangeCount === 0) return;
+            const selectedRange = selection.getRangeAt(0);
+            if (
+              !event.currentTarget.contains(selectedRange.startContainer)
+              || !event.currentTarget.contains(selectedRange.endContainer)
+            ) return;
             const range = currentLogicalRange();
             if (!range || range.start === range.end) return;
             const copiedSegments = inlineMediaRangeSegments(segments, range.start, range.end);
