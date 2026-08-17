@@ -63,13 +63,15 @@ async function readConfiguredAgent(filePath, roleNameHint = null) {
     const stableId = nonEmptyTomlString(parsed.name)
       ?? nonEmptyTomlString(parsed.role_name)
       ?? roleNameHint;
-    if (!stableId) return null;
+    const description = nonEmptyTomlString(parsed.description);
+    const developerInstructions = nonEmptyTomlString(parsed.developer_instructions);
+    if (!stableId || (roleNameHint === null && (!description || !developerInstructions))) return null;
     return {
       stableId,
       name: stableId,
       label: stableId,
-      description: nonEmptyTomlString(parsed.description),
-      developerInstructions: nonEmptyTomlString(parsed.developer_instructions),
+      description,
+      developerInstructions,
       sourcePath: filePath,
     };
   } catch {
@@ -133,7 +135,6 @@ function completeConfiguredAgent(agent) {
   return agent
     && agent.stableId
     && agent.description
-    && agent.developerInstructions
     ? {
         ...agent,
         identity: ["agent", agent.stableId].join("\u0000"),
