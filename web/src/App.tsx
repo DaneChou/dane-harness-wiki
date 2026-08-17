@@ -3613,21 +3613,30 @@ export function App() {
               "让 Codex 检查当前项目目录对应的对话，并整理任务状态。",
               "Ask Codex to inspect conversations for this project directory and organize their task status.",
             )}</p>
-            <button
-              className="button primary"
-              type="button"
-              onClick={() => setAiOpenThreadRequest((current) => ({
-                projectId: selectedProject.id,
-                issueId: null,
-                composerText: text(
-                  "只检查当前项目目录对应的 Codex 对话。请将其中已完成、处理中和待执行的任务整理并导入当前项目的 Taskboard。",
-                  "Only inspect Codex conversations associated with the current project directory. Organize completed, in-progress, and pending tasks, then import them into this project's Taskboard.",
-                ),
-                requestId: (current?.requestId ?? 0) + 1,
-              }))}
-            >
-              {text("导入当前项目任务状态", "Import current project task status")}
-            </button>
+            <div className="page-empty-actions">
+              <button
+                className="button primary"
+                type="button"
+                onClick={() => setAiOpenThreadRequest((current) => ({
+                  projectId: selectedProject.id,
+                  issueId: null,
+                  composerText: text(
+                    "只检查当前项目目录对应的 Codex 对话。请将其中已完成、处理中和待执行的任务整理并导入当前项目的 Taskboard。",
+                    "Only inspect Codex conversations associated with this project directory. Organize completed, in-progress, and pending tasks, then import them into this project's Taskboard.",
+                  ),
+                  requestId: (current?.requestId ?? 0) + 1,
+                }))}
+              >
+                {text("导入当前项目任务状态", "Import current project task status")}
+              </button>
+              <button
+                className="button secondary"
+                type="button"
+                onClick={() => setEditor({ task: null, status: "todo" })}
+              >
+                {text("添加议题", "Add issue")}
+              </button>
+            </div>
           </div>
         ) : boardView === "dashboard" ? (
           <DashboardView
