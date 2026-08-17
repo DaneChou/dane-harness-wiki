@@ -1026,8 +1026,6 @@ kbd {
   background: var(--surface-hover);
 }
 
-.task-filter-trigger:focus-visible,
-.task-filter-trigger.is-open,
 .other-tasks-trigger:focus-visible,
 .other-tasks-trigger.is-open {
   border-color: var(--border-strong);
@@ -1152,6 +1150,14 @@ kbd {
 
 .task-filter-trigger.is-active .filter-icon {
   stroke: var(--accent);
+}
+
+.task-filter-trigger:focus-visible,
+.task-filter-trigger.is-open {
+  border-color: transparent;
+  outline: 0;
+  background: var(--surface-active);
+  box-shadow: none;
 }
 
 .task-filter-active-dot {
@@ -7920,12 +7926,15 @@ kbd {
 
 .ai-chat-thinking-step-description {
   display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   color: var(--text-tertiary);
   font-size: 13px;
   font-weight: 400;
   line-height: 1.35;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ai-chat-thinking-step.is-failed .ai-chat-thinking-step-label {

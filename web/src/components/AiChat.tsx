@@ -838,7 +838,10 @@ function ThinkingSteps({
                           {eventStatus === "running" && <span aria-hidden="true">…</span>}
                         </span>
                         {content && (
-                          <span className="ai-chat-thinking-step-description">
+                          <span
+                            className="ai-chat-thinking-step-description"
+                            title={content}
+                          >
                             {content}
                           </span>
                         )}
