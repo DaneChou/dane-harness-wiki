@@ -1025,6 +1025,10 @@ export function TaskDetail({
                       segments={descriptionSegments}
                       mentionTasks={tasks}
                       referenceTasks={referenceTasks}
+                      completionContext={{
+                        projectId: currentTask.projectId,
+                        surface: "issue-description",
+                      }}
                       placeholder={text("添加描述…", "Add description…")}
                       ariaLabel={text("议题描述", "Issue description")}
                       disabled={savingProperty === "description"}
@@ -1346,6 +1350,10 @@ export function TaskDetail({
                             segments={editingSegments}
                             mentionTasks={tasks}
                             referenceTasks={referenceTasks}
+                            completionContext={{
+                              projectId: currentTask.projectId,
+                              surface: "comment",
+                            }}
                             placeholder={text("编辑评论", "Edit comment")}
                             ariaLabel={text("编辑评论", "Edit comment")}
                             disabled={savingCommentId === comment.id}
@@ -1491,6 +1499,10 @@ export function TaskDetail({
                   segments={commentSegments}
                   mentionTasks={tasks}
                   referenceTasks={referenceTasks}
+                  completionContext={{
+                    projectId: currentTask.projectId,
+                    surface: "comment",
+                  }}
                   placeholder={text("留下评论…", "Leave a comment…")}
                   ariaLabel={text("留下评论", "Leave a comment")}
                   onChange={setCommentSegments}
