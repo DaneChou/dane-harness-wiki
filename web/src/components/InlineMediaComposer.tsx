@@ -196,13 +196,16 @@ function imageSegment(file: File): InlineImageSegment {
 const COMPOSER_REFERENCE_URL = /^taskboard:\/\/composer-reference\/v1\/(skill|agent)\/([A-Za-z0-9_-]+)$/;
 const COMPOSER_REFERENCE_NAMESPACE_URL = /^taskboard:\/\/composer-reference\/([^/]+)\/([^/]+)\/([A-Za-z0-9_-]+)$/;
 
-function base64UrlReferenceKey(value: string): string | null {
+function base64UrlReferenceKey(
+  value: string,
+  requireNfc: boolean,
+): string | null {
   if (!value || value.length % 4 === 1) return null;
   try {
     const padded = `${value.replace(/-/g, "+").replace(/_/g, "/")}${"=".repeat((4 - value.length % 4) % 4)}`;
     const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
     const decoded = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    if (!decoded || decoded !== decoded.normalize("NFC")) return null;
+    if (!decoded || (requireNfc && decoded !== decoded.normalize("NFC"))) return null;
     const canonical = btoa(String.fromCharCode(...new TextEncoder().encode(decoded)))
       .replace(/\+/g, "-")
       .replace(/\//g, "_")
@@ -234,7 +237,7 @@ function composerReferenceFromNode(
 ) & { start: number; end: number } | null {
   if (node.type !== "link" || !node.url) return null;
   const namespaceMatch = COMPOSER_REFERENCE_NAMESPACE_URL.exec(node.url);
-  if (!namespaceMatch || !base64UrlReferenceKey(namespaceMatch[3])) return null;
+  if (!namespaceMatch || !base64UrlReferenceKey(namespaceMatch[3], namespaceMatch[2] === "skill")) return null;
   const label = markdownNodeText(node);
   const markdown = source.slice(node.position.start.offset, node.position.end.offset);
   if (
@@ -254,7 +257,7 @@ function composerReferenceFromNode(
     };
   }
   const kind = urlMatch[1] as "skill" | "agent";
-  const referenceKey = base64UrlReferenceKey(urlMatch[2])!;
+  const referenceKey = base64UrlReferenceKey(urlMatch[2], kind === "skill")!;
   return {
     type: `${kind}-reference`,
     start: node.position.start.offset,

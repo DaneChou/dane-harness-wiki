@@ -4,6 +4,7 @@ import { readFile, readdir, realpath, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { parse as parseToml } from "smol-toml";
 
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
 import { executableCommand } from "../shared/executable-command.mjs";
@@ -51,52 +52,166 @@ const UNSUPPORTED_COMPOSER_SOURCES = [
   { kind: "customPrompts", state: "unsupported", reasonCode: "NO_STABLE_CATALOG" },
 ];
 
-function tomlString(source, key) {
-  const match = new RegExp(`^${key}\\s*=\\s*(.+)$`, "m").exec(source);
-  if (!match) return "";
-  const raw = match[1].trim();
-  if (raw.startsWith('"') && raw.endsWith('"')) {
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return raw.slice(1, -1);
-    }
-  }
-  if (raw.startsWith("'") && raw.endsWith("'")) return raw.slice(1, -1);
-  return "";
+function nonEmptyTomlString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-async function listConfiguredAgents(agentsDirectory) {
-  let entries;
+async function readConfiguredAgent(filePath, roleNameHint = null) {
   try {
-    entries = await readdir(agentsDirectory, { withFileTypes: true });
-  } catch (error) {
-    return { agents: [], available: error?.code === "ENOENT" };
+    const source = await readFile(filePath, "utf8");
+    const parsed = parseToml(source);
+    const stableId = nonEmptyTomlString(parsed.name)
+      ?? nonEmptyTomlString(parsed.role_name)
+      ?? roleNameHint;
+    if (!stableId) return null;
+    return {
+      stableId,
+      name: stableId,
+      label: stableId,
+      description: nonEmptyTomlString(parsed.description),
+      developerInstructions: nonEmptyTomlString(parsed.developer_instructions),
+      sourcePath: filePath,
+    };
+  } catch {
+    return null;
   }
-  const agents = await Promise.all(entries.flatMap((entry) => (
-    entry.isFile() && entry.name.endsWith(".toml") ? [entry] : []
-  )).map(async (entry) => {
-    const id = path.basename(entry.name, ".toml");
+}
+
+async function collectTomlFiles(directory) {
+  const files = [];
+  const pendingDirectories = [directory];
+  let available = false;
+  while (pendingDirectories.length > 0) {
+    const currentDirectory = pendingDirectories.pop();
+    let entries;
     try {
-      const source = await readFile(path.join(agentsDirectory, entry.name), "utf8");
-      const name = tomlString(source, "name") || id;
-      return {
-        identity: `${id}\u0000${name}`,
-        id,
-        name,
-        label: name,
-        description: tomlString(source, "description") || null,
-      };
-    } catch {
-      return null;
+      entries = await readdir(currentDirectory, { withFileTypes: true });
+      available = true;
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
     }
-  }));
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const entryPath = path.join(currentDirectory, entry.name);
+      if (entry.isDirectory()) {
+        pendingDirectories.push(entryPath);
+      } else if (entry.isFile() && entry.name.endsWith(".toml")) {
+        files.push(entryPath);
+      }
+    }
+  }
+  return { files: files.sort(), available };
+}
+
+async function projectConfigFolders(workspacePath) {
+  if (typeof workspacePath !== "string" || !workspacePath.trim()) return [];
+  const folders = [];
+  let current = path.resolve(workspacePath);
+  while (true) {
+    folders.push(path.join(current, ".codex"));
+    try {
+      await stat(path.join(current, ".git"));
+      break;
+    } catch {}
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return folders.reverse();
+}
+
+function mergeConfiguredAgent(high, low) {
   return {
-    agents: agents.filter(Boolean).sort((left, right) => left.label.localeCompare(right.label)),
-    available: true,
+    ...low,
+    ...high,
+    description: high.description ?? low.description,
+    developerInstructions: high.developerInstructions ?? low.developerInstructions,
   };
 }
 
+function completeConfiguredAgent(agent) {
+  return agent
+    && agent.stableId
+    && agent.description
+    && agent.developerInstructions
+    ? {
+        ...agent,
+        identity: ["agent", agent.stableId].join("\u0000"),
+        id: agent.stableId,
+      }
+    : null;
+}
+
+async function loadAgentLayer({ configDirectory, configFile, agentsDirectory }) {
+  const layerAgents = new Map();
+  const declaredFiles = new Set();
+  let available = false;
+  let config = null;
+  try {
+    config = parseToml(await readFile(configFile, "utf8"));
+    available = true;
+  } catch {}
+  for (const [declaredName, role] of Object.entries(config?.agents ?? {})) {
+    if (!role || typeof role !== "object" || Array.isArray(role)) continue;
+    const configFileValue = nonEmptyTomlString(role.config_file);
+    let agent = {
+      stableId: declaredName,
+      name: declaredName,
+      label: declaredName,
+      description: nonEmptyTomlString(role.description),
+      developerInstructions: nonEmptyTomlString(role.developer_instructions),
+      sourcePath: configFile,
+    };
+    if (configFileValue) {
+      const declaredFile = path.isAbsolute(configFileValue)
+        ? configFileValue
+        : path.resolve(configDirectory, configFileValue);
+      const fileAgent = await readConfiguredAgent(declaredFile, declaredName);
+      if (!fileAgent) continue;
+      declaredFiles.add(path.resolve(declaredFile));
+      agent = mergeConfiguredAgent(fileAgent, agent);
+    }
+    if (!layerAgents.has(agent.stableId)) layerAgents.set(agent.stableId, agent);
+  }
+  const discovered = await collectTomlFiles(agentsDirectory);
+  available ||= discovered.available;
+  for (const filePath of discovered.files) {
+    if (declaredFiles.has(path.resolve(filePath))) continue;
+    const agent = await readConfiguredAgent(filePath);
+    if (agent && !layerAgents.has(agent.stableId)) layerAgents.set(agent.stableId, agent);
+  }
+  return { agents: [...layerAgents.values()], available };
+}
+
+async function listConfiguredAgents({ codexHome, agentsDirectory, workspacePath }) {
+  const projectFolders = await projectConfigFolders(workspacePath);
+  const layers = [{
+    configDirectory: codexHome,
+    configFile: path.join(codexHome, "config.toml"),
+    agentsDirectory,
+  }, ...projectFolders.map((configDirectory) => ({
+    configDirectory,
+    configFile: path.join(configDirectory, "config.toml"),
+    agentsDirectory: path.join(configDirectory, "agents"),
+  }))];
+  const effective = new Map();
+  let available = false;
+  for (const layer of layers) {
+    const loaded = await loadAgentLayer(layer);
+    available ||= loaded.available;
+    for (const agent of loaded.agents) {
+      const previous = effective.get(agent.stableId);
+      const merged = completeConfiguredAgent(
+        previous ? mergeConfiguredAgent(agent, previous) : agent,
+      );
+      if (merged) effective.set(agent.stableId, merged);
+    }
+  }
+  return {
+    agents: [...effective.values()].sort((left, right) => left.label.localeCompare(right.label)),
+    available,
+  };
+}
 async function existingDirectory(value) {
   if (typeof value !== "string" || !path.isAbsolute(value.trim())) return null;
   try {
@@ -378,10 +493,18 @@ function sanitizeComposerSkills(entries) {
 }
 
 function composerCatalogSignature(skills, agents) {
-  return JSON.stringify([...skills, ...agents].map(({ identity, label, description }) => ({
+  return JSON.stringify([...skills, ...agents].map(({
     identity,
+    stableId,
     label,
     description,
+    developerInstructions,
+  }) => ({
+    identity,
+    stableId,
+    label,
+    description,
+    developerInstructions,
   })));
 }
 
@@ -484,10 +607,12 @@ function referenceUnavailable(nodeIndex, reasonCode = "SOURCE_UNAVAILABLE") {
 }
 
 export class ComposerCatalog {
-  constructor({ appServer, agentsDirectory, issueSlashCommands } = {}) {
+  constructor({ appServer, agentsDirectory, codexHome, issueSlashCommands } = {}) {
     this.appServer = appServer;
-    this.agentsDirectory = agentsDirectory
-      ?? path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "agents");
+    this.codexHome = codexHome
+      ?? (agentsDirectory ? path.dirname(agentsDirectory) : process.env.CODEX_HOME)
+      ?? path.join(os.homedir(), ".codex");
+    this.agentsDirectory = agentsDirectory ?? path.join(this.codexHome, "agents");
     this.issueSlashCommands = issueSlashCommands ?? null;
     this.workspaces = new Map();
     this.unsubscribe = appServer.subscribe((notification) => {
@@ -544,7 +669,11 @@ export class ComposerCatalog {
         skillsAvailable = true;
       } catch {}
     }
-    const { agents, available: agentsAvailable } = await listConfiguredAgents(this.agentsDirectory);
+    const { agents, available: agentsAvailable } = await listConfiguredAgents({
+      codexHome: this.codexHome,
+      agentsDirectory: this.agentsDirectory,
+      workspacePath,
+    });
     const workspaceKey = workspacePath ?? "__global__";
     const state = this.#acceptCatalog(workspaceKey, sanitizeComposerSkills(entries), agents);
     const normalizedQuery = query.toLocaleLowerCase();
@@ -577,7 +706,7 @@ export class ComposerCatalog {
     const agentCandidates = trigger === "@" ? state.agents.flatMap((agent, itemOrder) => {
       const matchScore = composerMatchScore(
         normalizedQuery,
-        [agent.label, agent.id],
+        [agent.label, agent.stableId],
         agent.description ?? "",
       );
       if (matchScore < 0) return [];
@@ -592,7 +721,7 @@ export class ComposerCatalog {
         itemOrder,
         selectable: true,
         insertionText: `@${agent.name}`,
-        persistence: composerReferencePersistence("agent", agent.id, agent.label),
+        persistence: composerReferencePersistence("agent", agent.stableId, agent.label),
         matchScore,
       }];
     }) : [];
@@ -641,7 +770,11 @@ export class ComposerCatalog {
       entries = await this.appServer.listSkills(workspacePath, { forceReload: true });
       skillsAvailable = true;
     } catch {}
-    const { agents, available: agentsAvailable } = await listConfiguredAgents(this.agentsDirectory);
+    const { agents, available: agentsAvailable } = await listConfiguredAgents({
+      codexHome: this.codexHome,
+      agentsDirectory: this.agentsDirectory,
+      workspacePath,
+    });
     const state = this.#acceptCatalog(
       workspacePath,
       sanitizeComposerSkills(entries),
@@ -656,7 +789,7 @@ export class ComposerCatalog {
       byStableIdentity.set(key, matches);
     }
     for (const item of state.agents) {
-      const key = `agent\u0000${item.id}`;
+      const key = `agent\u0000${item.stableId}`;
       const matches = byStableIdentity.get(key) ?? [];
       matches.push(item);
       byStableIdentity.set(key, matches);
@@ -743,7 +876,11 @@ export class ComposerCatalog {
       ));
       throw referenceUnavailable(Math.max(firstReferenceIndex, 0));
     }
-    const { agents } = await listConfiguredAgents(this.agentsDirectory);
+    const { agents } = await listConfiguredAgents({
+      codexHome: this.codexHome,
+      agentsDirectory: this.agentsDirectory,
+      workspacePath,
+    });
     const current = this.#acceptCatalog(workspacePath, sanitizeComposerSkills(entries), agents);
     if (current.revision !== revision) {
       const firstReferenceIndex = nodes.findIndex((node) => (

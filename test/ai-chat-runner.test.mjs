@@ -36,6 +36,7 @@ async function createComposerCatalogFixture(issueSlashCommands) {
   await writeFile(path.join(agentsDirectory, "master.toml"), [
     'name = "任务总管"',
     'description = "协调专业 agents"',
+    'developer_instructions = "按任务分工协调 agents"',
   ].join("\n"));
   let skills = [{
     skills: [{
@@ -85,7 +86,7 @@ test("issue composer candidates persist canonical Agent and Skill markers withou
     const agentResponse = await fixture.catalog.candidates({
       workspacePath: "/workspace",
       trigger: "@",
-      query: "ma",
+      query: "任务",
     });
     assert.equal(agentResponse.candidates.length, 1);
     assert.equal(agentResponse.candidates[0].kind, "agent");
@@ -93,7 +94,7 @@ test("issue composer candidates persist canonical Agent and Skill markers withou
     assert.equal(agentResponse.candidates[0].persistence.kind, "agent");
     assert.equal(
       decodeComposerReferenceKey(agentResponse.candidates[0].persistence.referenceKey),
-      "master",
+      "任务总管",
     );
 
     const skillResponse = await fixture.catalog.candidates({
@@ -207,7 +208,7 @@ test("persisted composer references rebind without upgrading historical text", a
       "release-skill",
       "Release Skill",
     );
-    const agentPersistence = composerReferencePersistence("agent", "master", "任务总管");
+    const agentPersistence = composerReferencePersistence("agent", "任务总管", "任务总管");
     const rebound = await fixture.catalog.rebindPersistedReferences({
       workspacePath: "/workspace",
       nodes: [
@@ -224,7 +225,7 @@ test("persisted composer references rebind without upgrading historical text", a
           referenceKind: "agent",
           referenceKey: agentPersistence.referenceKey,
           label: "旧 Agent 标签",
-          stableId: "master",
+          stableId: "任务总管",
         },
       ],
     });
