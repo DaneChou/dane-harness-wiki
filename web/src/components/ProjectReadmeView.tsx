@@ -139,11 +139,6 @@ export function ProjectReadmeView({
                   )}
                 </span>
               )}
-              {readme && (
-                <span className="project-readme-version">
-                  v{readme.version}
-                </span>
-              )}
             </div>
           </div>
         </div>
