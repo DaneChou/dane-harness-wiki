@@ -17,12 +17,13 @@ const styles = await readFile(new URL("../web/src/components/workflow.css", impo
 const globalStyles = await readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
 
 test("the taskboard defaults to issues and exposes the current project views", () => {
-  assert.match(appSource, /type BoardView = "dashboard" \| "issues" \| "list" \| "gantt" \| "workflow"/);
+  assert.match(appSource, /type BoardView = "readme" \| "dashboard" \| "issues" \| "list" \| "gantt" \| "workflow"/);
   assert.match(
     appSource,
     /function readProjectBoardView\(projectId: string\): BoardView \{\s*const view = [^;]+;\s*return [\s\S]*?\? view\s*: "issues";\s*\}/,
   );
   assert.match(appSource, /useState<BoardView>\(\(\) => readProjectBoardView\(initialProjectId\)\)/);
+  assert.match(appSource, />\s*\{text\("说明文档", "README"\)\}\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("仪表盘", "Dashboard"\)\}\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("议题看板", "Issue board"\)\}\s*<\/button>/);
   assert.match(appSource, />\s*\{text\("列表视图", "List"\)\}\s*<\/button>/);
