@@ -2716,6 +2716,8 @@ kbd {
 
 .issue-description-document a.issue-reference-link {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   color: inherit;
   vertical-align: middle;
 }
@@ -2727,6 +2729,8 @@ kbd {
 .issue-reference-inline {
   display: inline-flex;
   align-items: center;
+  min-width: 0;
+  max-width: 100%;
   min-height: 22px;
   gap: 5px;
   padding: 0 6px 0 4px;
@@ -2736,7 +2740,7 @@ kbd {
   color: var(--text-secondary);
   font-size: 0.94em;
   line-height: 22px;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .issue-reference-link:hover .issue-reference-inline {
@@ -2766,9 +2770,11 @@ kbd {
 }
 
 .issue-reference-title {
-  flex: 0 0 auto;
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-primary);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .issue-description-document ul,
