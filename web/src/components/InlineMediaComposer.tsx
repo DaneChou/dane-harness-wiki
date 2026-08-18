@@ -498,9 +498,7 @@ function inlineMediaClipboardText(segments: InlineMediaSegment[]): string {
   return segments.map((segment) => {
     if (segment.type === "text") return segment.text;
     if (segment.type === "pending-image") return segment.file.name;
-    if (segment.type === "persisted-image") return segment.alt;
-    if (segment.type === "issue-reference") return segment.identifier;
-    return segment.label;
+    return segment.markdown;
   }).join("");
 }
 
@@ -784,13 +782,14 @@ function IssueReferenceChip({
   const displayIdentifier = task?.externalKey ?? segment.identifier;
 
   return (
-    <button
-      type="button"
+    <span
+      role="button"
+      tabIndex={disabled ? -1 : 0}
       className={`issue-reference-inline inline-media-issue-reference${task ? ` issue-reference-status-${task.status}` : ""}`}
       contentEditable={false}
       data-inline-media-segment={segment.id}
       data-taskboard-inline-media-markdown={segment.markdown}
-      disabled={disabled}
+      aria-disabled={disabled}
       aria-label={task
         ? text(
             `${displayIdentifier} ${task.title}，按退格键或删除键移除`,
@@ -801,20 +800,23 @@ function IssueReferenceChip({
             `${displayIdentifier}, press Backspace or Delete to remove`,
           )}
       onKeyDown={(event) => {
+        if (disabled) return;
         if (event.defaultPrevented) return;
         if (event.key !== "Backspace" && event.key !== "Delete") return;
         event.preventDefault();
         onRemove();
       }}
     >
-      {task && (
-        <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-          <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
-        </span>
-      )}
-      <span className="issue-reference-id">{displayIdentifier}</span>
+      <span className="issue-reference-identity">
+        {task && (
+          <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
+            <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
+          </span>
+        )}
+        <span className="issue-reference-id">{displayIdentifier}</span>
+      </span>
       {task && <span className="issue-reference-title">{task.title}</span>}
-    </button>
+    </span>
   );
 }
 

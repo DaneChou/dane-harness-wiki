@@ -265,6 +265,16 @@ function skillDisplayName(skill: Pick<AiChatSkill, "id" | "label">): string {
     .join(" ");
 }
 
+function stableComposerReferenceId(referenceKey: string): string | null {
+  try {
+    const padded = `${referenceKey.replace(/-/g, "+").replace(/_/g, "/")}${"=".repeat((4 - referenceKey.length % 4) % 4)}`;
+    const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes) || null;
+  } catch {
+    return null;
+  }
+}
+
 function eventSkillIds(event: AiChatEvent): string[] {
   const values = event.data?.skillIds;
   if (!Array.isArray(values)) return [];
@@ -478,6 +488,7 @@ function composerFragmentFromHtml(
 ): { message: string; skillIds: string[] } | null {
   if (!html || skills.length === 0) return null;
   const document = new DOMParser().parseFromString(html, "text/html");
+  const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
   const skillsByPath = new Map(skills.map((skill) => [skill.path, skill]));
   const skillIds: string[] = [];
   let message = "";
@@ -494,8 +505,17 @@ function composerFragmentFromHtml(
     const element = node as HTMLElement;
     if (COMPOSER_HTML_IGNORED.has(element.tagName)) return;
     if (element.tagName === "A") {
-      const path = decodedSkillPath(element.getAttribute("href") ?? "");
-      const skill = path?.endsWith("/SKILL.md") ? skillsByPath.get(path) : null;
+      const href = element.getAttribute("href") ?? "";
+      const referenceMatch = /^taskboard:\/\/composer-reference\/v1\/skill\/([A-Za-z0-9_-]+)$/.exec(href);
+      const stableSkillId = referenceMatch
+        ? stableComposerReferenceId(referenceMatch[1])
+        : null;
+      const path = stableSkillId ? null : decodedSkillPath(href);
+      const skill = stableSkillId
+        ? skillsById.get(stableSkillId)
+        : path?.endsWith("/SKILL.md")
+          ? skillsByPath.get(path)
+          : null;
       if (skill) {
         message += SKILL_MARKER;
         skillIds.push(skill.id);
@@ -521,15 +541,23 @@ function composerFragmentFromPlainText(
   skills: AiChatSkill[],
 ): { message: string; skillIds: string[] } | null {
   if (!text || skills.length === 0) return null;
+  const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
   const skillsByPath = new Map(skills.map((skill) => [skill.path, skill]));
   const skillIds: string[] = [];
   let message = "";
   let cursor = 0;
-  const referencePattern = /\[\$([^\]\r\n]+)\]\((\/[^)\r\n]*\/SKILL\.md)\)/g;
+  const referencePattern = /\[(?:\$([^\]\r\n]+)|([^\]\r\n]+))\]\((\/[^)\r\n]*\/SKILL\.md|taskboard:\/\/composer-reference\/v1\/skill\/([A-Za-z0-9_-]+))\)/g;
   for (const match of text.matchAll(referencePattern)) {
-    const path = decodedSkillPath(match[2]);
-    const skill = path ? skillsByPath.get(path) : null;
-    if (!skill || skill.id !== match[1]) continue;
+    const stableSkillId = match[4]
+      ? stableComposerReferenceId(match[4])
+      : null;
+    const path = stableSkillId ? null : decodedSkillPath(match[3]);
+    const skill = stableSkillId
+      ? skillsById.get(stableSkillId)
+      : path
+        ? skillsByPath.get(path)
+        : null;
+    if (!skill || (!stableSkillId && skill.id !== match[1])) continue;
     message += text.slice(cursor, match.index).replaceAll(SKILL_MARKER, "\uFFFD");
     message += SKILL_MARKER;
     skillIds.push(skill.id);
@@ -2127,6 +2155,13 @@ export function AiChat({
     tokenElement.dataset.composerCandidateRef = skillNode.candidateRef;
     tokenElement.dataset.composerLabel = skillNode.label;
     tokenElement.dataset.composerKind = "skill";
+    const stableSkillId = candidate.persistence?.kind === "skill"
+      ? stableComposerReferenceId(candidate.persistence.referenceKey)
+      : null;
+    const skill = stableSkillId
+      ? activeCatalog?.skills.find((catalogSkill) => catalogSkill.id === stableSkillId)
+      : null;
+    if (skill) tokenElement.dataset.skillId = skill.id;
     tokenElement.contentEditable = "false";
     tokenElement.title = skillNode.label;
     const sentinel = editor.ownerDocument.createTextNode("\u200B");
