@@ -516,7 +516,16 @@ export function MarkdownDocument({
             const markdown = typeof start === "number" && typeof end === "number"
               ? value.slice(start, end)
               : undefined;
-            return <img {...props} data-taskboard-inline-media-markdown={markdown} />;
+            const selfContainedMarkdown = markdown
+              && /^!\[(?:\\.|[^\]])*\]\(/.test(markdown)
+              ? markdown
+              : undefined;
+            return (
+              <img
+                {...props}
+                data-taskboard-inline-media-markdown={selfContainedMarkdown}
+              />
+            );
           },
           pre: MarkdownPre,
         }}

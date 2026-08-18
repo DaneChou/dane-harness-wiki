@@ -25,6 +25,7 @@ import {
   interruptAiChatRun,
   compactAiChatThread,
   listAiChatThreads,
+  rebindAiChatComposerReferences,
   startAiChatComposerTurn,
   startAiChatTurn,
   subscribeAiChatThread,
@@ -68,6 +69,7 @@ import type {
   ComposerSlashActionCandidate,
   ComposerTrigger,
 } from "../types";
+import { COMPOSER_CONTRACT_VERSION } from "../types";
 import { LinearIcon, type LinearIconName } from "./LinearIcon";
 import { TaskboardIcon } from "./TaskboardIcon";
 
@@ -102,7 +104,7 @@ type MenuName = "model" | "model-list" | "effort-list" | "sandbox" | null;
 type PendingDangerInput = {
   message: string;
   skillIds: string[];
-  composerDocument?: ComposerDocument;
+  composerDocument?: ComposerDocument | ComposerPersistedDocument;
   composerRevision?: string;
   attachments: AiChatAttachmentInput[];
   clearSubmittedDraft: boolean;
@@ -118,6 +120,18 @@ type ComposerSkillToken = {
   kind?: "skill" | "agent";
   unavailable?: boolean;
   element: HTMLSpanElement;
+};
+type ComposerStableReference = {
+  kind: "skill" | "agent";
+  stableId: string;
+  referenceKey: string;
+  label: string;
+  markdown: string;
+};
+type ComposerFragment = {
+  message: string;
+  skillIds: string[];
+  references?: Array<ComposerStableReference | null>;
 };
 type ComposerQuery = {
   trigger: ComposerTrigger;
@@ -267,12 +281,40 @@ function skillDisplayName(skill: Pick<AiChatSkill, "id" | "label">): string {
 
 function stableComposerReferenceId(referenceKey: string): string | null {
   try {
+    if (!/^[A-Za-z0-9_-]+$/.test(referenceKey) || referenceKey.length % 4 === 1) return null;
     const padded = `${referenceKey.replace(/-/g, "+").replace(/_/g, "/")}${"=".repeat((4 - referenceKey.length % 4) % 4)}`;
     const bytes = Uint8Array.from(atob(padded), (character) => character.charCodeAt(0));
-    return new TextDecoder("utf-8", { fatal: true }).decode(bytes) || null;
+    const stableId = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    if (!stableId || stableId !== stableId.normalize("NFC")) return null;
+    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(stableId)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+    return encoded === referenceKey ? stableId : null;
   } catch {
     return null;
   }
+}
+
+function stableComposerReferenceKey(stableId: string): string {
+  return btoa(String.fromCharCode(...new TextEncoder().encode(stableId.normalize("NFC"))))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function escapedComposerReferenceLabel(label: string): string {
+  return label.replace(/[\\[\]]/g, "\\$&");
+}
+
+function composerStableReference(
+  kind: "skill" | "agent",
+  stableId: string,
+  label: string,
+  referenceKey = stableComposerReferenceKey(stableId),
+  markdown = `[${escapedComposerReferenceLabel(label)}](taskboard://composer-reference/v1/${kind}/${referenceKey})`,
+): ComposerStableReference {
+  return { kind, stableId, referenceKey, label, markdown };
 }
 
 function eventSkillIds(event: AiChatEvent): string[] {
@@ -285,9 +327,10 @@ function eventHasAttachments(event: AiChatEvent): boolean {
   return Array.isArray(event.data?.attachments) && event.data.attachments.length > 0;
 }
 
-function serializeComposer(root: HTMLElement): { message: string; skillIds: string[] } {
+function serializeComposer(root: HTMLElement): ComposerFragment {
   let message = "";
   const skillIds: string[] = [];
+  const references: Array<ComposerStableReference | null> = [];
   const appendText = (value: string) => {
     message += value.replaceAll("\u200B", "");
   };
@@ -297,10 +340,20 @@ function serializeComposer(root: HTMLElement): { message: string; skillIds: stri
       return;
     }
     if (!(node instanceof HTMLElement)) return;
-    const skillId = node.dataset.skillId ?? node.dataset.composerCandidateRef;
+    const stableId = node.dataset.composerStableId ?? node.dataset.skillId;
+    const skillId = stableId ?? node.dataset.composerCandidateRef;
     if (skillId) {
       message += SKILL_MARKER;
       skillIds.push(skillId);
+      const referenceKey = node.dataset.composerReferenceKey;
+      const kind = node.dataset.composerKind === "agent" ? "agent" : "skill";
+      references.push(stableId && referenceKey ? composerStableReference(
+        kind,
+        stableId,
+        node.dataset.composerLabel ?? stableId,
+        referenceKey,
+        node.dataset.composerMarkdown,
+      ) : null);
       return;
     }
     if (node.tagName === "BR") {
@@ -313,19 +366,26 @@ function serializeComposer(root: HTMLElement): { message: string; skillIds: stri
     if (isBlock && node.nextSibling && !message.endsWith("\n")) message += "\n";
   };
   for (const child of root.childNodes) visit(child);
-  return { message, skillIds };
+  return { message, skillIds, references };
 }
 
-function serializeComposerDocumentFromDom(root: HTMLElement): ComposerDocument {
-  let document = createComposerDocument();
+function serializeComposerDocumentFromDom(
+  root: HTMLElement,
+): ComposerDocument | ComposerPersistedDocument {
+  const referenceElements = Array.from(root.querySelectorAll<HTMLElement>(
+    ".ai-chat-composer-skill-token",
+  ));
+  const persisted = referenceElements.length > 0
+    && referenceElements.every((element) => Boolean(element.dataset.composerReferenceKey));
+  const nodes: Array<
+    ComposerDocument["nodes"][number] | ComposerPersistedDocument["nodes"][number]
+  > = [];
   const appendText = (value: string) => {
     const text = value.replaceAll("\u200B", "");
     if (!text) return;
-    const nodes = document.nodes;
     const previous = nodes.at(-1);
-    document = previous?.type === "text"
-      ? { version: 1, nodes: [...nodes.slice(0, -1), { type: "text", text: previous.text + text }] }
-      : { version: 1, nodes: [...nodes, { type: "text", text }] };
+    if (previous?.type === "text") previous.text += text;
+    else nodes.push({ type: "text", text });
   };
   const visit = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
@@ -333,16 +393,21 @@ function serializeComposerDocumentFromDom(root: HTMLElement): ComposerDocument {
       return;
     }
     if (!(node instanceof HTMLElement)) return;
-    const candidateRef = node.dataset.composerCandidateRef;
-    if (candidateRef) {
-      document = {
-        version: 1,
-        nodes: [...document.nodes, {
+    if (persisted && node.dataset.composerReferenceKey) {
+      nodes.push({
+        type: "persistedReference",
+        referenceKind: node.dataset.composerKind === "agent" ? "agent" : "skill",
+        referenceKey: node.dataset.composerReferenceKey,
+        label: node.dataset.composerLabel ?? "",
+      });
+      return;
+    }
+    if (node.dataset.composerCandidateRef) {
+      nodes.push({
           type: node.dataset.composerKind === "agent" ? "agent" : "skill",
-          candidateRef,
+          candidateRef: node.dataset.composerCandidateRef,
           label: node.dataset.composerLabel ?? "",
-        }],
-      };
+      });
       return;
     }
     if (node.tagName === "BR") {
@@ -350,14 +415,14 @@ function serializeComposerDocumentFromDom(root: HTMLElement): ComposerDocument {
       return;
     }
     const isBlock = node.tagName === "DIV" || node.tagName === "P";
-    const previousText = document.nodes.at(-1);
+    const previousText = nodes.at(-1);
     if (
       isBlock
-      && document.nodes.length > 0
+      && nodes.length > 0
       && !(previousText?.type === "text" && previousText.text.endsWith("\n"))
     ) appendText("\n");
     for (const child of node.childNodes) visit(child);
-    const finalText = document.nodes.at(-1);
+    const finalText = nodes.at(-1);
     if (
       isBlock
       && node.nextSibling
@@ -365,12 +430,19 @@ function serializeComposerDocumentFromDom(root: HTMLElement): ComposerDocument {
     ) appendText("\n");
   };
   for (const child of root.childNodes) visit(child);
-  return serializeComposerDocument(document);
+  if (persisted) {
+    return { version: 1, nodes: nodes as ComposerPersistedDocument["nodes"] };
+  }
+  return serializeComposerDocument({
+    version: 1,
+    nodes: nodes as ComposerDocument["nodes"],
+  });
 }
 
 function selectedComposerFragment(root: HTMLElement): {
   message: string;
   skillIds: string[];
+  references?: Array<ComposerStableReference | null>;
   range: Range;
 } | null {
   const selection = root.ownerDocument.getSelection();
@@ -405,21 +477,39 @@ function composerMarkerCount(message: string): number {
   return message.split(SKILL_MARKER).length - 1;
 }
 
+function isPersistedComposerDocument(
+  document: ComposerDocument | ComposerPersistedDocument,
+): document is ComposerPersistedDocument {
+  return document.nodes.some((node) => (
+    node.type === "persistedReference" || node.type === "unsupportedReference"
+  ));
+}
+
+function composerFragmentReference(
+  fragment: ComposerFragment,
+  index: number,
+  skillsById: Map<string, AiChatSkill>,
+): ComposerStableReference | null {
+  const reference = fragment.references?.[index];
+  if (reference) return reference;
+  const skill = skillsById.get(fragment.skillIds[index] ?? "");
+  return skill ? composerStableReference("skill", skill.id, skill.label) : null;
+}
+
 function canonicalComposerFragment(
-  fragment: { message: string; skillIds: string[] },
+  fragment: ComposerFragment,
   skillsById: Map<string, AiChatSkill>,
 ): string {
   let index = 0;
   return fragment.message.replaceAll(SKILL_MARKER, () => {
-    const skillId = fragment.skillIds[index] ?? "";
+    const reference = composerFragmentReference(fragment, index, skillsById);
     index += 1;
-    const skill = skillsById.get(skillId);
-    return skill ? `[$${skill.id}](${skill.path})` : SKILL_MARKER;
+    return reference?.markdown ?? SKILL_MARKER;
   });
 }
 
 function composerFragmentHtml(
-  fragment: { message: string; skillIds: string[] },
+  fragment: ComposerFragment,
   skillsById: Map<string, AiChatSkill>,
   document: Document,
 ): string {
@@ -427,11 +517,19 @@ function composerFragmentHtml(
   const parts = fragment.message.split(SKILL_MARKER);
   parts.forEach((part, index) => {
     if (index > 0) {
-      const skill = skillsById.get(fragment.skillIds[index - 1] ?? "");
-      if (skill) {
+      const reference = composerFragmentReference(fragment, index - 1, skillsById);
+      if (reference) {
         const link = document.createElement("a");
-        link.setAttribute("href", skill.path);
-        link.textContent = skillDisplayName(skill);
+        link.setAttribute(
+          "href",
+          `taskboard://composer-reference/v1/${reference.kind}/${reference.referenceKey}`,
+        );
+        link.dataset.composerStableId = reference.stableId;
+        link.dataset.composerReferenceKey = reference.referenceKey;
+        link.dataset.composerKind = reference.kind;
+        link.dataset.composerLabel = reference.label;
+        link.dataset.composerMarkdown = reference.markdown;
+        link.textContent = reference.label;
         wrapper.append(link);
       } else {
         wrapper.append(SKILL_MARKER);
@@ -448,12 +546,14 @@ function composerFragmentHtml(
 
 function writeSkillFragmentToClipboard(
   event: ReactClipboardEvent<HTMLElement>,
-  fragment: { message: string; skillIds: string[] },
+  fragment: ComposerFragment,
   skillsById: Map<string, AiChatSkill>,
 ): boolean {
   if (
     fragment.skillIds.length === 0
-    || !fragment.skillIds.every((skillId) => skillsById.has(skillId))
+    || !fragment.skillIds.every((_, index) => (
+      composerFragmentReference(fragment, index, skillsById) !== null
+    ))
   ) {
     return false;
   }
@@ -485,12 +585,13 @@ function decodedSkillPath(href: string): string | null {
 function composerFragmentFromHtml(
   html: string,
   skills: AiChatSkill[],
-): { message: string; skillIds: string[] } | null {
-  if (!html || skills.length === 0) return null;
+): ComposerFragment | null {
+  if (!html) return null;
   const document = new DOMParser().parseFromString(html, "text/html");
   const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
   const skillsByPath = new Map(skills.map((skill) => [skill.path, skill]));
   const skillIds: string[] = [];
+  const references: ComposerStableReference[] = [];
   let message = "";
   let matchedSkill = false;
   const appendText = (value: string) => {
@@ -516,9 +617,27 @@ function composerFragmentFromHtml(
         : path?.endsWith("/SKILL.md")
           ? skillsByPath.get(path)
           : null;
+      if (stableSkillId && referenceMatch) {
+        const referenceKey = referenceMatch[1];
+        const label = element.dataset.composerLabel || element.textContent || stableSkillId;
+        message += SKILL_MARKER;
+        skillIds.push(stableSkillId);
+        references.push(composerStableReference(
+          "skill",
+          stableSkillId,
+          label,
+          referenceKey,
+          element.dataset.composerReferenceKey === referenceKey
+            ? element.dataset.composerMarkdown
+            : undefined,
+        ));
+        matchedSkill = true;
+        return;
+      }
       if (skill) {
         message += SKILL_MARKER;
         skillIds.push(skill.id);
+        references.push(composerStableReference("skill", skill.id, skill.label));
         matchedSkill = true;
         return;
       }
@@ -533,39 +652,47 @@ function composerFragmentFromHtml(
     if (isBlock && element.nextSibling && !message.endsWith("\n")) message += "\n";
   };
   for (const child of document.body.childNodes) visit(child);
-  return matchedSkill ? { message, skillIds } : null;
+  return matchedSkill ? { message, skillIds, references } : null;
 }
 
 function composerFragmentFromPlainText(
   text: string,
   skills: AiChatSkill[],
-): { message: string; skillIds: string[] } | null {
-  if (!text || skills.length === 0) return null;
+): ComposerFragment | null {
+  if (!text) return null;
   const skillsById = new Map(skills.map((skill) => [skill.id, skill]));
-  const skillsByPath = new Map(skills.map((skill) => [skill.path, skill]));
   const skillIds: string[] = [];
+  const references: ComposerStableReference[] = [];
   let message = "";
   let cursor = 0;
-  const referencePattern = /\[(?:\$([^\]\r\n]+)|([^\]\r\n]+))\]\((\/[^)\r\n]*\/SKILL\.md|taskboard:\/\/composer-reference\/v1\/skill\/([A-Za-z0-9_-]+))\)/g;
+  const referencePattern = /\[((?:\\[\\[\]]|[^\]\\\r\n])+)]\((\/[^)\r\n]*\/SKILL\.md|taskboard:\/\/composer-reference\/v1\/skill\/([A-Za-z0-9_-]+))\)/g;
   for (const match of text.matchAll(referencePattern)) {
-    const stableSkillId = match[4]
-      ? stableComposerReferenceId(match[4])
+    const markdownLabel = match[1];
+    const label = markdownLabel.replace(/\\([\\[\]])/g, "$1");
+    const referenceKey = match[3];
+    const stableSkillId = referenceKey
+      ? stableComposerReferenceId(referenceKey)
       : null;
-    const path = stableSkillId ? null : decodedSkillPath(match[3]);
-    const skill = stableSkillId
-      ? skillsById.get(stableSkillId)
-      : path
-        ? skillsByPath.get(path)
-        : null;
-    if (!skill || (!stableSkillId && skill.id !== match[1])) continue;
+    const legacySkillId = !stableSkillId && label.startsWith("$") ? label.slice(1) : null;
+    const resolvedSkillId = stableSkillId ?? legacySkillId;
+    if (!resolvedSkillId) continue;
+    const skill = skillsById.get(resolvedSkillId);
+    const reference = composerStableReference(
+      "skill",
+      resolvedSkillId,
+      stableSkillId ? label : skill?.label ?? resolvedSkillId,
+      referenceKey || stableComposerReferenceKey(resolvedSkillId),
+      stableSkillId ? match[0] : undefined,
+    );
     message += text.slice(cursor, match.index).replaceAll(SKILL_MARKER, "\uFFFD");
     message += SKILL_MARKER;
-    skillIds.push(skill.id);
+    skillIds.push(resolvedSkillId);
+    references.push(reference);
     cursor = (match.index ?? 0) + match[0].length;
   }
   if (skillIds.length === 0) return null;
   message += text.slice(cursor).replaceAll(SKILL_MARKER, "\uFFFD");
-  return { message, skillIds };
+  return { message, skillIds, references };
 }
 
 function composerQueryAt(
@@ -2076,13 +2203,12 @@ export function AiChat({
   }
 
   function insertComposerFragment(
-    fragment: { message: string; skillIds: string[] },
+    fragment: ComposerFragment,
     targetRange?: Range,
   ): boolean {
     const editor = editorRef.current;
     if (!editor || composerMarkerCount(fragment.message) !== fragment.skillIds.length) return false;
     const skillsById = new Map((activeCatalog?.skills ?? []).map((skill) => [skill.id, skill]));
-    if (!fragment.skillIds.every((skillId) => skillsById.has(skillId))) return false;
     const selection = editor.ownerDocument.getSelection();
     const range = targetRange ?? (selection?.rangeCount ? selection.getRangeAt(0) : null);
     if (!range || !editor.contains(range.commonAncestorContainer)) return false;
@@ -2103,17 +2229,24 @@ export function AiChat({
       }
       const skillId = fragment.skillIds[skillIndex];
       const skill = skillsById.get(skillId);
-      if (!skill) return false;
+      const reference = composerFragmentReference(fragment, skillIndex, skillsById);
+      if (!reference) return false;
       const tokenElement = editor.ownerDocument.createElement("span");
       tokenElement.className = "ai-chat-composer-skill-token";
-      tokenElement.dataset.skillId = skill.id;
+      tokenElement.dataset.skillId = reference.stableId;
+      tokenElement.dataset.composerStableId = reference.stableId;
+      tokenElement.dataset.composerReferenceKey = reference.referenceKey;
+      tokenElement.dataset.composerMarkdown = reference.markdown;
+      tokenElement.dataset.composerKind = reference.kind;
+      tokenElement.dataset.composerLabel = reference.label;
       tokenElement.contentEditable = "false";
-      tokenElement.title = skillDisplayName(skill);
+      tokenElement.title = reference.label;
       content.append(tokenElement, editor.ownerDocument.createTextNode("\u200B"));
       newTokens.push({
         key: crypto.randomUUID(),
-        candidateRef: skill.id,
-        label: skillDisplayName(skill),
+        candidateRef: reference.stableId,
+        label: reference.label,
+        kind: reference.kind,
         element: tokenElement,
       });
       skillIndex += 1;
@@ -2155,13 +2288,16 @@ export function AiChat({
     tokenElement.dataset.composerCandidateRef = skillNode.candidateRef;
     tokenElement.dataset.composerLabel = skillNode.label;
     tokenElement.dataset.composerKind = "skill";
-    const stableSkillId = candidate.persistence?.kind === "skill"
-      ? stableComposerReferenceId(candidate.persistence.referenceKey)
+    const persistence = candidate.persistence?.kind === "skill" ? candidate.persistence : null;
+    const stableSkillId = persistence
+      ? stableComposerReferenceId(persistence.referenceKey)
       : null;
-    const skill = stableSkillId
-      ? activeCatalog?.skills.find((catalogSkill) => catalogSkill.id === stableSkillId)
-      : null;
-    if (skill) tokenElement.dataset.skillId = skill.id;
+    if (stableSkillId && persistence) {
+      tokenElement.dataset.skillId = stableSkillId;
+      tokenElement.dataset.composerStableId = stableSkillId;
+      tokenElement.dataset.composerReferenceKey = persistence.referenceKey;
+      tokenElement.dataset.composerMarkdown = persistence.markdown;
+    }
     tokenElement.contentEditable = "false";
     tokenElement.title = skillNode.label;
     const sentinel = editor.ownerDocument.createTextNode("\u200B");
@@ -2264,7 +2400,7 @@ export function AiChat({
     boundSkillIds?: string[],
     clearSubmittedDraft = true,
     boundAttachments?: AiChatAttachmentInput[],
-    boundComposerDocument?: ComposerDocument,
+    boundComposerDocument?: ComposerDocument | ComposerPersistedDocument,
     boundComposerRevision?: string,
   ) {
     if (sendBlocked) return;
@@ -2274,8 +2410,13 @@ export function AiChat({
     let currentComposerDocument = boundComposerDocument
       ?? (editorRef.current ? serializeComposerDocumentFromDom(editorRef.current) : undefined);
     let currentComposerRevision = boundComposerRevision ?? composerRevision ?? undefined;
+    const hasPersistedReference = currentComposerDocument
+      ? isPersistedComposerDocument(currentComposerDocument)
+      : false;
     const hasStructuredReference = currentComposerDocument?.nodes.some((node) => (
       node.type === "skill" || node.type === "agent"
+      || node.type === "persistedReference"
+      || node.type === "unsupportedReference"
     )) ?? false;
     const isTaskOriginPlainTextDraft = Boolean(
       taskComposerDraftOriginRef.current
@@ -2305,7 +2446,7 @@ export function AiChat({
       }
     }
     const useComposerTurn = hasStructuredReference || isTaskOriginPlainTextDraft;
-    if (useComposerTurn && !currentComposerRevision) {
+    if (useComposerTurn && !hasPersistedReference && !currentComposerRevision) {
       setError(text(
         "补全来源已失效，请重新选择 Skill",
         "The completion source is stale. Select the Skill again.",
@@ -2325,9 +2466,9 @@ export function AiChat({
       setPendingDangerInput({
         message: trimmed,
         skillIds: submittedSkillIds,
-        ...(useComposerTurn && currentComposerDocument && currentComposerRevision ? {
+        ...(useComposerTurn && currentComposerDocument ? {
           composerDocument: currentComposerDocument,
-          composerRevision: currentComposerRevision,
+          ...(currentComposerRevision ? { composerRevision: currentComposerRevision } : {}),
         } : {}),
         attachments: messageAttachments,
         clearSubmittedDraft,
@@ -2343,11 +2484,33 @@ export function AiChat({
     setPendingDangerInput(null);
     setError(null);
     try {
+      let resolvedComposerDocument: ComposerDocument | undefined;
+      if (useComposerTurn && currentComposerDocument) {
+        if (isPersistedComposerDocument(currentComposerDocument)) {
+          const rebound = await rebindAiChatComposerReferences({
+            contractVersion: COMPOSER_CONTRACT_VERSION,
+            projectId: thread.origin.projectId,
+            threadId: thread.id,
+            document: currentComposerDocument,
+          });
+          if (!rebound.ready) {
+            throw new Error(text(
+              "Skill 当前不可用，请稍后重试",
+              "The Skill is currently unavailable. Try again later.",
+            ));
+          }
+          resolvedComposerDocument = rebound.document;
+          currentComposerRevision = rebound.revision;
+          setComposerRevision(rebound.revision);
+        } else {
+          resolvedComposerDocument = currentComposerDocument;
+        }
+      }
       const composerTurnInput = useComposerTurn
-        && currentComposerDocument
+        && resolvedComposerDocument
         && currentComposerRevision
         ? buildComposerTurnInput(
-            currentComposerDocument,
+            resolvedComposerDocument,
             currentComposerRevision,
             dangerConfirmed,
             messageAttachments,

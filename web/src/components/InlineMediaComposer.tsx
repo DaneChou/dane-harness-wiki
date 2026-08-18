@@ -502,6 +502,19 @@ function inlineMediaClipboardText(segments: InlineMediaSegment[]): string {
   }).join("");
 }
 
+function selfContainedClipboardSegments(
+  segments: InlineMediaSegment[],
+): InlineMediaSegment[] {
+  return segments.map((segment) => {
+    if (
+      segment.type !== "persisted-image"
+      || /^!\[(?:\\.|[^\]])*\]\(/.test(segment.markdown)
+    ) return segment;
+    const alt = segment.alt.replace(/[\\[\]]/g, "\\$&");
+    return { ...segment, markdown: `![${alt}](${segment.url})` };
+  });
+}
+
 function inlineMediaClipboardHtml(
   segments: InlineMediaSegment[],
   clipboardId: string,
@@ -550,12 +563,13 @@ export function writeInlineMediaClipboard(
   ownerDocument: Document,
 ) {
   const clipboardId = segmentId("clipboard");
-  inlineMediaClipboard = { id: clipboardId, segments };
+  const clipboardSegments = selfContainedClipboardSegments(segments);
+  inlineMediaClipboard = { id: clipboardId, segments: clipboardSegments };
   clipboardData.setData(INLINE_MEDIA_CLIPBOARD_MIME, clipboardId);
-  clipboardData.setData("text/plain", inlineMediaClipboardText(segments));
+  clipboardData.setData("text/plain", inlineMediaClipboardText(clipboardSegments));
   clipboardData.setData(
     "text/html",
-    inlineMediaClipboardHtml(segments, clipboardId, ownerDocument),
+    inlineMediaClipboardHtml(clipboardSegments, clipboardId, ownerDocument),
   );
 }
 
