@@ -563,10 +563,14 @@ function writeSkillFragmentToClipboard(
     return false;
   }
   event.preventDefault();
-  event.clipboardData.setData(COMPOSER_FRAGMENT_MIME, JSON.stringify({
-    message: fragment.message,
-    skillIds: fragment.skillIds,
-  }));
+  if (fragment.skillIds.every((_, index) => (
+    composerFragmentReference(fragment, index, skillsById)?.kind === "skill"
+  ))) {
+    event.clipboardData.setData(COMPOSER_FRAGMENT_MIME, JSON.stringify({
+      message: fragment.message,
+      skillIds: fragment.skillIds,
+    }));
+  }
   event.clipboardData.setData("text/plain", canonicalComposerFragment(fragment, skillsById));
   event.clipboardData.setData(
     "text/html",
