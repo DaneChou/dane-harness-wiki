@@ -821,8 +821,14 @@ function MarkdownMessage({
 
 function ThinkingStepDetail({
   detail,
+  label,
+  content,
+  running,
 }: {
   detail: ThinkingActivityDetail;
+  label: string;
+  content: string;
+  running: boolean;
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
@@ -832,9 +838,23 @@ function ThinkingStepDetail({
         aria-expanded={isOpen}
         className="ai-chat-thinking-detail-trigger"
         onClick={() => setIsOpen((open) => !open)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          setIsOpen((open) => !open);
+        }}
+        title={content}
         type="button"
       >
-        <span>{detail.summary}</span>
+        <span className="ai-chat-thinking-step-label">
+          {label}
+          {running && <span aria-hidden="true">…</span>}
+        </span>
+        {content && (
+          <span className="ai-chat-thinking-step-description">
+            {content}
+          </span>
+        )}
         <LinearIcon name="chevronRight" />
       </button>
       <div
@@ -909,6 +929,9 @@ function ThinkingSteps({
               const activityLabel = event.type === "error" && event.data?.status === "warning"
                 ? WARNING_ACTIVITY_LABEL
                 : ACTIVITY_LABELS[event.type];
+              const label = activityLabel
+                ? text(...activityLabel)
+                : text("执行活动", "Activity");
               const content = detail?.kind === "lines"
                 && (event.type === "file" || event.type === "file_change")
                 ? text(
@@ -940,24 +963,28 @@ function ThinkingSteps({
                       )}
                     </span>
                     <div className="ai-chat-thinking-step-content">
-                      <div className="ai-chat-thinking-step-heading">
-                        <span className="ai-chat-thinking-step-label">
-                          {activityLabel
-                            ? text(...activityLabel)
-                            : text("执行活动", "Activity")}
-                          {eventStatus === "running" && <span aria-hidden="true">…</span>}
-                        </span>
-                        {content && (
-                          <span
-                            className="ai-chat-thinking-step-description"
-                            title={content}
-                          >
-                            {content}
+                      {detail ? (
+                        <ThinkingStepDetail
+                          content={content}
+                          detail={detail}
+                          label={label}
+                          running={eventStatus === "running"}
+                        />
+                      ) : (
+                        <div className="ai-chat-thinking-step-heading">
+                          <span className="ai-chat-thinking-step-label">
+                            {label}
+                            {eventStatus === "running" && <span aria-hidden="true">…</span>}
                           </span>
-                        )}
-                      </div>
-                      {detail && (
-                        <ThinkingStepDetail detail={detail} />
+                          {content && (
+                            <span
+                              className="ai-chat-thinking-step-description"
+                              title={content}
+                            >
+                              {content}
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
                   </div>
