@@ -8003,15 +8003,16 @@ kbd {
 }
 
 .ai-chat-thinking-detail {
-  margin-top: 4px;
   margin-left: -12px;
   color: var(--text-tertiary);
   font-size: 13px;
 }
 
 .ai-chat-thinking-detail-trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: 100%;
+  min-width: 0;
   min-height: 26px;
   gap: 6px;
   padding: 4px 12px;
@@ -8023,6 +8024,15 @@ kbd {
   font: inherit;
   text-align: left;
   transition: background-color 80ms ease, color 80ms ease;
+}
+
+.ai-chat-thinking-detail-trigger .ai-chat-thinking-step-label {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ai-chat-thinking-detail-trigger .ai-chat-thinking-step-description {
+  flex: 1 1 auto;
 }
 
 .ai-chat-thinking-detail-trigger:hover {
@@ -8038,9 +8048,17 @@ kbd {
 
 .ai-chat-thinking-detail-trigger svg {
   order: 2;
+  flex: 0 0 auto;
   width: 12px;
   height: 12px;
-  transition: transform 140ms ease;
+  opacity: 0;
+  transition: opacity 80ms ease, transform 140ms ease;
+}
+
+.ai-chat-thinking-detail-trigger:hover svg,
+.ai-chat-thinking-detail-trigger:focus-visible svg,
+.ai-chat-thinking-detail.is-open .ai-chat-thinking-detail-trigger svg {
+  opacity: 1;
 }
 
 .ai-chat-thinking-detail.is-open .ai-chat-thinking-detail-trigger svg {
