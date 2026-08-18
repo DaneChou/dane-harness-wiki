@@ -8003,7 +8003,6 @@ kbd {
 }
 
 .ai-chat-thinking-detail-trigger:hover {
-  background: var(--surface-muted);
   color: var(--text-secondary);
 }
 
