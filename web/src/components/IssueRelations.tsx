@@ -40,6 +40,7 @@ export function IssuePickerContent({
   const [activeIndex, setActiveIndex] = useState(0);
   const [savingId, setSavingId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const results = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return candidates;
@@ -52,6 +53,10 @@ export function IssuePickerContent({
   useEffect(() => {
     requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
+
+  useEffect(() => {
+    optionRefs.current[activeIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
 
   async function choose(task: Task) {
     setSavingId(task.id);
@@ -80,7 +85,13 @@ export function IssuePickerContent({
             setActiveIndex(0);
           }}
           onKeyDown={(event) => {
-            if (event.key === "Escape") {
+            if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+            if (event.key === "Enter") {
+              if (event.metaKey || event.ctrlKey) return;
+              event.preventDefault();
+              const activeResult = results[activeIndex];
+              if (activeResult) void choose(activeResult);
+            } else if (event.key === "Escape") {
               event.preventDefault();
               onEscape();
             } else if (event.key === "ArrowDown" && results.length > 0) {
@@ -89,9 +100,6 @@ export function IssuePickerContent({
             } else if (event.key === "ArrowUp" && results.length > 0) {
               event.preventDefault();
               setActiveIndex((index) => (index - 1 + results.length) % results.length);
-            } else if (event.key === "Enter" && results[activeIndex]) {
-              event.preventDefault();
-              void choose(results[activeIndex]);
             }
           }}
         />
@@ -109,6 +117,9 @@ export function IssuePickerContent({
           ].filter(Boolean).join(" ");
           return (
             <button
+              ref={(element) => {
+                optionRefs.current[index] = element;
+              }}
               id={`relation-option-${candidate.id}`}
               className={className}
               type="button"
