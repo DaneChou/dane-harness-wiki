@@ -692,7 +692,7 @@ function LocalRealtimeSync({
 export function App() {
   const query = useMemo(() => new URL(document.baseURI).searchParams, []);
   const host = query.get("host");
-  const embedded = host === "codex" || host === "workbuddy";
+  const embedded = host === "codex" || host === "workbuddy" || host === "deepseek-harness";
   const undoShortcut = navigator.userAgent.includes("Macintosh") ? "⌘Z" : "Ctrl+Z";
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [hostContext, setHostContext] = useState<HostContext | null>(null);
@@ -1656,7 +1656,7 @@ export function App() {
   }, [embedded, host]);
 
   useEffect(() => {
-    if (host !== "workbuddy") return;
+    if (host !== "workbuddy" && host !== "deepseek-harness") return;
     let disposed = false;
     const syncRuntime = async () => {
       try {
