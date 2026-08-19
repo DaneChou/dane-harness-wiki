@@ -1656,7 +1656,7 @@ export function App() {
   }, [embedded, host]);
 
   useEffect(() => {
-    if (host !== "workbuddy" && host !== "deepseek-harness") return;
+    if (host !== "workbuddy") return;
     let disposed = false;
     const syncRuntime = async () => {
       try {
