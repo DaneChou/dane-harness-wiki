@@ -5,3 +5,21 @@ CREATE TABLE IF NOT EXISTS project_readmes (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TRIGGER project_readmes_revision_insert
+AFTER INSERT ON project_readmes
+BEGIN
+  UPDATE global_revision SET revision = revision + 1 WHERE singleton = 1;
+END;
+
+CREATE TRIGGER project_readmes_revision_update
+AFTER UPDATE ON project_readmes
+BEGIN
+  UPDATE global_revision SET revision = revision + 1 WHERE singleton = 1;
+END;
+
+CREATE TRIGGER project_readmes_revision_delete
+AFTER DELETE ON project_readmes
+BEGIN
+  UPDATE global_revision SET revision = revision + 1 WHERE singleton = 1;
+END;

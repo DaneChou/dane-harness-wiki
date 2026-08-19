@@ -1380,7 +1380,7 @@ export class TaskboardDatabase {
     `).get(projectId);
     return row
       ? projectReadmeFromRow(row, projectId)
-      : { projectId, content: "", version: 1, createdAt: null, updatedAt: null };
+      : { projectId, content: "", version: 0, createdAt: null, updatedAt: null };
   }
 
   saveProjectReadme(projectId, content, expectedVersion) {
@@ -1394,7 +1394,7 @@ export class TaskboardDatabase {
         SELECT version FROM project_readmes WHERE project_id = ?
       `).get(projectId);
       if (expectedVersion !== undefined) {
-        const actualVersion = current?.version ?? 1;
+        const actualVersion = current?.version ?? 0;
         if (actualVersion !== expectedVersion) {
           throw new ApiError(409, "VERSION_CONFLICT", "Project README changed since it was last read", {
             expectedVersion,

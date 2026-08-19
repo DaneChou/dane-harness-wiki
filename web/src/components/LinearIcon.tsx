@@ -168,8 +168,7 @@ interface LinearIconProps extends Omit<SVGProps<SVGSVGElement>, "children"> {
 }
 
 export function LinearIcon({ name, title, style, ...props }: LinearIconProps) {
-  const icon: { viewBox?: string; content: ReactNode } | undefined = ICONS[name];
-  if (!icon) return null;
+  const icon: { viewBox?: string; content: ReactNode } = ICONS[name];
   return (
     <svg
       data-linear-icon={name}

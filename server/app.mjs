@@ -505,8 +505,14 @@ function parseProjectLabel(body) {
 function parseProjectReadmeSave(body) {
   assertPlainObject(body);
   assertAllowedKeys(body, new Set(["content", "version"]));
-  const content = stringField(body.content ?? "", "content", { maxLength: 500_000 });
-  const version = body.version === undefined ? undefined : parseVersion(body.version);
+  const content = body.content ?? "";
+  if (typeof content !== "string") {
+    throw new ApiError(400, "INVALID_FIELD", "'content' must be a string");
+  }
+  if (content.length > 500_000) {
+    throw new ApiError(400, "INVALID_FIELD", "'content' cannot exceed 500000 characters");
+  }
+  const version = body.version === undefined ? undefined : parseWorkflowVersion(body.version);
   return { content, version };
 }
 

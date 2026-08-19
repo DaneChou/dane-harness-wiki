@@ -619,7 +619,7 @@ async function executeProjectReadme(api, parsed, overrides) {
       throw usageError("project readme set requires --content or --file");
     }
     const ifVersion = parsed.options["if-version"] !== undefined
-      ? explicitVersion(parsed.options["if-version"])
+      ? explicitVersion(parsed.options["if-version"], { allowZero: true })
       : undefined;
     return api.request("PUT", `/api/projects/${encodeURIComponent(projectId)}/readme`, {
       content,
@@ -1038,11 +1038,11 @@ function attachmentContentPath(attachmentId) {
   return `/api/attachments/${encodeURIComponent(attachmentId)}/content`;
 }
 
-function explicitVersion(rawVersion) {
+function explicitVersion(rawVersion, { allowZero = false } = {}) {
   if (rawVersion === undefined) throw usageError("Missing required option --if-version");
   const version = Number(rawVersion);
-  if (!Number.isSafeInteger(version) || version < 1) {
-    throw usageError("--if-version must be a positive integer");
+  if (!Number.isSafeInteger(version) || version < (allowZero ? 0 : 1)) {
+    throw usageError(`--if-version must be a ${allowZero ? "non-negative" : "positive"} integer`);
   }
   return version;
 }

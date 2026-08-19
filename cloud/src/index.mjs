@@ -2429,7 +2429,7 @@ async function getProjectReadme(env, projectId) {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }
-    : { projectId, content: "", version: 1, createdAt: null, updatedAt: null };
+    : { projectId, content: "", version: 0, createdAt: null, updatedAt: null };
 }
 
 async function saveProjectReadme(env, projectId, content, expectedVersion) {
@@ -2442,7 +2442,7 @@ async function saveProjectReadme(env, projectId, content, expectedVersion) {
     SELECT version FROM project_readmes WHERE project_id = ?
   `).bind(projectId).first();
   if (expectedVersion !== undefined) {
-    const actualVersion = current?.version ?? 1;
+    const actualVersion = current?.version ?? 0;
     if (actualVersion !== expectedVersion) {
       throw new ApiError(409, "VERSION_CONFLICT", "Project README changed since it was last read", {
         expectedVersion,
@@ -2468,7 +2468,7 @@ async function saveProjectReadme(env, projectId, content, expectedVersion) {
         409,
         "VERSION_CONFLICT",
         "Project README changed since it was last read",
-        { expectedVersion, actualVersion: latest?.version ?? 1 },
+        { expectedVersion, actualVersion: latest?.version ?? 0 },
       );
     }
   } else {
@@ -2486,7 +2486,7 @@ async function saveProjectReadme(env, projectId, content, expectedVersion) {
           409,
           "VERSION_CONFLICT",
           "Project README changed since it was last read",
-          { expectedVersion, actualVersion: latest?.version ?? 1 },
+          { expectedVersion, actualVersion: latest?.version ?? 0 },
         );
       }
       throw error;
@@ -2891,8 +2891,16 @@ async function routeApi(request, env, actor, url) {
       const body = await readJson(request);
       assertPlainObject(body);
       assertAllowedKeys(body, new Set(["version", "content"]));
-      const version = body.version === undefined ? undefined : parseVersion(body.version);
-      const content = stringField(body.content ?? "", "content", { maxLength: 500_000 });
+      const version = body.version === undefined
+        ? undefined
+        : parseVersion(body.version, { allowZero: true });
+      const content = body.content ?? "";
+      if (typeof content !== "string") {
+        throw new ApiError(400, "INVALID_FIELD", "'content' must be a string");
+      }
+      if (content.length > 500_000) {
+        throw new ApiError(400, "INVALID_FIELD", "'content' cannot exceed 500000 characters");
+      }
       return json(200, {
         readme: await saveProjectReadme(env, projectId, content, version),
       });

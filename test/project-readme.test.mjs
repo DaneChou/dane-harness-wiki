@@ -86,7 +86,7 @@ test("Database: getProjectReadme returns empty record for fresh project", async 
     const readme = db.getProjectReadme("demo-project");
     assert.equal(readme.projectId, "demo-project");
     assert.equal(readme.content, "");
-    assert.equal(readme.version, 1);
+    assert.equal(readme.version, 0);
     assert.equal(readme.createdAt, null);
     assert.equal(readme.updatedAt, null);
   } finally {
@@ -137,7 +137,7 @@ test("API: GET and PUT /api/projects/:id/readme", async () => {
   const get1 = await request(baseUrl, "/api/projects/p-test/readme");
   assert.equal(get1.response.status, 200);
   assert.equal(get1.body.readme.content, "");
-  assert.equal(get1.body.readme.version, 1);
+  assert.equal(get1.body.readme.version, 0);
 
   // PUT initial content
   const put1 = await request(baseUrl, "/api/projects/p-test/readme", {
@@ -184,7 +184,7 @@ test("CLI: taskctl project readme get and set", async () => {
   const cliGet1 = await runCli(["project", "readme", "get", "cli-proj"], baseUrl);
   assert.equal(cliGet1.exitCode, 0);
   assert.equal(cliGet1.stdout.readme.content, "");
-  assert.equal(cliGet1.stdout.readme.version, 1);
+  assert.equal(cliGet1.stdout.readme.version, 0);
 
   // Set README via --content
   const cliSet1 = await runCli(

@@ -9,12 +9,14 @@ import "./ProjectReadmeView.css";
 interface ProjectReadmeViewProps {
   project: Project;
   currentUser: ActorIdentity;
+  revision: number;
   onError?: (error: string) => void;
 }
 
 export function ProjectReadmeView({
   project,
   currentUser: _currentUser,
+  revision,
   onError,
 }: ProjectReadmeViewProps) {
   const { language, text } = useTaskboardI18n();
@@ -28,9 +30,8 @@ export function ProjectReadmeView({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
+    if (editing) return;
     let active = true;
-    setLoading(true);
-    setEditing(false);
     setSaveError(null);
 
     getProjectReadme(project.id)
@@ -51,7 +52,7 @@ export function ProjectReadmeView({
     return () => {
       active = false;
     };
-  }, [project.id, onError]);
+  }, [editing, onError, project.id, revision]);
 
   function handleStartEditing() {
     setDraftContent(readme?.content ?? "");

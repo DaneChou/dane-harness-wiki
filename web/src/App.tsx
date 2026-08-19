@@ -387,6 +387,7 @@ const EVENT_NAMES = [
   "attachment.deleted",
   "project.created",
   "project.labels.updated",
+  "project.readme.updated",
   "workflow.updated",
 ] as const;
 
@@ -580,6 +581,7 @@ interface LocalRealtimeSyncProps {
   setConnection: Dispatch<SetStateAction<ConnectionState>>;
   setCommentsRevision: Dispatch<SetStateAction<number>>;
   setAttachmentsRevision: Dispatch<SetStateAction<number>>;
+  setReadmeRevision: Dispatch<SetStateAction<number>>;
 }
 
 function LocalRealtimeSync({
@@ -591,6 +593,7 @@ function LocalRealtimeSync({
   setConnection,
   setCommentsRevision,
   setAttachmentsRevision,
+  setReadmeRevision,
 }: LocalRealtimeSyncProps) {
   useEffect(() => {
     const source = new EventSource(resolveTaskboardUrl("/api/events"));
@@ -644,6 +647,10 @@ function LocalRealtimeSync({
         if (selectedProjectId) void refreshWorkflowOptions(selectedProjectId);
         return;
       }
+      if (event.type === "project.readme.updated") {
+        setReadmeRevision((current) => current + 1);
+        return;
+      }
       if (event.type.startsWith("comment.")) {
         if (!detailTaskId || !payload.taskId || payload.taskId === detailTaskId) {
           setCommentsRevision((current) => current + 1);
@@ -664,6 +671,7 @@ function LocalRealtimeSync({
       setConnection("live");
       scheduleRefresh({ projects: true, tasks: Boolean(selectedProjectId) });
       if (selectedProjectId) void refreshWorkflowOptions(selectedProjectId);
+      setReadmeRevision((current) => current + 1);
       if (detailTaskId) {
         setCommentsRevision((current) => current + 1);
         setAttachmentsRevision((current) => current + 1);
@@ -685,6 +693,7 @@ function LocalRealtimeSync({
     setAttachmentsRevision,
     setCommentsRevision,
     setConnection,
+    setReadmeRevision,
   ]);
 
   return null;
@@ -764,6 +773,7 @@ export function App() {
   const [commentsRevision, setCommentsRevision] = useState(0);
   const [attachmentsRevision, setAttachmentsRevision] = useState(0);
   const [workflowRevision, setWorkflowRevision] = useState(0);
+  const [readmeRevision, setReadmeRevision] = useState(0);
   const [workflowOptions, setWorkflowOptions] = useState<WorkflowOption[]>(DEFAULT_WORKFLOW_OPTIONS);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
@@ -1923,6 +1933,7 @@ export function App() {
           void refreshWorkflowOptions(projectId).catch(() => {});
         }
         setWorkflowRevision((current) => current + 1);
+        setReadmeRevision((current) => current + 1);
         setCommentsRevision((current) => current + 1);
         setAttachmentsRevision((current) => current + 1);
       },
@@ -3329,6 +3340,7 @@ export function App() {
           setConnection={setConnection}
           setCommentsRevision={setCommentsRevision}
           setAttachmentsRevision={setAttachmentsRevision}
+          setReadmeRevision={setReadmeRevision}
         />
       )}
       {!embedded && (
@@ -3697,7 +3709,8 @@ export function App() {
             openingThread={openingThreadTaskId === detailTask.id}
             onError={setActionError}
           />
-        ) : hasLoadedTasks
+        ) : boardView !== "readme"
+          && hasLoadedTasks
           && tasks.length === 0
           && selectedProject
           && aiImportReadyProjectId === selectedProject.id ? (
@@ -3737,6 +3750,7 @@ export function App() {
             key={selectedProjectId}
             project={selectedProject}
             currentUser={currentUser}
+            revision={readmeRevision}
             onError={setActionError}
           />
         ) : boardView === "dashboard" ? (
