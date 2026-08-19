@@ -1863,12 +1863,12 @@ export function App() {
   }, [refreshTasks, selectedProjectId]);
 
   useEffect(() => {
-    if (!isJiraProject || !selectedProjectId) return;
+    if ((!isJiraProject && !(isAllProjects && jiraConnection?.configured)) || !selectedProjectId) return;
     const timer = window.setInterval(() => {
       void refreshTasks(selectedProjectId, { quiet: true });
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [isJiraProject, refreshTasks, selectedProjectId]);
+  }, [isAllProjects, isJiraProject, jiraConnection?.configured, refreshTasks, selectedProjectId]);
 
   const refreshWorkflowOptions = useCallback(async (projectId: string, signal?: AbortSignal) => {
     const record = await getWorkflowWorkspace<unknown>(projectId, signal);
