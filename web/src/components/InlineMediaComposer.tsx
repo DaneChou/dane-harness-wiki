@@ -694,14 +694,8 @@ function inlineMediaClipboardHtml(
       continue;
     }
     const pendingImage = ownerDocument.createElement("span");
-    const markdown = pendingImageClipboardMarkdown(segment);
-    if (markdown) {
-      pendingImage.dataset.taskboardInlineMediaMarkdown = markdown;
-      pendingImage.textContent = markdown;
-    } else {
-      pendingImage.dataset.taskboardInlineMediaPendingImage = segment.id;
-      pendingImage.textContent = segment.file.name;
-    }
+    pendingImage.dataset.taskboardInlineMediaPendingImage = segment.id;
+    pendingImage.textContent = segment.file.name;
     wrapper.append(pendingImage);
   }
 
@@ -1787,7 +1781,10 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       }
       const taskboardHtml = clipboardId
         || clipboardHtml.includes("data-taskboard-inline-media-markdown");
-      if (taskboardHtml) {
+      const pendingImageHtml = clipboardHtml.includes(
+        "data-taskboard-inline-media-pending-image",
+      );
+      if (taskboardHtml && !pendingImageHtml) {
         const htmlSegments = createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
         if (htmlSegments) {
           event.preventDefault();
@@ -1808,7 +1805,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         );
         return;
       }
-      const htmlSegments = createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
+      const htmlSegments = pendingImageHtml
+        ? null
+        : createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
       if (htmlSegments) {
         event.preventDefault();
         applyRangeReplacement(range.start, range.end, htmlSegments, false);
