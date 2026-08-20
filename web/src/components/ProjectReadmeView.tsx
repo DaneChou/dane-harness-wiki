@@ -230,7 +230,7 @@ export function ProjectReadmeView({
         </div>
       )}
 
-      {loadError && (
+      {loadError && !editing && (
         <div className="project-readme-alert error" role="alert">
           <LinearIcon name="alert" />
           <span>{loadError}</span>
