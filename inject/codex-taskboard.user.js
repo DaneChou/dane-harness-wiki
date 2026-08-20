@@ -1147,7 +1147,7 @@
       postToFrame({ type: "taskboard:thread-prepared", payload: { taskId, threadId: started.threadId } });
     } catch (error) {
       const createdThreadId = normalizeThreadId(error?.threadId);
-      if (createdThreadId) {
+      if (createdThreadId && codexProjectKind !== "remote") {
         await dispatchHostMessage({
           type: "navigate-to-route",
           path: routeForThread(createdThreadId),
