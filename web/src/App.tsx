@@ -177,6 +177,7 @@ const GanttView = lazy(() => import("./components/GanttView").then((module) => (
 interface EditorState {
   task: Task | null;
   status: TaskStatus;
+  projectId?: string | null;
 }
 
 interface ContextMenuState {
@@ -760,6 +761,7 @@ export function App() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [newTaskDraft, setNewTaskDraft] = useState<{
     projectId: string;
+    targetProjectId: string | null;
     draft: NewTaskEditorDraft;
   } | null>(null);
   const [detailTaskIdentifier, setDetailTaskIdentifier] = useState<string | null>(
@@ -1094,6 +1096,16 @@ export function App() {
   }, [hostContext?.projects, projectCodexIdentities, projects, recentProjectIds, text]);
   const firstEmptyProjectId = projectChoices.find((project) => project.issueCount === 0)?.id ?? null;
   const hasProjectsWithIssues = projectChoices.some((project) => project.issueCount > 0);
+  const editorProjectId = editor?.task?.projectId
+    ?? editor?.projectId
+    ?? (newTaskDraft?.projectId === selectedProjectId ? newTaskDraft.targetProjectId : undefined)
+    ?? (isAllProjects ? null : selectedProjectId);
+  const createTargetProjects = projectChoices.flatMap((choice) => {
+    const project = projects.find((candidate) => candidate.id === choice.id);
+    return project && project.source !== "jira"
+      ? [{ id: choice.id, name: choice.name }]
+      : [];
+  });
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const issueReadStorageKey = selectedProjectId
     ? `${ISSUE_READ_KEY_PREFIX}:${taskboardMetadata?.mode ?? "local"}:${selectedProjectId}`
@@ -2181,13 +2193,14 @@ export function App() {
     createOptions?: NewTaskCreateOptions,
   ) {
     if (!selectedProjectId || !editor) return;
+    const targetProjectId = editorProjectId ?? selectedProjectId;
     setActionError(null);
     const creating = editor.task === null;
     let saved: Task;
     try {
       saved = editor.task
         ? await updateTaskRequest(editor.task, draft)
-        : await createTaskRequest(selectedProjectId, draft);
+        : await createTaskRequest(targetProjectId, draft);
     } catch (error) {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
         void refreshTasks(selectedProjectId, { quiet: true });
@@ -2196,7 +2209,7 @@ export function App() {
     }
     if (creating) {
       setProjects((current) => current.map((project) => (
-        project.id === selectedProjectId
+        project.id === targetProjectId
           ? { ...project, issueCount: project.issueCount + 1 }
           : project
       )));
@@ -3514,7 +3527,7 @@ export function App() {
                 <LinearIcon name="recurrence" />
               </button>
             )}
-            {selectedProject && !isJiraProject && boardView !== "workflow" && (
+            {selectedProjectId && !isJiraProject && boardView !== "workflow" && (
               <button
                 className="icon-button header-create-button"
                 type="button"
@@ -4117,22 +4130,30 @@ export function App() {
       {editor && (
         <TaskEditor
           key={editor.task?.id ?? `new-${selectedProjectId}-${editor.status}`}
-          projectId={selectedProjectId}
+          projectId={editorProjectId}
+          projectOptions={!editor.task && isAllProjects ? createTargetProjects : undefined}
+          onProjectChange={(projectId) => setEditor((current) => (
+            current ? { ...current, projectId } : current
+          ))}
           task={editor.task}
-          tasks={tasks.filter((task) => task.projectId === selectedProjectId)}
-          referenceTasks={referenceTasks.filter((task) => task.projectId === selectedProjectId)}
+          tasks={tasks.filter((task) => task.projectId === editorProjectId)}
+          referenceTasks={referenceTasks.filter((task) => task.projectId === editorProjectId)}
           initialStatus={editor.status}
           initialDraft={editor.task || newTaskDraft?.projectId !== selectedProjectId
             ? null
             : newTaskDraft.draft}
-          labels={availableLabels}
+          labels={projects.find((project) => project.id === editorProjectId)?.labels ?? []}
           currentUser={currentUser}
           developmentScan={developmentScan}
           developmentScanLoading={developmentScanLoading}
-          onCreateLabel={persistProjectLabel}
+          onCreateLabel={(label) => persistProjectLabel(label, editorProjectId ?? selectedProjectId)}
           onCancel={(draft) => {
             if (!editor.task) {
-              setNewTaskDraft(draft ? { projectId: selectedProjectId, draft } : null);
+              setNewTaskDraft(draft ? {
+                projectId: selectedProjectId,
+                targetProjectId: editorProjectId,
+                draft,
+              } : null);
             }
             setEditor(null);
           }}
