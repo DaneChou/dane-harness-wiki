@@ -1,4 +1,5 @@
 import {
+  Fragment,
   lazy,
   Suspense,
   useCallback,
@@ -314,6 +315,7 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 };
 
 const GLOBAL_PROJECT_ID = "local";
+const ALL_PROJECTS_ID = "__all_projects__";
 const RECENT_PROJECT_IDS_KEY = "taskboard.recentProjectIds.v1";
 const PROJECT_VIEW_KEY_PREFIX = "taskboard.project-view.v1.";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
@@ -629,7 +631,11 @@ function LocalRealtimeSync({
       }
       const eventProjectId = payload.projectId ?? payload.project?.id;
       const affectsSelectedProject = Boolean(selectedProjectId)
-        && (!eventProjectId || eventProjectId === selectedProjectId);
+        && (
+          selectedProjectId === ALL_PROJECTS_ID
+          || !eventProjectId
+          || eventProjectId === selectedProjectId
+        );
       if (event.type === "project.created") {
         scheduleRefresh({ projects: true });
         return;
@@ -644,7 +650,9 @@ function LocalRealtimeSync({
       }
       if (!affectsSelectedProject) return;
       if (event.type === "workflow.updated") {
-        if (selectedProjectId) void refreshWorkflowOptions(selectedProjectId);
+        if (selectedProjectId && selectedProjectId !== ALL_PROJECTS_ID) {
+          void refreshWorkflowOptions(selectedProjectId);
+        }
         return;
       }
       if (event.type === "project.readme.updated") {
@@ -670,8 +678,10 @@ function LocalRealtimeSync({
     source.onopen = () => {
       setConnection("live");
       scheduleRefresh({ projects: true, tasks: Boolean(selectedProjectId) });
-      if (selectedProjectId) void refreshWorkflowOptions(selectedProjectId);
-      setReadmeRevision((current) => current + 1);
+      if (selectedProjectId && selectedProjectId !== ALL_PROJECTS_ID) {
+        void refreshWorkflowOptions(selectedProjectId);
+        setReadmeRevision((current) => current + 1);
+      }
       if (detailTaskId) {
         setCommentsRevision((current) => current + 1);
         setAttachmentsRevision((current) => current + 1);
@@ -702,7 +712,7 @@ function LocalRealtimeSync({
 export function App() {
   const query = useMemo(() => new URL(document.baseURI).searchParams, []);
   const host = query.get("host");
-  const embedded = host === "codex" || host === "workbuddy";
+  const embedded = host === "codex" || host === "workbuddy" || host === "deepseek-harness";
   const undoShortcut = navigator.userAgent.includes("Macintosh") ? "⌘Z" : "Ctrl+Z";
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const [hostContext, setHostContext] = useState<HostContext | null>(null);
@@ -813,6 +823,7 @@ export function App() {
   const dragRegionRef = useRef<HTMLDivElement>(null);
   const issueListRef = useRef<HTMLDivElement>(null);
   const boardColumnScrollRefs = useRef<Partial<Record<TaskStatus, HTMLDivElement | null>>>({});
+  const detailSourceProjectIdRef = useRef<string | null>(null);
   const pendingDetailSourceScrollRef = useRef<DetailSourceScroll | null>(null);
   const selectedProjectIdRef = useRef(selectedProjectId);
   selectedProjectIdRef.current = selectedProjectId;
@@ -874,6 +885,7 @@ export function App() {
   }, []);
 
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
+  const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
   const aiImportProjectId = hasLoadedTasks
     && tasks.length === 0
@@ -901,7 +913,7 @@ export function App() {
     ...DEFAULT_USER_ACTOR,
     name: text("本地用户", "Local user"),
   };
-  const selectedDeviceWorkspacePath = selectedProjectId === GLOBAL_PROJECT_ID
+  const selectedDeviceWorkspacePath = selectedProjectId === GLOBAL_PROJECT_ID || isAllProjects
     ? undefined
     : deviceWorkspacePaths[selectedProjectId];
   const selectedProjectAutomation = projectAutomations[selectedProjectId];
@@ -1041,7 +1053,13 @@ export function App() {
   const contextMenuTask = contextMenu
     ? tasks.find((task) => task.id === contextMenu.taskId) ?? null
     : null;
-  const availableLabels = selectedProject?.labels ?? [];
+  const availableLabels = isAllProjects
+    ? [...new Set(projects.flatMap((project) => project.labels))]
+    : selectedProject?.labels ?? [];
+  const projectNames = useMemo(() => Object.fromEntries(projects.map((project) => [
+    project.id,
+    project.id === GLOBAL_PROJECT_ID ? text("临时任务", "Temporary tasks") : project.name,
+  ])), [projects, text]);
   const projectChoices = useMemo<ProjectChoice[]>(() => {
     const persistedById = new Map(projects.map((project) => [project.id, project]));
     const seen = new Set<string>();
@@ -1052,7 +1070,7 @@ export function App() {
       choices.push({
         id: project.id,
         name: project.id === GLOBAL_PROJECT_ID
-          ? text("全局", "Global")
+          ? text("临时任务", "Temporary tasks")
           : persistedById.get(project.id)?.name ?? project.name,
         issueCount: persistedById.get(project.id)?.issueCount ?? 0,
         inCodex: true,
@@ -1071,7 +1089,9 @@ export function App() {
       if (seen.has(project.id)) continue;
       choices.push({
         id: project.id,
-        name: project.id === GLOBAL_PROJECT_ID ? text("全局", "Global") : project.name,
+        name: project.id === GLOBAL_PROJECT_ID
+          ? text("临时任务", "Temporary tasks")
+          : project.name,
         issueCount: project.issueCount,
         inCodex: false,
         persisted: true,
@@ -1079,11 +1099,17 @@ export function App() {
       });
     }
     const recentOrder = new Map(recentProjectIds.map((projectId, index) => [projectId, index]));
-    return choices.sort((left, right) => (
+    const sortedChoices = choices.sort((left, right) => (
       (recentOrder.get(left.id) ?? recentProjectIds.length)
       - (recentOrder.get(right.id) ?? recentProjectIds.length)
     ));
+    return [
+      ...sortedChoices.filter((project) => project.issueCount > 0),
+      ...sortedChoices.filter((project) => project.issueCount === 0),
+    ];
   }, [hostContext?.projects, projectCodexIdentities, projects, recentProjectIds, text]);
+  const firstEmptyProjectId = projectChoices.find((project) => project.issueCount === 0)?.id ?? null;
+  const hasProjectsWithIssues = projectChoices.some((project) => project.issueCount > 0);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   const issueReadStorageKey = selectedProjectId
     ? `${ISSUE_READ_KEY_PREFIX}:${taskboardMetadata?.mode ?? "local"}:${selectedProjectId}`
@@ -1391,6 +1417,9 @@ export function App() {
   function openTaskDetail(task: Pick<Task, "identifier" | "projectId">) {
     const fullTask = tasksRef.current.find((candidate) => candidate.identifier === task.identifier);
     if (fullTask) markTaskRead(fullTask);
+    const currentIssue = readIssueIdentifier(window.location.search);
+    if (!currentIssue) detailSourceProjectIdRef.current = selectedProjectId;
+    if (isAllProjects) setSelectedProjectId(task.projectId);
     if (boardView === "list" && issueListRef.current) {
       pendingDetailSourceScrollRef.current = {
         projectId: selectedProjectId,
@@ -1411,8 +1440,7 @@ export function App() {
     closeContextMenu();
     setProjectMenuOpen(false);
     setDetailTaskIdentifier(task.identifier);
-    const currentIssue = readIssueIdentifier(window.location.search);
-    const boardUrl = buildIssueUrl(window.location.href, task.projectId, null);
+    const boardUrl = buildIssueUrl(window.location.href, selectedProjectId, null);
     if (!currentIssue) {
       window.history.replaceState(window.history.state, "", boardUrl);
     }
@@ -1425,8 +1453,14 @@ export function App() {
   }
 
   function closeTaskDetail() {
+    const sourceProjectId = detailSourceProjectIdRef.current ?? selectedProjectId;
+    detailSourceProjectIdRef.current = null;
     setDetailTaskIdentifier(null);
-    const url = buildIssueUrl(window.location.href, selectedProjectId || null, null);
+    if (sourceProjectId !== selectedProjectId) {
+      setSelectedProjectId(sourceProjectId);
+      setBoardView(sourceProjectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(sourceProjectId));
+    }
+    const url = buildIssueUrl(window.location.href, sourceProjectId, null);
     window.history.replaceState(window.history.state, "", url);
   }
 
@@ -1475,7 +1509,7 @@ export function App() {
       }
       setDetailTaskIdentifier(routeIssueIdentifier);
       if (routeProjectId === selectedProjectId) return;
-      setBoardView(readProjectBoardView(routeProjectId));
+      setBoardView(routeProjectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(routeProjectId));
       setSelectedProjectId(routeProjectId);
     }
 
@@ -1491,7 +1525,9 @@ export function App() {
   }, [embedded, theme]);
 
   useEffect(() => {
-    if (selectedProjectId) setBoardView(readProjectBoardView(selectedProjectId));
+    if (selectedProjectId) {
+      setBoardView(selectedProjectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(selectedProjectId));
+    }
   }, [selectedProjectId]);
 
   useEffect(() => {
@@ -1741,7 +1777,9 @@ export function App() {
       setJiraConnection(nextJiraConnection);
       setSelectedProjectId((current) => {
         const fromQuery = new URLSearchParams(window.location.search).get("project");
+        if (fromQuery === ALL_PROJECTS_ID) return fromQuery;
         if (fromQuery && nextProjects.some((project) => project.id === fromQuery)) return fromQuery;
+        if (current === ALL_PROJECTS_ID) return current;
         if (current && nextProjects.some((project) => project.id === current)) return current;
         return nextProjects.find((project) => project.id === GLOBAL_PROJECT_ID)?.id
           ?? nextProjects[0]?.id
@@ -1802,9 +1840,10 @@ export function App() {
       current ? { ...current, requestId } : current
     ));
     try {
+      const taskProjectId = projectId === ALL_PROJECTS_ID ? undefined : projectId;
       const [nextTasks, nextArchivedTasks] = await Promise.all([
-        listTasks(projectId, options.signal),
-        listArchivedTasks(projectId, options.signal),
+        listTasks(taskProjectId, options.signal),
+        listArchivedTasks(taskProjectId, options.signal),
       ]);
       if (requestId !== tasksRequestRef.current) return;
       setTasks(sortTasks(nextTasks));
@@ -1843,12 +1882,12 @@ export function App() {
   }, [refreshTasks, selectedProjectId]);
 
   useEffect(() => {
-    if (!isJiraProject || !selectedProjectId) return;
+    if ((!isJiraProject && !(isAllProjects && jiraConnection?.configured)) || !selectedProjectId) return;
     const timer = window.setInterval(() => {
       void refreshTasks(selectedProjectId, { quiet: true });
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [isJiraProject, refreshTasks, selectedProjectId]);
+  }, [isAllProjects, isJiraProject, jiraConnection?.configured, refreshTasks, selectedProjectId]);
 
   const refreshWorkflowOptions = useCallback(async (projectId: string, signal?: AbortSignal) => {
     const record = await getWorkflowWorkspace<unknown>(projectId, signal);
@@ -1856,7 +1895,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!selectedProjectId || isAllProjects) {
       setWorkflowOptions(DEFAULT_WORKFLOW_OPTIONS);
       return;
     }
@@ -1868,11 +1907,12 @@ export function App() {
       }
     });
     return () => controller.abort();
-  }, [refreshWorkflowOptions, selectedProjectId]);
+  }, [isAllProjects, refreshWorkflowOptions, selectedProjectId]);
 
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!selectedProjectId || isAllProjects) {
       setDevelopmentScan({ workspacePath: null, contexts: [] });
+      setDevelopmentScanLoading(false);
       return;
     }
     const controller = new AbortController();
@@ -1904,6 +1944,7 @@ export function App() {
     detailTask?.threadId,
     hostContext?.projectId,
     hostContext?.threadId,
+    isAllProjects,
     rememberDeviceWorkspacePath,
     selectedProjectId,
     selectedDeviceWorkspacePath,
@@ -1930,7 +1971,7 @@ export function App() {
         const projectId = selectedProjectIdRef.current;
         if (projectId) {
           void refreshTasks(projectId, { quiet: true });
-          void refreshWorkflowOptions(projectId).catch(() => {});
+          if (projectId !== ALL_PROJECTS_ID) void refreshWorkflowOptions(projectId).catch(() => {});
         }
         setWorkflowRevision((current) => current + 1);
         setReadmeRevision((current) => current + 1);
@@ -2016,6 +2057,7 @@ export function App() {
         && !event.metaKey
         && !event.ctrlKey
         && selectedProjectId
+        && !isAllProjects
         && !isJiraProject
         && boardView !== "workflow"
       ) {
@@ -2038,7 +2080,7 @@ export function App() {
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [boardView, contextMenu, detailTaskId, editor, isJiraProject, projectMenuOpen, selectedProjectId]);
+  }, [boardView, contextMenu, detailTaskId, editor, isAllProjects, isJiraProject, projectMenuOpen, selectedProjectId]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(
@@ -2324,7 +2366,11 @@ export function App() {
       return;
     }
 
-    const destination = tasks.filter((candidate) => candidate.status === status && candidate.id !== task.id);
+    const destination = tasks.filter((candidate) => (
+      candidate.projectId === task.projectId
+      && candidate.status === status
+      && candidate.id !== task.id
+    ));
     const statusChanged = task.status !== status;
     const insertionIndex = statusChanged && !useDropPosition
       ? 0
@@ -2334,7 +2380,9 @@ export function App() {
     const targetIndex = insertionIndex < 0 ? destination.length : insertionIndex;
     const desiredOrder = [...destination];
     desiredOrder.splice(targetIndex, 0, task);
-    const currentOrder = tasks.filter((candidate) => candidate.status === status);
+    const currentOrder = tasks.filter((candidate) => (
+      candidate.projectId === task.projectId && candidate.status === status
+    ));
     if (
       task.status === status
       && currentOrder.length === desiredOrder.length
@@ -2461,10 +2509,10 @@ export function App() {
     }
   }
 
-  async function persistProjectLabel(label: string) {
+  async function persistProjectLabel(label: string, projectId = selectedProjectId) {
     setActionError(null);
     try {
-      const project = await createProjectLabelRequest(selectedProjectId, label);
+      const project = await createProjectLabelRequest(projectId, label);
       setProjects((current) => current.map((candidate) => (
         candidate.id === project.id ? project : candidate
       )));
@@ -3126,9 +3174,10 @@ export function App() {
     closeContextMenu();
     setProjectContextMenu(null);
     setProjectMenuOpen(false);
+    detailSourceProjectIdRef.current = null;
     setDetailTaskIdentifier(null);
-    setBoardView(readProjectBoardView(projectId));
-    rememberProjectOpen(projectId);
+    setBoardView(projectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(projectId));
+    if (projectId !== ALL_PROJECTS_ID) rememberProjectOpen(projectId);
     setSelectedProjectId(projectId);
     setSearch("");
     setFilters(EMPTY_TASK_FILTERS);
@@ -3320,9 +3369,11 @@ export function App() {
     }
   }
 
-  const headerProjectName = selectedProject?.id === GLOBAL_PROJECT_ID
-    ? text("全局", "Global")
-    : selectedProject?.name ?? text("任务面板", "Taskboard");
+  const headerProjectName = isAllProjects
+    ? text("所有项目", "All projects")
+    : selectedProject?.id === GLOBAL_PROJECT_ID
+      ? text("临时任务", "Temporary tasks")
+      : selectedProject?.name ?? text("任务面板", "Taskboard");
   const appShellStyle = embedded
     ? { "--codex-titlebar-left-inset": `${hostContext?.titlebarLeftInset ?? 0}px` } as CSSProperties
     : undefined;
@@ -3430,31 +3481,51 @@ export function App() {
                 {projectMenuOpen && (
                   <div className="header-project-menu" role="menu" aria-label={text("项目", "Projects")}>
                     <span>{text("切换项目", "Switch project")}</span>
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={isAllProjects}
+                      disabled={openingProjectId !== null}
+                      onClick={() => {
+                        if (isAllProjects) setProjectMenuOpen(false);
+                        else changeProject(ALL_PROJECTS_ID);
+                      }}
+                    >
+                      <TaskboardIcon className="project-avatar" name="projectFolder" />
+                      <span>{text("所有项目", "All projects")}</span>
+                      {isAllProjects && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
+                    </button>
+                    <div className="project-menu-divider" role="separator" />
                     {projectChoices.map((project) => (
-                      <button
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={project.id === selectedProjectId}
-                        disabled={openingProjectId !== null}
-                        key={project.id}
-                        onContextMenu={project.id.startsWith("temp-") ? (event) => {
-                          event.preventDefault();
-                          setProjectContextMenu({
-                            project,
-                            x: event.clientX,
-                            y: event.clientY,
-                          });
-                        } : undefined}
-                        onClick={() => {
-                          if (project.id === selectedProjectId) setProjectMenuOpen(false);
-                          else void selectProject(project);
-                        }}
-                      >
-                        <TaskboardIcon className="project-avatar" name="projectFolder" />
-                        <span>{project.name}</span>
-                        {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
-                      </button>
+                      <Fragment key={project.id}>
+                        {hasProjectsWithIssues && project.id === firstEmptyProjectId && (
+                          <div className="project-menu-divider" role="separator" />
+                        )}
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={project.id === selectedProjectId}
+                          disabled={openingProjectId !== null}
+                          onContextMenu={project.id.startsWith("temp-") ? (event) => {
+                            event.preventDefault();
+                            setProjectContextMenu({
+                              project,
+                              x: event.clientX,
+                              y: event.clientY,
+                            });
+                          } : undefined}
+                          onClick={() => {
+                            if (project.id === selectedProjectId) setProjectMenuOpen(false);
+                            else void selectProject(project);
+                          }}
+                        >
+                          <TaskboardIcon className="project-avatar" name="projectFolder" />
+                          <span>{project.name}</span>
+                          {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
+                        </button>
+                      </Fragment>
                     ))}
+                    <div className="project-menu-divider" role="separator" />
                     <button
                       type="button"
                       role="menuitem"
@@ -3486,7 +3557,7 @@ export function App() {
           <div ref={dragRegionRef} className="workspace-drag-region" aria-hidden="true" />
 
           <div className="header-actions">
-            {selectedProjectId && (
+            {selectedProject && (
               <ProjectAutomationMenu
                 automation={selectedProjectAutomation}
                 pending={automationPending}
@@ -3508,7 +3579,7 @@ export function App() {
                 <LinearIcon name="recurrence" />
               </button>
             )}
-            {selectedProjectId && !isJiraProject && boardView !== "workflow" && (
+            {selectedProject && !isJiraProject && boardView !== "workflow" && (
               <button
                 className="icon-button header-create-button"
                 type="button"
@@ -3524,14 +3595,16 @@ export function App() {
 
         {selectedProjectId && !detailTask && <div className="board-toolbar">
           <div className="view-tabs" aria-label={text("看板视图", "Board views")}>
-            <button
-              className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
-              type="button"
-              aria-pressed={boardView === "dashboard"}
-              onClick={() => selectBoardView("dashboard")}
-            >
-              {text("仪表盘", "Dashboard")}
-            </button>
+            {!isAllProjects && (
+              <button
+                className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
+                type="button"
+                aria-pressed={boardView === "dashboard"}
+                onClick={() => selectBoardView("dashboard")}
+              >
+                {text("仪表盘", "Dashboard")}
+              </button>
+            )}
             <button
               className={`view-tab${boardView === "issues" ? " active" : ""}`}
               type="button"
@@ -3753,7 +3826,7 @@ export function App() {
             revision={readmeRevision}
             onError={setActionError}
           />
-        ) : boardView === "dashboard" ? (
+        ) : boardView === "dashboard" && selectedProject ? (
           <DashboardView
             key={selectedProjectId}
             projectId={selectedProjectId}
@@ -3848,10 +3921,11 @@ export function App() {
                         settlingTaskId={settlingTaskId}
                         contextMenuTaskId={contextMenu?.taskId ?? null}
                         availableLabels={availableLabels}
+                        projectNames={isAllProjects ? projectNames : undefined}
                         currentUser={currentUser}
                         showCover={boardCardDisplay.cover}
                         showBody={boardCardDisplay.body}
-                        createEnabled={!isJiraProject}
+                        createEnabled={!isAllProjects && !isJiraProject}
                         onCreateLabel={persistProjectLabel}
                         onCreate={(initialStatus) => setEditor({ task: null, status: initialStatus })}
                         onEdit={openTaskDetail}
@@ -3883,6 +3957,7 @@ export function App() {
                     settlingTaskId={settlingTaskId}
                     contextMenuTaskId={contextMenu?.taskId ?? null}
                     availableLabels={availableLabels}
+                    projectNames={isAllProjects ? projectNames : undefined}
                     currentUser={currentUser}
                     showCover={boardCardDisplay.cover}
                     showBody={boardCardDisplay.body}
@@ -3890,7 +3965,7 @@ export function App() {
                     restoringTaskId={restoringTaskId}
                     deletingTaskId={deletingArchivedTaskId}
                     onTabChange={setOtherTasksTab}
-                    onCreate={isJiraProject
+                    onCreate={isJiraProject || isAllProjects
                       ? undefined
                       : (initialStatus) => setEditor({ task: null, status: initialStatus })}
                     onRestore={(task) => void restoreArchivedTask(task)}
@@ -4170,7 +4245,7 @@ export function App() {
         />
       )}
 
-      {localAiChatAvailable && (
+      {localAiChatAvailable && !isAllProjects && (
         <Suspense fallback={null}>
           <AiChat
             available
