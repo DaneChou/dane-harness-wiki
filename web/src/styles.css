@@ -9903,7 +9903,7 @@ kbd {
   overflow: hidden;
   border: .5px solid var(--border);
   border-radius: 999px;
-  background: var(--surface-muted);
+  background: var(--surface);
   color: var(--text-secondary);
   font-size: 10px;
   font-weight: 450;

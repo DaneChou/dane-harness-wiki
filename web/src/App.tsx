@@ -812,6 +812,7 @@ export function App() {
   const dragRegionRef = useRef<HTMLDivElement>(null);
   const issueListRef = useRef<HTMLDivElement>(null);
   const boardColumnScrollRefs = useRef<Partial<Record<TaskStatus, HTMLDivElement | null>>>({});
+  const detailSourceProjectIdRef = useRef<string | null>(null);
   const pendingDetailSourceScrollRef = useRef<DetailSourceScroll | null>(null);
   const selectedProjectIdRef = useRef(selectedProjectId);
   selectedProjectIdRef.current = selectedProjectId;
@@ -1405,7 +1406,9 @@ export function App() {
   function openTaskDetail(task: Pick<Task, "identifier" | "projectId">) {
     const fullTask = tasksRef.current.find((candidate) => candidate.identifier === task.identifier);
     if (fullTask) markTaskRead(fullTask);
-    if (isAllProjects) changeProject(task.projectId);
+    const currentIssue = readIssueIdentifier(window.location.search);
+    if (!currentIssue) detailSourceProjectIdRef.current = selectedProjectId;
+    if (isAllProjects) setSelectedProjectId(task.projectId);
     if (boardView === "list" && issueListRef.current) {
       pendingDetailSourceScrollRef.current = {
         projectId: selectedProjectId,
@@ -1426,8 +1429,7 @@ export function App() {
     closeContextMenu();
     setProjectMenuOpen(false);
     setDetailTaskIdentifier(task.identifier);
-    const currentIssue = readIssueIdentifier(window.location.search);
-    const boardUrl = buildIssueUrl(window.location.href, task.projectId, null);
+    const boardUrl = buildIssueUrl(window.location.href, selectedProjectId, null);
     if (!currentIssue) {
       window.history.replaceState(window.history.state, "", boardUrl);
     }
@@ -1440,8 +1442,14 @@ export function App() {
   }
 
   function closeTaskDetail() {
+    const sourceProjectId = detailSourceProjectIdRef.current ?? selectedProjectId;
+    detailSourceProjectIdRef.current = null;
     setDetailTaskIdentifier(null);
-    const url = buildIssueUrl(window.location.href, selectedProjectId || null, null);
+    if (sourceProjectId !== selectedProjectId) {
+      setSelectedProjectId(sourceProjectId);
+      setBoardView(sourceProjectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(sourceProjectId));
+    }
+    const url = buildIssueUrl(window.location.href, sourceProjectId, null);
     window.history.replaceState(window.history.state, "", url);
   }
 
@@ -3154,6 +3162,7 @@ export function App() {
     closeContextMenu();
     setProjectContextMenu(null);
     setProjectMenuOpen(false);
+    detailSourceProjectIdRef.current = null;
     setDetailTaskIdentifier(null);
     setBoardView(projectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(projectId));
     if (projectId !== ALL_PROJECTS_ID) rememberProjectOpen(projectId);
@@ -3469,7 +3478,7 @@ export function App() {
                         else changeProject(ALL_PROJECTS_ID);
                       }}
                     >
-                      <LinearIcon className="project-avatar" name="myIssues" />
+                      <TaskboardIcon className="project-avatar" name="projectFolder" />
                       <span>{text("所有项目", "All projects")}</span>
                       {isAllProjects && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
                     </button>
