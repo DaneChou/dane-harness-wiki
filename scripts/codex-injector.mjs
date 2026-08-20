@@ -2135,9 +2135,12 @@ async function main() {
     if (stopping) return false;
     if (!options.cdpPipe) {
       const runningCodex = codexAppProcesses(options.appPath);
+      let debuggingCodexFound = false;
       for (const record of runningCodex) {
         const port = codexProcessDebuggingPort(record);
-        if (!port || !(await isReachable(`http://127.0.0.1:${port}/json/version`))) continue;
+        if (!port) continue;
+        debuggingCodexFound = true;
+        if (!(await isReachable(`http://127.0.0.1:${port}/json/version`))) continue;
         try {
           if ((await codexTargets(port)).length === 0) continue;
         } catch {
@@ -2150,6 +2153,7 @@ async function main() {
         return true;
       }
       if (runningCodex.length > 0) {
+        if (debuggingCodexFound) return false;
         nativeCodexBrowser = true;
         return false;
       }
