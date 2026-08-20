@@ -307,6 +307,51 @@ test("WebSocket push invalidates on changes and checks revision once per connect
   assert.deepEqual(sockets[1].closeCalls, [{ code: 1000, reason: "Client stopped" }]);
 });
 
+test("a failed reconnect revision check closes the socket so compensation retries", async () => {
+  const sockets = [];
+  const timeouts = [];
+  let revisionRequest = 0;
+
+  const client = createRevisionWebSocketClient({
+    url: "wss://taskboard.example.test/api/events",
+    fetchRevision: async () => {
+      revisionRequest += 1;
+      if (revisionRequest === 1) throw new Error("temporary revision failure");
+      return { changed: true, revision: 7 };
+    },
+    onInvalidate() {},
+    createWebSocket() {
+      const socket = {
+        closeCalls: [],
+        close(code, reason) {
+          this.closeCalls.push({ code, reason });
+        },
+      };
+      sockets.push(socket);
+      return socket;
+    },
+    setTimeout(callback, delay) {
+      const timer = { callback, delay };
+      timeouts.push(timer);
+      return timer;
+    },
+    clearTimeout() {},
+  });
+
+  client.start();
+  sockets[0].onopen();
+  await flush();
+  assert.deepEqual(sockets[0].closeCalls, [{ code: 1012, reason: "Revision check failed" }]);
+
+  sockets[0].onclose();
+  assert.equal(timeouts[0].delay, 1_000);
+  timeouts[0].callback();
+  sockets[1].onopen();
+  await flush();
+  assert.equal(revisionRequest, 2);
+  client.stop();
+});
+
 test("the app connects the selected realtime transport without reloading the page", async () => {
   const [appSource, apiSource] = await Promise.all([
     readFile(new URL("../web/src/App.tsx", import.meta.url), "utf8"),

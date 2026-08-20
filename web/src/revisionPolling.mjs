@@ -72,16 +72,17 @@ export function createRevisionWebSocketClient({
   let reconnectAttempt = 0;
 
   async function checkRevision() {
-    if (!running || requestPending) return;
+    if (!running || requestPending) return false;
     requestPending = true;
     try {
       const result = await fetchRevision(revision);
-      if (!running) return;
+      if (!running) return false;
       const advanced = result.revision > revision;
       revision = Math.max(revision, result.revision);
       if (result.changed && advanced) onInvalidate();
+      return true;
     } catch {
-      if (running) onConnectionChange("reconnecting");
+      return false;
     } finally {
       requestPending = false;
     }
@@ -111,9 +112,15 @@ export function createRevisionWebSocketClient({
     const currentSocket = socket;
     currentSocket.onopen = () => {
       if (!running || socket !== currentSocket) return;
-      reconnectAttempt = 0;
-      onConnectionChange("live");
-      void checkRevision();
+      void checkRevision().then((succeeded) => {
+        if (!running || socket !== currentSocket) return;
+        if (!succeeded) {
+          currentSocket.close(1012, "Revision check failed");
+          return;
+        }
+        reconnectAttempt = 0;
+        onConnectionChange("live");
+      });
     };
     currentSocket.onmessage = (event) => {
       if (!running || socket !== currentSocket) return;
