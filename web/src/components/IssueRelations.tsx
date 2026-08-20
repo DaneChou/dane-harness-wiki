@@ -13,9 +13,8 @@ import type {
 } from "../types";
 import { useTaskboardI18n } from "../i18n";
 import { ActorAvatar } from "./ActorAvatar";
-import { StatusIcon } from "./BoardColumn";
 import { LinearIcon } from "./LinearIcon";
-import { TaskboardIcon } from "./TaskboardIcon";
+import { RelationIcon, StatusIcon } from "./SemanticIcons";
 
 export interface RelationMutationResult {
   task: Task;
@@ -130,7 +129,7 @@ export function IssuePickerContent({
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => void choose(candidate)}
             >
-              <StatusIcon status={candidate.status} />
+              <StatusIcon status={candidate.status} size={14} />
               <span className="issue-relation-option-id">{candidate.externalKey ?? candidate.identifier}</span>
               <span className="issue-relation-option-title">{candidate.title}</span>
               {selectedIds && (
@@ -248,7 +247,7 @@ function IssueRelationRow({
   return (
     <div className="issue-relation-row">
       <button className="issue-relation-target" type="button" onClick={onOpen}>
-        <StatusIcon status={issue.status} />
+        <StatusIcon status={issue.status} size={14} />
         <span className="issue-relation-id">{issue.externalKey ?? issue.identifier}</span>
         <span className="issue-relation-title">{issue.title}</span>
         {showAssignee && <ActorAvatar actor={issue.assignee} className="issue-relation-assignee" />}
@@ -442,7 +441,7 @@ export function IssueRelationSidebar({
                 {group.type === "related" ? (
                   <LinearIcon name="link" />
                 ) : (
-                  <TaskboardIcon name={group.type === "blocked_by" ? "relationBlockedBy" : "relationBlocks"} />
+                  <RelationIcon type={group.type} color="currentColor" />
                 )}
                 {label}
               </span>

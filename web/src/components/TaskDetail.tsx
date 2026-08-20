@@ -50,10 +50,25 @@ import {
   assigneeTargetForActor,
 } from "../actors";
 import { ActorAvatar } from "./ActorAvatar";
-import { ColumnStatusIcon, STATUS_DETAILS, StatusIcon } from "./BoardColumn";
+import { STATUS_DETAILS } from "./BoardColumn";
 import { LabelPicker } from "./LabelPicker";
-import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
-import { TaskboardIcon } from "./TaskboardIcon";
+import { LinearIcon } from "./LinearIcon";
+import {
+  AttachmentIcon,
+  BranchIcon,
+  ConversationIcon,
+  DeleteIcon,
+  DueDateIcon,
+  EditIcon,
+  LabelIcon,
+  MoreIcon,
+  PriorityIcon,
+  ProjectIcon,
+  RecurrenceIcon,
+  RelationIcon,
+  StartDateIcon,
+  StatusIcon,
+} from "./SemanticIcons";
 import {
   fileKey,
   MAX_ATTACHMENT_SIZE,
@@ -214,7 +229,6 @@ const ACTIVITY_FIELD_LABELS: Record<string, readonly [string, string]> = {
   priority: ["优先级", "priority"],
   labels: ["标签", "labels"],
   assignee: ["负责人", "assignee"],
-  workflowId: ["工作流", "workflow"],
   developmentContext: ["开发上下文", "development context"],
   startDate: ["开始日期", "start date"],
   dueDate: ["截止日期", "due date"],
@@ -300,25 +314,27 @@ function ActivityChangeIcon({ field, before, after }: {
 }) {
   const value = after ?? before;
   if (field === "status" && typeof value === "string" && value in STATUS_DETAILS) {
-    return <StatusIcon status={value as TaskStatus} />;
+    return <StatusIcon status={value as TaskStatus} color="currentColor" size={14} />;
   }
   if (field === "priority" && typeof value === "string" && TASK_PRIORITIES.includes(value as TaskPriority)) {
-    return <LinearPriorityIcon priority={value as TaskPriority} />;
+    return <PriorityIcon priority={value as TaskPriority} color="currentColor" size={14} />;
   }
   if (field === "relation" && typeof value === "object") {
     const relation = value as { type?: IssueRelationType };
-    if (relation.type === "blocked_by") return <TaskboardIcon name="relationBlockedBy" />;
-    if (relation.type === "blocks") return <TaskboardIcon name="relationBlocks" />;
+    if (relation.type === "blocked_by" || relation.type === "blocks") {
+      return <RelationIcon type={relation.type} color="currentColor" size={14} />;
+    }
     return <LinearIcon name="link" />;
   }
-  if (field === "projectId" || field === "workflowId") return <LinearIcon name="project" />;
-  if (field === "labels") return <LinearIcon name="label" />;
+  if (field === "projectId") return <ProjectIcon color="currentColor" size={14} />;
+  if (field === "labels") return <LabelIcon color="currentColor" size={14} />;
   if (field === "assignee") return <LinearIcon name="myIssues" />;
-  if (field === "developmentContext") return <LinearIcon name="branch" />;
-  if (field === "startDate" || field === "dueDate") return <LinearIcon name="calendar" />;
-  if (field === "recurrence") return <LinearIcon name="recurrence" />;
-  if (field === "archivedAt") return <LinearIcon name="trash" />;
-  return <LinearIcon name="write" />;
+  if (field === "developmentContext") return <BranchIcon color="currentColor" size={14} />;
+  if (field === "startDate") return <StartDateIcon color="currentColor" size={14} />;
+  if (field === "dueDate") return <DueDateIcon color="currentColor" size={14} />;
+  if (field === "recurrence") return <RecurrenceIcon color="currentColor" size={14} />;
+  if (field === "archivedAt") return <DeleteIcon color="currentColor" size={14} />;
+  return <EditIcon color="currentColor" size={14} />;
 }
 
 function referencedTask(
@@ -392,7 +408,7 @@ function DescriptionDocument({
           <span className={`issue-reference-inline issue-reference-status-${task.status}`}>
             <span className="issue-reference-identity">
               <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-                <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
+                <StatusIcon status={task.status} size={15} />
               </span>
               <span className="issue-reference-id">{task.externalKey ?? task.identifier}</span>
             </span>
@@ -432,7 +448,7 @@ function ConversationLink({
       title={text(`查看对话 ${threadId}`, `View conversation ${threadId}`)}
       onClick={onOpen}
     >
-      <TaskboardIcon name="conversation" />
+      <ConversationIcon color="currentColor" size={16} />
       <strong>{text("查看对话", "View conversation")}</strong>
       <span className="conversation-divider" aria-hidden="true" />
       <span className="conversation-thread-id">{threadId}</span>
@@ -1106,7 +1122,7 @@ export function TaskDetail({
                   disabled={uploadingAttachments}
                   onClick={() => attachmentInputRef.current?.click()}
                 >
-                  <LinearIcon name="attachment" />
+                  <AttachmentIcon color="currentColor" />
                   {uploadingAttachments
                     ? text("上传中…", "Uploading…")
                     : text("添加附件", "Add attachment")}
@@ -1157,7 +1173,7 @@ export function TaskDetail({
                             title={text("删除附件", "Delete attachment")}
                             onClick={() => setPendingAttachmentDelete(attachment)}
                           >
-                            <LinearIcon name="trash" />
+                            <DeleteIcon color="currentColor" />
                           </button>
                         </div>
                       </li>
@@ -1318,7 +1334,7 @@ export function TaskDetail({
                               aria-expanded={activeMenuId === comment.id}
                               onClick={() => setActiveMenuId((current) => current === comment.id ? null : comment.id)}
                             >
-                              <LinearIcon name="more" />
+                              <MoreIcon color="currentColor" />
                             </button>
                             {activeMenuId === comment.id && (
                               <div className="comment-action-menu" role="menu">
@@ -1328,7 +1344,7 @@ export function TaskDetail({
                                   disabled={savingCommentId !== null}
                                   onClick={() => beginEdit(comment)}
                                 >
-                                  <LinearIcon name="write" />
+                                  <EditIcon color="currentColor" />
                                   {text("编辑评论", "Edit comment")}
                                 </button>
                                 <button
@@ -1337,7 +1353,7 @@ export function TaskDetail({
                                   className="danger"
                                   onClick={() => { setPendingDelete(comment); setActiveMenuId(null); }}
                                 >
-                                  <LinearIcon name="trash" />
+                                  <DeleteIcon color="currentColor" />
                                   {text("删除评论", "Delete comment")}
                                 </button>
                               </div>
@@ -1386,7 +1402,7 @@ export function TaskDetail({
                                 title={text("添加附件", "Add attachments")}
                                 onClick={() => editCommentAttachmentInputRef.current?.click()}
                               >
-                                <LinearIcon name="attachment" />
+                                <AttachmentIcon color="currentColor" />
                               </button>
                               <input
                                 ref={editCommentAttachmentInputRef}
@@ -1457,7 +1473,7 @@ export function TaskDetail({
                                     title={text("删除附件", "Delete attachment")}
                                     onClick={() => setPendingAttachmentDelete(attachment)}
                                   >
-                                    <LinearIcon name="trash" />
+                                    <DeleteIcon color="currentColor" />
                                   </button>
                                 )}
                               </li>
@@ -1531,7 +1547,7 @@ export function TaskDetail({
                       title={text("添加附件", "Add attachments")}
                       onClick={() => commentAttachmentInputRef.current?.click()}
                     >
-                      <LinearIcon name="attachment" />
+                      <AttachmentIcon color="currentColor" />
                     </button>
                     <input
                       ref={commentAttachmentInputRef}
@@ -1640,7 +1656,7 @@ export function TaskDetail({
                 options={TASK_STATUSES.map((status) => ({
                   value: status,
                   label: taskStatusLabel(language, status),
-                  icon: <StatusIcon status={status} />,
+                  icon: <StatusIcon status={status} size={14} />,
                   className: `status-icon-${STATUS_DETAILS[status].tone}`,
                 }))}
                 open={propertyMenu === "status"}
@@ -1659,7 +1675,7 @@ export function TaskDetail({
                 options={TASK_PRIORITIES.map((priority) => ({
                   value: priority,
                   label: taskPriorityLabel(language, priority),
-                  icon: <LinearPriorityIcon priority={priority} />,
+                  icon: <PriorityIcon priority={priority} size={14} />,
                   className: `priority-${priority}`,
                 }))}
                 open={propertyMenu === "priority"}
@@ -1699,7 +1715,7 @@ export function TaskDetail({
             </div>
             <div className="detail-property-row labels-property">
               <span className="detail-property-icon" aria-hidden="true">
-                <LinearIcon name="label" />
+                <LabelIcon color="currentColor" size={14} />
               </span>
               <span className="detail-property-label">{text("标签", "Labels")}</span>
               <LabelPicker
@@ -1727,12 +1743,14 @@ export function TaskDetail({
                     label: developmentScanLoading
                       ? text("正在扫描 Git…", "Scanning Git…")
                       : text("未绑定", "Not linked"),
-                    icon: <LinearIcon name="branch" />,
+                    icon: <BranchIcon color="currentColor" size={14} />,
                   },
                   ...developmentOptions.map((context) => ({
                     value: contextValue(context),
                     label: contextLabel(context, text),
-                    icon: <LinearIcon name={context.type === "branch" ? "branch" : "folder"} />,
+                    icon: context.type === "branch"
+                      ? <BranchIcon color="currentColor" size={14} />
+                      : <LinearIcon name="folder" />,
                   })),
                 ]}
                 open={propertyMenu === "development"}
@@ -1757,7 +1775,7 @@ export function TaskDetail({
                 }
               }}
             >
-              <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
+              <span className="detail-property-icon" aria-hidden="true"><StartDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
               <input
                 type="date"
@@ -1778,7 +1796,7 @@ export function TaskDetail({
                 }
               }}
             >
-              <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
+              <span className="detail-property-icon" aria-hidden="true"><DueDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("截止日期", "Due date")}</span>
               <input
                 type="date"
@@ -1795,11 +1813,11 @@ export function TaskDetail({
               <TaskPropertyPicker
                 value={currentTask.recurrence?.unit ?? ""}
                 options={[
-                  { value: "", label: text("不重复", "Does not repeat"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "day", label: text("每天", "Daily"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "week", label: text("每周", "Weekly"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "month", label: text("每月", "Monthly"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "year", label: text("每年", "Yearly"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "", label: text("不重复", "Does not repeat"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "day", label: text("每天", "Daily"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "week", label: text("每周", "Weekly"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "month", label: text("每月", "Monthly"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "year", label: text("每年", "Yearly"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
                 ]}
                 open={propertyMenu === "recurrence"}
                 disabled={savingProperty === "recurrence"}

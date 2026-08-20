@@ -103,7 +103,6 @@ async function createMigrationFixture({
       assignee_id TEXT NOT NULL,
       assignee_name TEXT NOT NULL,
       assignee_avatar_url TEXT,
-      workflow_id TEXT,
       git_branch TEXT,
       worktree_path TEXT,
       worktree_branch TEXT,
@@ -139,13 +138,6 @@ async function createMigrationFixture({
       content_type TEXT NOT NULL,
       size INTEGER NOT NULL,
       created_at TEXT NOT NULL
-    );
-
-    CREATE TABLE workflow_workspaces (
-      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-      workspace TEXT NOT NULL,
-      version INTEGER NOT NULL,
-      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE task_relations (
@@ -204,7 +196,6 @@ async function createMigrationFixture({
         'alice',
         'Alice',
         NULL,
-        'workflow-alpha',
         NULL,
         '/Users/alice/source/alpha-worktree',
         'feature/cloud-share',
@@ -235,7 +226,6 @@ async function createMigrationFixture({
         'codex-agent',
         'Codex Agent',
         NULL,
-        NULL,
         'feature/plain-branch',
         NULL,
         NULL,
@@ -265,7 +255,6 @@ async function createMigrationFixture({
         'user',
         'bob',
         'Bob',
-        NULL,
         NULL,
         NULL,
         '/Users/bob/source/beta-worktree',
@@ -339,14 +328,6 @@ async function createMigrationFixture({
         '${timestamp}'
       );
 
-    INSERT INTO workflow_workspaces VALUES
-      (
-        'alpha',
-        '{"version":1,"tabs":[{"id":"delivery","name":"Delivery","nodes":[{"data":{"gitWorktreePath":"/Users/alice/source/alpha-worktree","workspacePath":"/api/request/workspace","cwd":"/api/request/cwd","workingDirectory":"/api/request/working-directory","additionalInstructions":"Keep this workflow note"}}]}]}',
-        1,
-        '${timestamp}'
-      );
-
     INSERT INTO task_relations VALUES
       ('parent', 'task-a1', 'task-a2', '${timestamp}');
 
@@ -382,7 +363,6 @@ function expectedProjectCounts() {
       comments: 1,
       attachments: 2,
       task_relations: 1,
-      workflow_workspaces: 1,
     },
     beta: {
       projects: 1,
@@ -390,7 +370,6 @@ function expectedProjectCounts() {
       comments: 1,
       attachments: 1,
       task_relations: 0,
-      workflow_workspaces: 0,
     },
   };
 }
@@ -403,7 +382,6 @@ function expectedCloudBaselineCounts() {
       comments: 0,
       attachments: 0,
       task_relations: 0,
-      workflow_workspaces: 0,
     },
   };
 }
@@ -503,19 +481,6 @@ test("migration snapshots live WAL data, counts each project, and strips local e
   const alphaBranchTask = bundle.tables.tasks.find((task) => task.id === "task-a2");
   assert.equal(alphaBranchTask.git_branch, "feature/plain-branch");
 
-  const workflow = JSON.parse(bundle.tables.workflow_workspaces[0].workspace);
-  assert.equal(workflow.tabs[0].nodes[0].data.gitWorktreePath, null);
-  assert.equal(workflow.tabs[0].nodes[0].data.workspacePath, "/api/request/workspace");
-  assert.equal(workflow.tabs[0].nodes[0].data.cwd, "/api/request/cwd");
-  assert.equal(
-    workflow.tabs[0].nodes[0].data.workingDirectory,
-    "/api/request/working-directory",
-  );
-  assert.equal(
-    workflow.tabs[0].nodes[0].data.additionalInstructions,
-    "Keep this workflow note",
-  );
-
   const serializedBundle = JSON.stringify(bundle);
   assert.doesNotMatch(serializedBundle, /cf-access-super-secret/);
   assert.doesNotMatch(serializedBundle, /\/Users\/(?:alice|bob)\//);
@@ -584,7 +549,6 @@ test("cloud import calls D1 and R2 adapters, then verifies project counts and ob
     "comments",
     "task_relations",
     "attachments",
-    "workflow_workspaces",
   ]);
   assert.deepEqual(result.counts.byProject, expectedProjectCounts());
   assert.equal(result.attachments.verified, 3);
@@ -693,7 +657,7 @@ test("D1 binding import uses one JSON statement per table for 100+ rows", async 
   await adapters.d1.importTables(tables);
 
   assert.equal(batches.length, 1);
-  assert.equal(batches[0].length, 6);
+  assert.equal(batches[0].length, 5);
   for (const statement of batches[0]) assert.match(statement.sql, /json_each\(\?\)/);
   assert.equal(JSON.parse(batches[0][1].values[0]).length, 125);
 });
@@ -749,7 +713,6 @@ test("real D1 batch atomically imports a bundle containing local and maps develo
     PRAGMA foreign_keys = OFF;
     UPDATE projects SET id = 'local' WHERE id = 'alpha';
     UPDATE tasks SET project_id = 'local' WHERE project_id = 'alpha';
-    UPDATE workflow_workspaces SET project_id = 'local' WHERE project_id = 'alpha';
     PRAGMA foreign_keys = ON;
   `);
   const bundle = await createCloudMigrationBundle({
@@ -1106,7 +1069,6 @@ test("one-time Wrangler adapter migrates and verifies local persistence without 
     PRAGMA foreign_keys = OFF;
     UPDATE projects SET id = 'local' WHERE id = 'alpha';
     UPDATE tasks SET project_id = 'local' WHERE project_id = 'alpha';
-    UPDATE workflow_workspaces SET project_id = 'local' WHERE project_id = 'alpha';
     PRAGMA foreign_keys = ON;
   `);
   const insertLargeTask = fixture.database.prepare(`
@@ -1114,7 +1076,7 @@ test("one-time Wrangler adapter migrates and verifies local persistence without 
     SELECT ?, ?, project_id, ?, ?, status, priority, labels, ?, thread_id,
       creator_type, creator_id, creator_name, creator_avatar_url,
       assignee_type, assignee_id, assignee_name, assignee_avatar_url,
-      workflow_id, git_branch, worktree_path, worktree_branch, due_date,
+      git_branch, worktree_path, worktree_branch, due_date,
       recurrence_interval, recurrence_unit, archived_at, version, created_at,
       updated_at
     FROM tasks WHERE id = 'task-a1'

@@ -242,7 +242,6 @@ function taskFromRow(row) {
       name: row.assignee_name,
       avatarUrl: row.assignee_avatar_url,
     },
-    workflowId: row.workflow_id,
     developmentContext,
     startDate: row.start_date,
     dueDate: row.due_date,
@@ -331,15 +330,6 @@ function projectSummaryFromRow(row) {
     generatedAt: row.generated_at,
     attemptedAt: row.attempted_at,
     error: row.error,
-  };
-}
-
-function workflowWorkspaceFromRow(row) {
-  return {
-    projectId: row.project_id,
-    workspace: JSON.parse(row.workspace),
-    version: row.version,
-    updatedAt: row.updated_at,
   };
 }
 
@@ -448,7 +438,6 @@ export class TaskboardDatabase {
         assignee_id TEXT NOT NULL DEFAULT 'local-user',
         assignee_name TEXT NOT NULL DEFAULT '本地用户',
         assignee_avatar_url TEXT,
-        workflow_id TEXT,
         git_branch TEXT,
         worktree_path TEXT,
         worktree_branch TEXT,
@@ -518,13 +507,6 @@ export class TaskboardDatabase {
 
       CREATE INDEX IF NOT EXISTS attachments_task_created
         ON attachments(task_id, created_at, id);
-
-      CREATE TABLE IF NOT EXISTS workflow_workspaces (
-        project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-        workspace TEXT NOT NULL,
-        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
-        updated_at TEXT NOT NULL
-      );
 
       CREATE TABLE IF NOT EXISTS project_summaries (
         project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -653,9 +635,6 @@ export class TaskboardDatabase {
     }
     if (!migratedTaskColumns.some((column) => column.name === "creator_avatar_url")) {
       this.database.exec("ALTER TABLE tasks ADD COLUMN creator_avatar_url TEXT");
-    }
-    if (!migratedTaskColumns.some((column) => column.name === "workflow_id")) {
-      this.database.exec("ALTER TABLE tasks ADD COLUMN workflow_id TEXT");
     }
     if (!migratedTaskColumns.some((column) => column.name === "external_source")) {
       this.database.exec("ALTER TABLE tasks ADD COLUMN external_source TEXT");
@@ -1066,7 +1045,7 @@ export class TaskboardDatabase {
           thread_codex_host_id, thread_workspace_path,
           creator_type, creator_id, creator_name, creator_avatar_url,
           assignee_type, assignee_id, assignee_name, assignee_avatar_url,
-          workflow_id, git_branch, worktree_path, worktree_branch,
+          git_branch, worktree_path, worktree_branch,
           start_date, due_date, recurrence_interval, recurrence_unit,
           external_source, external_origin, external_id, external_key, external_url,
           archived_at, version, created_at, updated_at
@@ -1075,7 +1054,7 @@ export class TaskboardDatabase {
           ?, NULL, NULL, NULL, NULL, NULL,
           ?, ?, ?, ?,
           ?, ?, ?, ?,
-          NULL, NULL, NULL, NULL,
+          NULL, NULL, NULL,
           NULL, ?, NULL, NULL,
           'jira', ?, ?, ?, ?,
           NULL, 1, ?, ?
@@ -1349,57 +1328,6 @@ export class TaskboardDatabase {
         error = excluded.error
     `).run(projectId, timestamp, error);
     return this.getProjectSummary(projectId);
-  }
-
-  getWorkflowWorkspace(projectId) {
-    if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
-      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
-    }
-    const row = this.database.prepare(`
-      SELECT project_id, workspace, version, updated_at
-      FROM workflow_workspaces
-      WHERE project_id = ?
-    `).get(projectId);
-    return row
-      ? workflowWorkspaceFromRow(row)
-      : { projectId, workspace: null, version: 0, updatedAt: null };
-  }
-
-  saveWorkflowWorkspace(projectId, expectedVersion, workspace) {
-    const timestamp = now();
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
-        throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
-      }
-      const current = this.database.prepare(`
-        SELECT version FROM workflow_workspaces WHERE project_id = ?
-      `).get(projectId);
-      const actualVersion = current?.version ?? 0;
-      if (actualVersion !== expectedVersion) {
-        throw new ApiError(409, "VERSION_CONFLICT", "Workflow was changed by another client", {
-          expectedVersion,
-          actualVersion,
-        });
-      }
-      if (current) {
-        this.database.prepare(`
-          UPDATE workflow_workspaces
-          SET workspace = ?, version = version + 1, updated_at = ?
-          WHERE project_id = ? AND version = ?
-        `).run(JSON.stringify(workspace), timestamp, projectId, expectedVersion);
-      } else {
-        this.database.prepare(`
-          INSERT INTO workflow_workspaces (project_id, workspace, version, updated_at)
-          VALUES (?, ?, 1, ?)
-        `).run(projectId, JSON.stringify(workspace), timestamp);
-      }
-      this.database.exec("COMMIT");
-    } catch (error) {
-      this.database.exec("ROLLBACK");
-      throw error;
-    }
-    return this.getWorkflowWorkspace(projectId);
   }
 
   listAiChatThreads() {
@@ -1791,10 +1719,10 @@ export class TaskboardDatabase {
           thread_codex_host_id, thread_workspace_path,
           creator_type, creator_id, creator_name, creator_avatar_url,
           assignee_type, assignee_id, assignee_name, assignee_avatar_url,
-          workflow_id, git_branch, worktree_path, worktree_branch,
+          git_branch, worktree_path, worktree_branch,
           start_date, due_date, recurrence_interval, recurrence_unit,
           archived_at, version, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 1, ?, ?)
       `).run(
         id,
         identifier,
@@ -1814,7 +1742,6 @@ export class TaskboardDatabase {
         input.assignee.id,
         input.assignee.name,
         input.assignee.avatarUrl,
-        input.workflowId,
         input.developmentContext?.type === "branch" ? input.developmentContext.branch : null,
         input.developmentContext?.type === "worktree" ? input.developmentContext.path : null,
         input.developmentContext?.type === "worktree" ? input.developmentContext.branch : null,
@@ -1879,7 +1806,6 @@ export class TaskboardDatabase {
       status: "status",
       priority: "priority",
       labels: "labels",
-      workflowId: "workflow_id",
       startDate: "start_date",
       dueDate: "due_date",
     };

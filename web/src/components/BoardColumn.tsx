@@ -4,9 +4,9 @@ import type { ActorIdentity, Task, TaskDraft, TaskStatus } from "../types";
 import { taskStatusLabel, useTaskboardI18n } from "../i18n";
 import type { TaskCardPresentation, TaskConversationItem } from "../taskConversations";
 import { TaskCard } from "./TaskCard";
+import { StatusIcon } from "./SemanticIcons";
 import {
   TaskboardIcon,
-  taskboardIconSource,
   type TaskboardIconName,
 } from "./TaskboardIcon";
 
@@ -23,44 +23,12 @@ export const STATUS_DETAILS: Record<
   canceled: { label: "取消", tone: "canceled" },
 };
 
-const STATUS_ICONS: Record<TaskStatus, TaskboardIconName> = {
-  backlog: "statusTodo",
-  todo: "statusTodo",
-  in_progress: "statusProgress",
-  in_review: "statusReview",
-  blocked: "statusBlocked",
-  done: "statusReview",
-  canceled: "statusBlocked",
-};
-
-const COLUMN_STATUS_ICONS: Record<TaskStatus, TaskboardIconName> = {
-  backlog: "statusTodo",
-  todo: "columnStatusTodo",
-  in_progress: "columnStatusProgress",
-  in_review: "columnStatusReview",
-  blocked: "columnStatusBlocked",
-  done: "statusReview",
-  canceled: "statusBlocked",
-};
-
 const COLUMN_ADD_ICONS: Partial<Record<TaskStatus, TaskboardIconName>> = {
   todo: "columnAddTodo",
   in_progress: "columnAddProgress",
   in_review: "columnAddReview",
   blocked: "columnAddBlocked",
 };
-
-export function statusIconSource(status: TaskStatus) {
-  return taskboardIconSource(STATUS_ICONS[status]);
-}
-
-export function StatusIcon({ status }: { status: TaskStatus }) {
-  return <TaskboardIcon name={STATUS_ICONS[status]} />;
-}
-
-export function ColumnStatusIcon({ status }: { status: TaskStatus }) {
-  return <TaskboardIcon name={COLUMN_STATUS_ICONS[status]} />;
-}
 
 interface BoardColumnProps {
   scrollRef: (element: HTMLDivElement | null) => void;
@@ -191,7 +159,7 @@ export function BoardColumn({
       <header className="column-header">
         <div className="column-heading">
           <span className={`column-status-icon status-icon-${details.tone}`}>
-            <ColumnStatusIcon status={status} />
+            <StatusIcon status={status} size={14} />
           </span>
           <h2 id={`column-${status}`}>
             {label}{tasks.length > 0 && (
