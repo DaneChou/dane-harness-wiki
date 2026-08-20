@@ -2,6 +2,7 @@ import { normalizeWorkflowSnapshot } from "../../shared/workflow-control-flow.mj
 import { DEFAULT_LABEL_NAMES } from "../../shared/domain.mjs";
 
 const JSON_BODY_LIMIT = 1024 * 1024;
+const PROJECT_README_BODY_LIMIT = 3 * 1024 * 1024;
 const ATTACHMENT_BODY_LIMIT = 25 * 1024 * 1024;
 const DEFAULT_PROJECT_LABELS_JSON = JSON.stringify(DEFAULT_LABEL_NAMES);
 const PROJECT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
@@ -440,7 +441,11 @@ function resolveAssignee(target, actor) {
   };
 }
 
-async function readJson(request) {
+async function readJson(
+  request,
+  limit = JSON_BODY_LIMIT,
+  tooLargeMessage = "JSON body cannot exceed 1 MiB",
+) {
   const contentType = request.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().startsWith("application/json")) {
     throw new ApiError(
@@ -450,12 +455,12 @@ async function readJson(request) {
     );
   }
   const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > JSON_BODY_LIMIT) {
-    throw new ApiError(413, "BODY_TOO_LARGE", "JSON body cannot exceed 1 MiB");
+  if (contentLength > limit) {
+    throw new ApiError(413, "BODY_TOO_LARGE", tooLargeMessage);
   }
   const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > JSON_BODY_LIMIT) {
-    throw new ApiError(413, "BODY_TOO_LARGE", "JSON body cannot exceed 1 MiB");
+  if (new TextEncoder().encode(text).byteLength > limit) {
+    throw new ApiError(413, "BODY_TOO_LARGE", tooLargeMessage);
   }
   try {
     return JSON.parse(text);
@@ -2899,7 +2904,11 @@ async function routeApi(request, env, actor, url) {
       return json(200, { readme: await getProjectReadme(env, projectId) });
     }
     if (request.method === "PUT") {
-      const body = await readJson(request);
+      const body = await readJson(
+        request,
+        PROJECT_README_BODY_LIMIT,
+        "Project README request cannot exceed 3 MiB",
+      );
       assertPlainObject(body);
       assertAllowedKeys(body, new Set(["version", "content"]));
       const version = body.version === undefined

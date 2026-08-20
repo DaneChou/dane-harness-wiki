@@ -37,6 +37,7 @@ import { ProjectSummaryService } from "./project-summary.mjs";
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const execFileAsync = promisify(execFile);
 const JSON_BODY_LIMIT = 1024 * 1024;
+const PROJECT_README_BODY_LIMIT = 3 * 1024 * 1024;
 const ATTACHMENT_BODY_LIMIT = 25 * 1024 * 1024;
 const AI_CHAT_TURN_BODY_LIMIT = 25 * 1024 * 1024;
 const AI_CHAT_ATTACHMENT_LIMIT = 10;
@@ -2715,7 +2716,11 @@ export function createTaskboardServer(options = {}) {
           return sendJson(response, 200, { readme: database.getProjectReadme(projectId) });
         }
         if (request.method === "PUT") {
-          const input = parseProjectReadmeSave(await readJson(request));
+          const input = parseProjectReadmeSave(await readJson(
+            request,
+            PROJECT_README_BODY_LIMIT,
+            "Project README request cannot exceed 3 MiB",
+          ));
           const readme = database.saveProjectReadme(projectId, input.content, input.version);
           events.emit("project.readme.updated", {
             projectId,

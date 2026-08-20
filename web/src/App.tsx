@@ -3629,14 +3629,16 @@ export function App() {
             >
               {text("甘特图", "Gantt")}
             </button>
-            <button
-              className={`view-tab${boardView === "readme" ? " active" : ""}`}
-              type="button"
-              aria-pressed={boardView === "readme"}
-              onClick={() => selectBoardView("readme")}
-            >
-              Readme
-            </button>
+            {!isAllProjects && (
+              <button
+                className={`view-tab${boardView === "readme" ? " active" : ""}`}
+                type="button"
+                aria-pressed={boardView === "readme"}
+                onClick={() => selectBoardView("readme")}
+              >
+                Readme
+              </button>
+            )}
             {SHOW_WORKFLOW_BOARD_ENTRY && (
               <button
                 className={`view-tab${boardView === "workflow" ? " active" : ""}`}
