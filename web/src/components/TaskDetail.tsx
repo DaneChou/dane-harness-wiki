@@ -1585,7 +1585,7 @@ export function TaskDetail({
                 <ActorAvatar actor={CODEX_AGENT_ACTOR} className="detail-thread-avatar" />
                 <span>{openingThread
                   ? text("正在打开…", "Opening…")
-                  : text("在对话中打开", "Open in conversation")}</span>
+                  : text("在新对话打开", "Open in new conversation")}</span>
               </button>
               {currentTask.externalUrl && (
                 <a

@@ -992,14 +992,17 @@
   }
 
   async function resolveNativeProject(requestedProjectId, workspacePath) {
-    if (workspacePath) {
-      return normalizeNativeRootPath(workspacePath) ? { targetRoot: workspacePath } : null;
-    }
     const context = await nativeProjectContext();
-    const project = context.projects.find((candidate) => candidate.id === requestedProjectId) ?? null;
-    const targetRoot = project?.rootPaths[0];
-    return typeof targetRoot === "string" && normalizeNativeRootPath(targetRoot)
-      ? { targetRoot }
+    const normalizedWorkspacePath = normalizeNativeRootPath(workspacePath);
+    const project = context.projects.find((candidate) => (
+      candidate.id === requestedProjectId
+      || candidate.rootPaths.some((root) => (
+        normalizeNativeRootPath(root) === normalizedWorkspacePath
+      ))
+    )) ?? null;
+    const targetRoot = normalizedWorkspacePath ? workspacePath : project?.rootPaths[0];
+    return project && typeof targetRoot === "string" && normalizeNativeRootPath(targetRoot)
+      ? { projectId: project.id, targetRoot }
       : null;
   }
 
@@ -1018,18 +1021,18 @@
     }
   }
 
-  async function waitForNativeProject(targetRoot) {
+  async function waitForNativeProject(projectId, targetRoot) {
     const deadline = Date.now() + 8_000;
     const normalizedTargetRoot = normalizeNativeRootPath(targetRoot);
     while (Date.now() < deadline) {
-      const [projectId, activeRoots] = await Promise.all([
+      const [selectedProjectId, activeRoots] = await Promise.all([
         selectedNativeProjectId(),
         activeNativeWorkspaceRoots(),
       ]);
       if (
-        projectId
+        selectedProjectId === projectId
         && normalizeNativeRootPath(activeRoots[0]) === normalizedTargetRoot
-      ) return projectId;
+      ) return selectedProjectId;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     throw new Error(hostText(
@@ -1046,6 +1049,7 @@
     const workspacePath = typeof payload?.workspacePath === "string"
       ? payload.workspacePath.trim()
       : "";
+    const projectless = payload?.projectless === true;
     const codexProjectKind = payload?.codexProjectKind === "remote" ? "remote" : "local";
     const requestedProjectId = typeof payload?.codexProjectId === "string"
       ? payload.codexProjectId.trim()
@@ -1077,7 +1081,9 @@
       );
       let codexHostId = "local";
       let targetRoot;
-      if (codexProjectKind === "remote") {
+      if (projectless) {
+        targetRoot = "";
+      } else if (codexProjectKind === "remote") {
         codexHostId = typeof payload?.codexHostId === "string"
           ? payload.codexHostId.trim()
           : "";
@@ -1095,10 +1101,9 @@
           ));
         }
         targetRoot = target.targetRoot;
-        const switched = await requestNativeFetch("add-workspace-root-option", {
-          root: targetRoot,
-          setActive: true,
-          origin: window.location.origin,
+        const switched = await requestNativeFetch("set-global-state", {
+          key: "selected-project",
+          value: { type: "local", projectId: target.projectId },
         });
         if (switched?.success !== true) {
           throw new Error(hostText(
@@ -1106,7 +1111,7 @@
             "Codex did not switch to the target project or worktree in time",
           ));
         }
-        lastNativeProjectId = await waitForNativeProject(targetRoot);
+        lastNativeProjectId = await waitForNativeProject(target.projectId, targetRoot);
       }
 
       closeTaskboard(false);
@@ -1117,12 +1122,14 @@
         state: {
           focusComposerNonce,
           prefillPrompt: instruction,
+          ...(projectless ? { project: null } : {}),
         },
       });
       const started = await requestHostTaskConversationStart({
         taskId,
         previousThreadId,
         codexHostId,
+        projectless,
         targetRoot,
         instruction,
         title,
@@ -1580,6 +1587,7 @@
     taskId,
     previousThreadId,
     codexHostId,
+    projectless,
     targetRoot,
     instruction,
     title,
@@ -1588,6 +1596,7 @@
       taskId,
       previousThreadId,
       codexHostId,
+      projectless,
       targetRoot,
       instruction,
       title,

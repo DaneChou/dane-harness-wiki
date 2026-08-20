@@ -1385,7 +1385,14 @@ async function restoreQuotaPolicies(cdp) {
 }
 
 async function startTaskConversationViaCdp(cdp, executionContextId, request) {
-  const { codexHostId, instruction, previousThreadId, targetRoot, title } = request;
+  const {
+    codexHostId,
+    instruction,
+    previousThreadId,
+    projectless,
+    targetRoot,
+    title,
+  } = request;
   const normalizeWorkspaceRoot = (value) => {
     const root = String(value || "").trim();
     if (!root) return "";
@@ -1416,7 +1423,7 @@ async function startTaskConversationViaCdp(cdp, executionContextId, request) {
           !root
           || conversationId
           || !editor
-          || (editor.textContent || "") !== ${JSON.stringify(instruction)}
+          || (editor.innerText || "") !== ${JSON.stringify(instruction)}
         ) return false;
         editor.focus();
         return true;
@@ -1482,7 +1489,10 @@ async function startTaskConversationViaCdp(cdp, executionContextId, request) {
             );
             if (
               result?.thread?.id === threadId
-              && normalizeWorkspaceRoot(result.thread.cwd) === normalizedTargetRoot
+              && (
+                projectless
+                || normalizeWorkspaceRoot(result.thread.cwd) === normalizedTargetRoot
+              )
             ) {
               ready = true;
               break;
@@ -1490,7 +1500,11 @@ async function startTaskConversationViaCdp(cdp, executionContextId, request) {
           } catch {}
           await new Promise((resolve) => setTimeout(resolve, 80));
         }
-        if (!ready) throw new Error("Codex did not confirm the task conversation workspace root");
+        if (!ready) {
+          throw new Error(projectless
+            ? "Codex did not confirm the projectless task conversation"
+            : "Codex did not confirm the task conversation workspace root");
+        }
 
         try {
           await requestCodexAppServerViaCdp(
