@@ -2025,6 +2025,7 @@ async function main() {
   let pendingCodexLaunch = null;
   let cdpRuntime = null;
   let codexAppPid = null;
+  let nativeCodexBrowser = false;
   let runtimePublishPromise = null;
   const injectedTargets = new Map();
   let idleAfterNormalExit = false;
@@ -2040,8 +2041,26 @@ async function main() {
     const generation = openRequestGeneration;
     if (generation <= openedRequestGeneration) return true;
     const connection = injectedTargets.values().next().value;
-    if (!connection) return false;
+    if (!nativeCodexBrowser && !connection) return false;
     try {
+      if (nativeCodexBrowser) {
+        const deepLink = new URL("codex://threads/new");
+        deepLink.searchParams.set("browserUrl", taskboardPageUrl);
+        await new Promise((resolve, reject) => {
+          const child = spawn("/usr/bin/open", [deepLink.toString()], {
+            env: withoutTaskboardLauncherEnvironment(process.env),
+            stdio: "ignore",
+          });
+          child.once("error", reject);
+          child.once("close", (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`LaunchServices could not open Taskboard (${code})`));
+          });
+        });
+        openedRequestGeneration = Math.max(openedRequestGeneration, generation);
+        console.log(JSON.stringify({ openedTaskboardInExistingCodex: true }));
+        return true;
+      }
       const evaluation = await connection.send("Runtime.evaluate", {
         expression: `(() => {
           const taskboard = window.__codexTaskboardInjection__;
@@ -2131,9 +2150,7 @@ async function main() {
         return true;
       }
       if (runningCodex.length > 0) {
-        console.error(
-          "Waiting for Codex: the running Codex instance has no debuggable renderer; no second instance will be started.",
-        );
+        nativeCodexBrowser = true;
         return false;
       }
     }
@@ -2274,7 +2291,7 @@ async function main() {
     if (stopping) return;
 
     if (options.cdpPipe || !cdpReachable) {
-      idleAfterNormalExit = !(await startManagedCodex());
+      idleAfterNormalExit = !(await startManagedCodex()) && !nativeCodexBrowser;
     } else {
       if (options.launch) {
         const runningCodex = codexAppProcesses(options.appPath)
@@ -2302,7 +2319,7 @@ async function main() {
     let firstResults = [];
     const firstOpenGeneration = openRequestGeneration;
     const shouldOpenFirstTarget = firstOpenGeneration > openedRequestGeneration;
-    if (!idleAfterNormalExit) {
+    if (!idleAfterNormalExit && !nativeCodexBrowser) {
       try {
         firstResults = await injectAll(
           cdpRuntime,
@@ -2329,7 +2346,7 @@ async function main() {
       }
       console.log(JSON.stringify({ injected: firstResults }, null, 2));
     }
-    if (hasOpenPending() && injectedTargets.size > 0) {
+    if (hasOpenPending()) {
       await requestTaskboardOpen();
     }
     if (!options.watch) {
@@ -2355,10 +2372,25 @@ async function main() {
           await connection.hostBridge?.publishHeartbeat();
         } catch (_) {}
       }
+      if (nativeCodexBrowser) {
+        if (codexAppProcesses(options.appPath).length === 0) {
+          nativeCodexBrowser = false;
+          idleAfterNormalExit = true;
+          console.error(
+            "Waiting for Codex after exit; open Codex Taskboard again to restart it.",
+          );
+          continue;
+        }
+        if (hasOpenPending()) await requestTaskboardOpen();
+        continue;
+      }
       if (idleAfterNormalExit) {
         if (!hasOpenPending()) continue;
         try {
-          if (!(await startManagedCodex())) continue;
+          if (!(await startManagedCodex())) {
+            if (nativeCodexBrowser) await requestTaskboardOpen();
+            continue;
+          }
           idleAfterNormalExit = false;
         } catch (restartError) {
           console.error(`Waiting to restart Codex: ${restartError.message}`);
@@ -2381,7 +2413,7 @@ async function main() {
         if (results.length > 0) {
           console.log(JSON.stringify({ injected: results }, null, 2));
         }
-        if (hasOpenPending() && injectedTargets.size > 0) {
+        if (hasOpenPending()) {
           await requestTaskboardOpen();
         }
       } catch (error) {
