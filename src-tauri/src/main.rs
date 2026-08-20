@@ -784,7 +784,7 @@ fn watch_launcher_output<R: std::io::Read + Send + 'static>(
                     {
                         snapshot.phase = "starting".into();
                         snapshot.message =
-                            "已打开的 Codex 不提供注入入口；不会启动第二个实例。".into();
+                            "当前平台无法向已打开的普通 Codex 注入；不会启动第二个实例。".into();
                     }
                 });
             } else if is_stderr && line.contains("Waiting for Codex") {

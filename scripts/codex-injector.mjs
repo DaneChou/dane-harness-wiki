@@ -2277,11 +2277,18 @@ async function main() {
       idleAfterNormalExit = !(await startManagedCodex());
     } else {
       if (options.launch) {
-        managedCodex = managedCodexProcess(options.appPath);
-        if (!managedCodex || !managedCodexUsesPort(managedCodex, options.port)) {
+        const runningCodex = codexAppProcesses(options.appPath)
+          .find((record) => codexProcessDebuggingPort(record) === options.port);
+        if (!runningCodex || (await codexTargets(options.port)).length === 0) {
           throw new Error(`Codex CDP port ${options.port} belongs to another process`);
         }
-        codexAppPid = managedCodex.pid;
+        managedCodex = managedCodexProcesses(options.appPath)
+          .find((record) => record.pid === runningCodex.pid) ?? null;
+        codexAppPid = runningCodex.pid;
+        if (!managedCodex) {
+          options.attachExisting = true;
+          console.log(JSON.stringify({ reusedCodexPid: runningCodex.pid, cdpPort: options.port }));
+        }
       } else {
         codexAppPid = codexAppProcesses(options.appPath)
           .find((record) => codexProcessDebuggingPort(record) === options.port)?.pid ?? null;
@@ -2416,7 +2423,8 @@ async function main() {
         const launchedCodexExited = options.cdpPipe
           ? codexProcess
             && (codexProcess.exitCode !== null || codexProcess.signalCode !== null)
-          : managedCodex && !isManagedCodexRunning(managedCodex);
+          : codexAppPid && !codexAppProcesses(options.appPath)
+            .some((record) => record.pid === codexAppPid);
         if (launchedCodexExited) {
           injectedTargets.forEach((connection) => {
             unregisterQuotaPolicyCdp(connection);
@@ -2445,6 +2453,7 @@ async function main() {
             continue;
           }
           managedCodex = null;
+          codexAppPid = null;
           idleAfterNormalExit = true;
           console.error(
             "Waiting for Codex after exit; open Codex Taskboard again to restart it.",
