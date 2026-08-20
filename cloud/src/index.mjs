@@ -2438,6 +2438,17 @@ async function saveProjectReadme(env, projectId, content, expectedVersion) {
     throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
   }
   const timestamp = now();
+  if (expectedVersion === undefined) {
+    await env.DB.prepare(`
+      INSERT INTO project_readmes (project_id, content, version, created_at, updated_at)
+      VALUES (?, ?, 1, ?, ?)
+      ON CONFLICT(project_id) DO UPDATE SET
+        content = excluded.content,
+        version = project_readmes.version + 1,
+        updated_at = excluded.updated_at
+    `).bind(projectId, content, timestamp, timestamp).run();
+    return getProjectReadme(env, projectId);
+  }
   const current = await env.DB.prepare(`
     SELECT version FROM project_readmes WHERE project_id = ?
   `).bind(projectId).first();
