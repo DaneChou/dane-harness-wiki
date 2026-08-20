@@ -1839,16 +1839,23 @@ async function injectTarget(
         await hostBridge.publishHeartbeat();
       });
       await hostBridge.publishHeartbeat();
+      if (shouldOpen && !reconciled.shouldRemainOpen) {
+        await cdp.send("Runtime.evaluate", {
+          expression: "window.__codexTaskboardInjection__?.open()",
+          returnByValue: true,
+        });
+      }
+      const shouldRemainOpen = shouldOpen || reconciled.shouldRemainOpen;
       const status = await waitForInjectionStatus(
         cdp,
-        reconciled.shouldRemainOpen,
+        shouldRemainOpen,
         sourceHash,
         15_000,
       );
       const frameLoaded = status.frameUrl
         ? await waitForFrame(cdp, status.frameUrl, 15_000)
         : false;
-      if (reconciled.shouldRemainOpen && (!status.frameReady || !frameLoaded)) {
+      if (shouldRemainOpen && (!status.frameReady || !frameLoaded)) {
         throw new Error("Taskboard frame did not report ready in the Codex renderer");
       }
       retained = true;
