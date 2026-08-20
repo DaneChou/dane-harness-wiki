@@ -1747,7 +1747,16 @@ export function TaskDetail({
                 }, "developmentContext")}
               />
             </div>
-            <label className="detail-property-row">
+            <label
+              className="detail-property-row detail-date-property-row"
+              onClick={(event) => {
+                const input = event.currentTarget.querySelector("input");
+                if (input && !input.disabled) {
+                  event.preventDefault();
+                  input.showPicker();
+                }
+              }}
+            >
               <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
               <input
@@ -1759,7 +1768,16 @@ export function TaskDetail({
                 }, "startDate")}
               />
             </label>
-            <label className="detail-property-row">
+            <label
+              className="detail-property-row detail-date-property-row"
+              onClick={(event) => {
+                const input = event.currentTarget.querySelector("input");
+                if (input && !input.disabled) {
+                  event.preventDefault();
+                  input.showPicker();
+                }
+              }}
+            >
               <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
               <span className="detail-property-label">{text("截止日期", "Due date")}</span>
               <input
