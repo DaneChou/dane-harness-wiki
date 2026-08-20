@@ -88,6 +88,7 @@ const codexAutomationMethods = new Set([
 let codexAutomationRequestSequence = 0;
 let codexAppServerRequestSequence = 0;
 const taskConversationOperations = new Map();
+const taskConversationFailureTtlMs = 120_000;
 const quotaPolicyTimers = new Map();
 const quotaPolicyRecords = new Map();
 const quotaPolicyQueues = new Map();
@@ -1576,7 +1577,21 @@ function getOrStartTaskConversation(cdp, executionContextId, request) {
       taskConversationOperations.delete(request.taskId);
     }
   };
-  void promise.then(clearSettledOperation, clearSettledOperation);
+  const retainCreatedOrUncertainFailure = (error) => {
+    if (!(
+      error
+      && typeof error === "object"
+      && (typeof error.threadId === "string" || error.uncertain === true)
+    )) {
+      clearSettledOperation();
+      return;
+    }
+    const timer = setTimeout(() => {
+      clearSettledOperation();
+    }, taskConversationFailureTtlMs);
+    timer.unref?.();
+  };
+  void promise.then(clearSettledOperation, retainCreatedOrUncertainFailure);
   return promise;
 }
 

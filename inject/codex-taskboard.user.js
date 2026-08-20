@@ -1146,6 +1146,14 @@
       lastNativeThreadId = startedThreadId;
       postToFrame({ type: "taskboard:thread-prepared", payload: { taskId, threadId: started.threadId } });
     } catch (error) {
+      const createdThreadId = normalizeThreadId(error?.threadId);
+      if (createdThreadId) {
+        await dispatchHostMessage({
+          type: "navigate-to-route",
+          path: routeForThread(createdThreadId),
+        });
+        lastNativeThreadId = createdThreadId;
+      }
       postToFrame({
         type: "taskboard:thread-create-error",
         payload: {
