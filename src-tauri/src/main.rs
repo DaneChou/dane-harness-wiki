@@ -1927,6 +1927,7 @@ fn main() {
                                 "Codex Taskboard Skill 更新失败",
                                 &format!("无法保留旧 Skill：{error}"),
                             );
+                            app_handle.exit(1);
                             return;
                         }
                     }
