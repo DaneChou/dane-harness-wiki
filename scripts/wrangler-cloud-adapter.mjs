@@ -141,18 +141,23 @@ export function createWranglerCloudAdapters({
       ]));
     },
     async listProjectReadmes() {
-      const result = await run([
-        "d1",
-        "execute",
-        database,
-        ...modeArguments,
-        "--command",
-        CLOUD_PROJECT_READMES_SQL,
-        "--json",
-        "--config",
-        resolvedConfig,
-      ]);
-      return parseD1Results(result.stdout);
+      const readmes = [];
+      for (let offset = 0; ; offset += 1) {
+        const result = await run([
+          "d1",
+          "execute",
+          database,
+          ...modeArguments,
+          "--command",
+          `${CLOUD_PROJECT_READMES_SQL} LIMIT 1 OFFSET ${offset}`,
+          "--json",
+          "--config",
+          resolvedConfig,
+        ]);
+        const rows = parseD1Results(result.stdout);
+        if (rows.length === 0) return readmes;
+        readmes.push(rows[0]);
+      }
     },
   };
 

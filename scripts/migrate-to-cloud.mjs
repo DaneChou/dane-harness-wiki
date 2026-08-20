@@ -560,11 +560,32 @@ export function createCloudBindingMigrationAdapters({ d1, r2 }) {
   return {
     d1: {
       async importTables(tables) {
-        await d1.batch(
-          createCloudD1ImportPlan(tables).map(({ sql, json }) => (
-            d1.prepare(sql).bind(json)
-          )),
-        );
+        const statements = [];
+        for (const { table, sql, json } of createCloudD1ImportPlan(tables)) {
+          if (table !== "project_readmes") {
+            statements.push(d1.prepare(sql).bind(json));
+            continue;
+          }
+          const readmes = JSON.parse(json);
+          if (readmes.length === 0) {
+            statements.push(d1.prepare(sql).bind(json));
+            continue;
+          }
+          for (const readme of readmes) {
+            statements.push(d1.prepare(`
+              INSERT INTO project_readmes
+                (project_id, content, version, created_at, updated_at)
+              VALUES (?, ?, ?, ?, ?)
+            `).bind(
+              readme.project_id,
+              readme.content,
+              readme.version,
+              readme.created_at,
+              readme.updated_at,
+            ));
+          }
+        }
+        await d1.batch(statements);
       },
       async countByProject() {
         const result = await d1.prepare(CLOUD_PROJECT_COUNTS_SQL).all();
