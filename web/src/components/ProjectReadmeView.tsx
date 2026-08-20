@@ -22,6 +22,8 @@ export function ProjectReadmeView({
   const { language, text } = useTaskboardI18n();
   const [readme, setReadme] = useState<ProjectReadme | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadRequest, setLoadRequest] = useState(0);
   const [editing, setEditing] = useState(false);
   const [draftContent, setDraftContent] = useState("");
   const [editTab, setEditTab] = useState<"write" | "preview">("write");
@@ -33,6 +35,7 @@ export function ProjectReadmeView({
     if (editing) return;
     let active = true;
     setSaveError(null);
+    setLoadError(null);
 
     getProjectReadme(project.id)
       .then((data) => {
@@ -43,7 +46,7 @@ export function ProjectReadmeView({
       .catch((err) => {
         if (!active) return;
         const msg = err instanceof Error ? err.message : String(err);
-        onError?.(msg);
+        setLoadError(msg);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -52,10 +55,11 @@ export function ProjectReadmeView({
     return () => {
       active = false;
     };
-  }, [editing, onError, project.id, revision]);
+  }, [editing, loadRequest, project.id, revision]);
 
   function handleStartEditing() {
-    setDraftContent(readme?.content ?? "");
+    if (!readme) return;
+    setDraftContent(readme.content);
     setEditing(true);
     setEditTab("write");
     setSaveError(null);
@@ -71,7 +75,7 @@ export function ProjectReadmeView({
   }
 
   async function handleSave() {
-    if (saving) return;
+    if (saving || !readme) return;
     setSaving(true);
     setSaveError(null);
 
@@ -79,7 +83,7 @@ export function ProjectReadmeView({
       const updated = await saveProjectReadme(
         project.id,
         draftContent,
-        readme?.version,
+        readme.version,
       );
       setReadme(updated);
       setDraftContent(updated.content);
@@ -109,6 +113,24 @@ export function ProjectReadmeView({
       <div className="project-readme-loading">
         <div className="project-readme-spinner" />
         <p>{text("正在加载 Readme…", "Loading Readme…")}</p>
+      </div>
+    );
+  }
+
+  if (loadError && !readme) {
+    return (
+      <div className="project-readme-loading" role="alert">
+        <p>{loadError}</p>
+        <button
+          type="button"
+          className="button secondary"
+          onClick={() => {
+            setLoading(true);
+            setLoadRequest((current) => current + 1);
+          }}
+        >
+          {text("重试", "Try again")}
+        </button>
       </div>
     );
   }
@@ -205,6 +227,23 @@ export function ProjectReadmeView({
         <div className="project-readme-alert error" role="alert">
           <LinearIcon name="alert" />
           <span>{saveError}</span>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="project-readme-alert error" role="alert">
+          <LinearIcon name="alert" />
+          <span>{loadError}</span>
+          <button
+            type="button"
+            className="button secondary"
+            onClick={() => {
+              setLoading(true);
+              setLoadRequest((current) => current + 1);
+            }}
+          >
+            {text("重试", "Try again")}
+          </button>
         </div>
       )}
 
