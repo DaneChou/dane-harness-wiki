@@ -88,7 +88,6 @@ const codexAutomationMethods = new Set([
 let codexAutomationRequestSequence = 0;
 let codexAppServerRequestSequence = 0;
 const taskConversationOperations = new Map();
-const taskConversationOperationTtlMs = 120_000;
 const quotaPolicyTimers = new Map();
 const quotaPolicyRecords = new Map();
 const quotaPolicyQueues = new Map();
@@ -1572,15 +1571,12 @@ function getOrStartTaskConversation(cdp, executionContextId, request) {
   ));
   operation.promise = promise;
   taskConversationOperations.set(request.taskId, operation);
-  const retainSettledOperation = () => {
-    const timer = setTimeout(() => {
-      if (taskConversationOperations.get(request.taskId) === operation) {
-        taskConversationOperations.delete(request.taskId);
-      }
-    }, taskConversationOperationTtlMs);
-    timer.unref?.();
+  const clearSettledOperation = () => {
+    if (taskConversationOperations.get(request.taskId) === operation) {
+      taskConversationOperations.delete(request.taskId);
+    }
   };
-  void promise.then(retainSettledOperation, retainSettledOperation);
+  void promise.then(clearSettledOperation, clearSettledOperation);
   return promise;
 }
 

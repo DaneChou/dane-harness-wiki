@@ -2971,9 +2971,11 @@ export function App() {
     }
     const workspacePath = projectless
       ? undefined
-      : codexProjectContext?.workspacePath
-        ?? deviceWorkspacePaths[task.projectId]
-        ?? taskboardProject?.workspacePath;
+      : task.developmentContext?.type === "worktree"
+        ? task.developmentContext.path
+        : codexProjectContext?.workspacePath
+          ?? deviceWorkspacePaths[task.projectId]
+          ?? taskboardProject?.workspacePath;
     const instruction = `e-taskboard 处理任务面板任务 ${task.identifier}，并同步进度状态。`;
 
     if (!embedded || window.parent === window) {

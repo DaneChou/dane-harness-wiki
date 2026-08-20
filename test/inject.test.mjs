@@ -268,18 +268,17 @@ test("issues start a native Codex conversation in the confirmed project with the
   assert.match(source, /async function resolveNativeProject\(requestedProjectId, workspacePath\)/);
   assert.match(source, /candidate\.id === requestedProjectId\s*\|\|\s*candidate\.rootPaths\.some/);
   assert.match(source, /const targetRoot = normalizedWorkspacePath \? workspacePath : project\?\.rootPaths\[0\]/);
-  assert.match(source, /async function waitForNativeProject\(projectId, targetRoot\)/);
+  assert.match(source, /async function waitForNativeProject\(targetRoot\)/);
   const waitStart = source.indexOf("async function waitForNativeProject");
   const waitSource = source.slice(waitStart, source.indexOf("async function createThreadForTask", waitStart));
   assert.match(waitSource, /selectedNativeProjectId\(\)/);
   assert.match(waitSource, /activeNativeWorkspaceRoots\(\)/);
-  assert.match(waitSource, /selectedProjectId === projectId\s*&&\s*normalizeNativeRootPath\(activeRoots\[0\]\) === normalizedTargetRoot/);
+  assert.match(waitSource, /projectId\s*&&\s*normalizeNativeRootPath\(activeRoots\[0\]\) === normalizedTargetRoot/);
   assert.match(
     source,
-    /requestNativeFetch\("set-global-state", \{\s*key: "selected-project",\s*value: \{ type: "local", projectId: target\.projectId \},/,
+    /bridge\.sendMessageFromView\(\{\s*type: "electron-add-new-workspace-root-option",\s*root: targetRoot,/,
   );
-  assert.match(source, /if \(switched\?\.success !== true\)/);
-  assert.match(source, /await waitForNativeProject\(target\.projectId, targetRoot\)/);
+  assert.match(source, /await waitForNativeProject\(targetRoot\)/);
   assert.match(
     createThreadSource,
     /if \(codexProjectKind === "remote"\) \{[\s\S]*?codexHostId = typeof payload\?\.codexHostId[\s\S]*?codexProjectWorkspacePath[\s\S]*?await waitForRemoteProject\(requestedProjectId, codexHostId, codexProjectWorkspacePath\);\s*targetRoot = codexProjectWorkspacePath;/,

@@ -1021,18 +1021,18 @@
     }
   }
 
-  async function waitForNativeProject(projectId, targetRoot) {
+  async function waitForNativeProject(targetRoot) {
     const deadline = Date.now() + 8_000;
     const normalizedTargetRoot = normalizeNativeRootPath(targetRoot);
     while (Date.now() < deadline) {
-      const [selectedProjectId, activeRoots] = await Promise.all([
+      const [projectId, activeRoots] = await Promise.all([
         selectedNativeProjectId(),
         activeNativeWorkspaceRoots(),
       ]);
       if (
-        selectedProjectId === projectId
+        projectId
         && normalizeNativeRootPath(activeRoots[0]) === normalizedTargetRoot
-      ) return selectedProjectId;
+      ) return projectId;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
     throw new Error(hostText(
@@ -1101,17 +1101,11 @@
           ));
         }
         targetRoot = target.targetRoot;
-        const switched = await requestNativeFetch("set-global-state", {
-          key: "selected-project",
-          value: { type: "local", projectId: target.projectId },
+        bridge.sendMessageFromView({
+          type: "electron-add-new-workspace-root-option",
+          root: targetRoot,
         });
-        if (switched?.success !== true) {
-          throw new Error(hostText(
-            "Codex 未在限定时间内切换到目标项目或 worktree",
-            "Codex did not switch to the target project or worktree in time",
-          ));
-        }
-        lastNativeProjectId = await waitForNativeProject(target.projectId, targetRoot);
+        lastNativeProjectId = await waitForNativeProject(targetRoot);
       }
 
       closeTaskboard(false);
