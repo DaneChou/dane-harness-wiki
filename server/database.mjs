@@ -579,6 +579,11 @@ export class TaskboardDatabase {
     }
 
     const taskColumns = this.database.prepare("PRAGMA table_info(tasks)").all();
+    const hasWorkflowId = taskColumns.some((column) => column.name === "workflow_id");
+    if (hasWorkflowId) {
+      this.database.exec("ALTER TABLE tasks DROP COLUMN workflow_id");
+    }
+    this.database.exec("DROP TABLE IF EXISTS workflow_workspaces");
     const hasThreadId = taskColumns.some((column) => column.name === "thread_id");
     const hasLinkedThreadId = taskColumns.some((column) => column.name === "linked_thread_id");
     if (!hasThreadId) {
