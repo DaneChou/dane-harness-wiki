@@ -862,9 +862,9 @@ export function TaskDetail({
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
-      let relationAnchor = currentTask;
+      let relationAnchor = await getTask(currentTask.id);
       if (changeStatusToTodo) {
-        const saved = await onUpdate(currentTask, { status: "todo" });
+        const saved = await onUpdate(relationAnchor, { status: "todo" });
         setCurrentTask(saved);
         relationAnchor = saved;
         setChangeStatusToTodo(false);
@@ -949,7 +949,8 @@ export function TaskDetail({
         resolveInlineMediaMarkdown(body, editingInlineImages, uploaded).trim(),
       );
       setComments((current) => current.map((item) => item.id === updated.id ? updated : item));
-      const savedWithAddedRelations = await addMentionRelations(currentTask, editingSegments);
+      const relationAnchor = await getTask(currentTask.id);
+      const savedWithAddedRelations = await addMentionRelations(relationAnchor, editingSegments);
       const savedWithRelations = await removeUnreferencedMentionRelations(
         savedWithAddedRelations,
         removedMentionIds,
