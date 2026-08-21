@@ -686,6 +686,29 @@ export function TaskDetail({
     }
   }
 
+  async function addMentionRelations(
+    anchor: Task,
+    segments: InlineMediaSegment[],
+  ): Promise<Task> {
+    let current = anchor;
+    const relatedIds = new Set(current.relations.related.map((relation) => relation.id));
+    for (const segment of segments) {
+      if (segment.type !== "issue-reference" || !segment.taskId) continue;
+      const relatedTaskId = segment.taskId;
+      if (
+        relatedTaskId === current.id
+        || segment.projectId !== current.projectId
+        || relatedIds.has(relatedTaskId)
+      ) continue;
+      const result = await applyRelationMutation(
+        () => onAddRelation(current, "related", relatedTaskId),
+      );
+      current = result.task;
+      relatedIds.add(relatedTaskId);
+    }
+    return current;
+  }
+
   function handleTitleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -736,9 +759,10 @@ export function TaskDetail({
         return null;
       });
       if (!saved) return;
-      setCurrentTask(saved);
-      setDescription(saved.description);
-      setDescriptionSegments(createInlineMediaSegments(saved.description, referenceTasks));
+      const savedWithRelations = await addMentionRelations(saved, descriptionSegments);
+      setCurrentTask(savedWithRelations);
+      setDescription(savedWithRelations.description);
+      setDescriptionSegments(createInlineMediaSegments(savedWithRelations.description, referenceTasks));
       setAttachments((current) => [
         ...current,
         ...uploaded.filter((attachment) => !current.some((item) => item.id === attachment.id)),
@@ -777,11 +801,15 @@ export function TaskDetail({
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
+      let relationAnchor = currentTask;
       if (changeStatusToTodo) {
         const saved = await onUpdate(currentTask, { status: "todo" });
         setCurrentTask(saved);
+        relationAnchor = saved;
         setChangeStatusToTodo(false);
       }
+      const savedWithRelations = await addMentionRelations(relationAnchor, commentSegments);
+      setCurrentTask(savedWithRelations);
       const failed = results.length - uploaded.length;
       if (failed > 0) setCommentsError([
         `评论已发布，但有 ${failed} 个附件上传失败。`,
@@ -856,6 +884,8 @@ export function TaskDetail({
         resolveInlineMediaMarkdown(body, editingInlineImages, uploaded).trim(),
       );
       setComments((current) => current.map((item) => item.id === updated.id ? updated : item));
+      const savedWithRelations = await addMentionRelations(currentTask, editingSegments);
+      setCurrentTask(savedWithRelations);
       endCommentEdit();
     } catch (error) {
       setCommentsError(messageFor(error));
