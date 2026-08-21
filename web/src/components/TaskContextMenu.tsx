@@ -183,7 +183,8 @@ export function TaskContextMenu({
     function closeFromOutside(event: PointerEvent) {
       if (!menuRef.current?.contains(event.target as Node)) onClose();
     }
-    function closeFromViewportChange() {
+    function closeFromViewportChange(event: Event) {
+      if (event.type === "scroll" && menuRef.current?.contains(event.target as Node)) return;
       onClose();
     }
 
