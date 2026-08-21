@@ -933,14 +933,7 @@ async function hydrateTask(env, row, activityComments = null, activityChanges = 
       WHERE attachments.task_id = ?
         AND attachments.comment_id IS NULL
         AND attachments.content_type LIKE 'image/%'
-        AND (
-          instr(tasks.description, 'api/attachments/' || attachments.id || '/content') > 0
-          OR EXISTS (
-            SELECT 1 FROM comments
-            WHERE comments.task_id = attachments.task_id
-              AND instr(comments.body, 'api/attachments/' || attachments.id || '/content') > 0
-          )
-        )
+        AND instr(tasks.description, 'api/attachments/' || attachments.id || '/content') > 0
       ORDER BY attachments.created_at, attachments.id
       LIMIT 1
     `).bind(task.id).first(),

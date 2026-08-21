@@ -2436,14 +2436,7 @@ export class TaskboardDatabase {
         WHERE attachments.task_id IN (${placeholders})
           AND attachments.comment_id IS NULL
           AND attachments.content_type LIKE 'image/%'
-          AND (
-            instr(tasks.description, 'api/attachments/' || attachments.id || '/content') > 0
-            OR EXISTS (
-              SELECT 1 FROM comments
-              WHERE comments.task_id = attachments.task_id
-                AND instr(comments.body, 'api/attachments/' || attachments.id || '/content') > 0
-            )
-          )
+          AND instr(tasks.description, 'api/attachments/' || attachments.id || '/content') > 0
         ORDER BY attachments.task_id, attachments.created_at, attachments.id
       `).all(...chunk);
       for (const row of rows) {
