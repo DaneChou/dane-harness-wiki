@@ -93,8 +93,8 @@ export function ProjectReadmeView({
       if (err instanceof ApiError && err.code === "VERSION_CONFLICT") {
         setSaveError(
           text(
-            "项目说明已被其他协作者或 Agent 更新，请刷新后重试。",
-            "Project README was modified elsewhere. Please refresh and try again.",
+            "项目文档已被其他协作者或 Agent 更新，请刷新后重试。",
+            "Project Docs were modified elsewhere. Please refresh and try again.",
           ),
         );
       } else {
@@ -113,7 +113,7 @@ export function ProjectReadmeView({
     return (
       <div className="project-readme-loading">
         <div className="project-readme-spinner" />
-        <p>{text("正在加载 Readme…", "Loading Readme…")}</p>
+        <p>{text("正在加载项目文档…", "Loading Project Docs…")}</p>
       </div>
     );
   }
@@ -145,7 +145,7 @@ export function ProjectReadmeView({
           </span>
           <div className="project-readme-title-info">
             <h1 className="project-readme-heading">
-              Readme
+              {text("项目文档", "Project Docs")}
             </h1>
             <div className="project-readme-meta">
               <span className="project-readme-project-badge">{project.name}</span>
@@ -175,7 +175,7 @@ export function ProjectReadmeView({
               onClick={handleStartEditing}
             >
               <EditIcon color="currentColor" />
-              <span>{hasContent ? text("编辑 Readme", "Edit Readme") : text("编写 Readme", "Write Readme")}</span>
+              <span>{hasContent ? text("编辑项目文档", "Edit Project Docs") : text("编写项目文档", "Write Project Docs")}</span>
             </button>
           ) : (
             <div className="project-readme-edit-actions">
@@ -258,10 +258,10 @@ export function ProjectReadmeView({
                 value={draftContent}
                 onChange={(e) => setDraftContent(e.target.value)}
                 placeholder={text(
-                  "输入项目 Readme 内容，支持 Markdown 语法…",
-                  "Enter project Readme content in Markdown…",
+                  "输入项目文档内容，支持 Markdown 语法…",
+                  "Enter Project Docs content in Markdown…",
                 )}
-                aria-label={text("项目 Readme 内容", "Project Readme content")}
+                aria-label={text("项目文档内容", "Project Docs content")}
                 rows={24}
               />
               <div className="project-readme-editor-footer">
@@ -295,12 +295,12 @@ export function ProjectReadmeView({
             <LinearIcon name="file" />
           </div>
           <h2 className="project-readme-empty-title">
-            {text("项目暂无 Readme", "No Readme for this project yet")}
+            {text("暂无项目文档", "No Project Docs for this project yet")}
           </h2>
           <p className="project-readme-empty-desc">
             {text(
-              "为项目撰写全局 Readme，记录项目目标、技术栈、架构与规范，方便团队协作者与 Agent 快速上手。",
-              "Create a project Readme to document goals, architecture, tech stack, and conventions for collaborators and AI agents.",
+              "创建项目文档，记录项目目标、技术栈、架构与规范，方便团队协作者与 Agent 快速上手。",
+              "Create Project Docs to document goals, architecture, tech stack, and conventions for collaborators and AI agents.",
             )}
           </p>
           <button
@@ -309,7 +309,7 @@ export function ProjectReadmeView({
             onClick={handleStartEditing}
           >
             <PlusIcon color="currentColor" size={16} />
-            <span>{text("开始编写 Readme", "Create Project Readme")}</span>
+            <span>{text("开始编写项目文档", "Create Project Docs")}</span>
           </button>
         </div>
       )}
