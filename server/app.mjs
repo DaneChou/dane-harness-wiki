@@ -639,6 +639,25 @@ function parseArchive(body) {
   };
 }
 
+function parseRelationOrigin(value) {
+  if (value === undefined) return undefined;
+  if (value !== "manual" && value !== "mention") {
+    throw new ApiError(400, "INVALID_FIELD", "'origin' must be manual or mention");
+  }
+  return value;
+}
+
+function parseRelationMutation(body) {
+  assertPlainObject(body);
+  assertAllowedKeys(body, new Set(["version", "threadId", "threadBinding", "origin"]));
+  return {
+    version: parseVersion(body.version),
+    threadId: parseThreadId(body.threadId),
+    threadBinding: parseThreadBinding(body.threadBinding),
+    origin: parseRelationOrigin(body.origin),
+  };
+}
+
 function parseIssueRelationType(value) {
   if (!["parent", "blocks", "blocked_by", "related"].includes(value)) {
     throw new ApiError(
@@ -2592,8 +2611,8 @@ export function createTaskboardServer(options = {}) {
         }
         const relationType = parseIssueRelationType(type);
         if (request.method === "POST") {
-          const { version, threadId, threadBinding } = resolveInputThreadBinding(
-            parseArchive(await readJson(request)),
+          const { version, threadId, threadBinding, origin } = resolveInputThreadBinding(
+            parseRelationMutation(await readJson(request)),
           );
           const result = database.addTaskRelation(
             taskId,
@@ -2603,13 +2622,14 @@ export function createTaskboardServer(options = {}) {
             threadId,
             threadBinding,
             actorFromRequest(request),
+            origin,
           );
           events.emit("task.relation.updated", result);
           return sendJson(response, 200, result);
         }
         if (request.method === "DELETE") {
-          const { version, threadId, threadBinding } = resolveInputThreadBinding(
-            parseArchive(await readJson(request)),
+          const { version, threadId, threadBinding, origin } = resolveInputThreadBinding(
+            parseRelationMutation(await readJson(request)),
           );
           const result = database.removeTaskRelation(
             taskId,
@@ -2619,6 +2639,7 @@ export function createTaskboardServer(options = {}) {
             threadId,
             threadBinding,
             actorFromRequest(request),
+            origin,
           );
           events.emit("task.relation.updated", result);
           return sendJson(response, 200, result);
