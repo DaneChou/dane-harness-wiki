@@ -698,10 +698,18 @@ function inlineMediaClipboardHtml(
       wrapper.append(markdown);
       continue;
     }
-    const pendingImage = ownerDocument.createElement("span");
-    pendingImage.dataset.taskboardInlineMediaPendingImage = segment.id;
-    pendingImage.textContent = segment.file.name;
-    wrapper.append(pendingImage);
+    if (segment.dataUrl) {
+      const pendingImage = ownerDocument.createElement("img");
+      pendingImage.dataset.taskboardInlineMediaPendingImage = segment.id;
+      pendingImage.src = segment.dataUrl;
+      pendingImage.alt = segment.file.name;
+      wrapper.append(pendingImage);
+    } else {
+      const pendingImage = ownerDocument.createElement("span");
+      pendingImage.dataset.taskboardInlineMediaPendingImage = segment.id;
+      pendingImage.textContent = segment.file.name;
+      wrapper.append(pendingImage);
+    }
   }
 
   return wrapper.outerHTML;
@@ -1159,7 +1167,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             element.textContent = segment.text;
             if (segment.text.endsWith("\n")) element.append(document.createElement("br"));
           } else {
-            element.append(document.createElement("br"));
+            element.append(document.createTextNode(""), document.createElement("br"));
           }
         } else {
           element.className = isInlineReference(segment)
@@ -1770,6 +1778,29 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       applyRangeReplacement(start, end, insertion);
     }
 
+    function copyContent(event: ClipboardEvent<HTMLDivElement>): {
+      range: { start: number; end: number };
+      segments: InlineMediaSegment[];
+    } | null {
+      const selection = event.currentTarget.ownerDocument.getSelection();
+      if (!selection || selection.rangeCount === 0) return null;
+      const selectedRange = selection.getRangeAt(0);
+      if (
+        !event.currentTarget.contains(selectedRange.startContainer)
+        || !event.currentTarget.contains(selectedRange.endContainer)
+      ) return null;
+      const range = currentLogicalRange();
+      if (!range || range.start === range.end) return null;
+      const copiedSegments = inlineMediaRangeSegments(segments, range.start, range.end);
+      event.preventDefault();
+      writeInlineMediaClipboard(
+        event.clipboardData,
+        copiedSegments,
+        event.currentTarget.ownerDocument,
+      );
+      return { range, segments: copiedSegments };
+    }
+
     function pasteContent(event: ClipboardEvent<HTMLDivElement>) {
       const range = currentLogicalRange();
       if (!range) return;
@@ -1963,23 +1994,23 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           onDragOver={dragContent}
           onDrop={dropContent}
           onPaste={pasteContent}
-          onCopy={(event) => {
-            const selection = event.currentTarget.ownerDocument.getSelection();
-            if (!selection || selection.rangeCount === 0) return;
-            const selectedRange = selection.getRangeAt(0);
-            if (
-              !event.currentTarget.contains(selectedRange.startContainer)
-              || !event.currentTarget.contains(selectedRange.endContainer)
-            ) return;
-            const range = currentLogicalRange();
-            if (!range || range.start === range.end) return;
-            const copiedSegments = inlineMediaRangeSegments(segments, range.start, range.end);
-            event.preventDefault();
-            writeInlineMediaClipboard(
-              event.clipboardData,
-              copiedSegments,
-              event.currentTarget.ownerDocument,
-            );
+          onCopy={copyContent}
+          onCut={(event) => {
+            const copied = copyContent(event);
+            if (!copied) return;
+            const image = copied.segments.find((segment): segment is InlineImageSegment => (
+              segment.type === "pending-image" && segment.file.type === "image/png"
+            ));
+            if (image) {
+              const plainText = event.clipboardData.getData("text/plain");
+              const html = event.clipboardData.getData("text/html");
+              void navigator.clipboard.write([new ClipboardItem({
+                "image/png": image.file,
+                "text/html": new Blob([html], { type: "text/html" }),
+                "text/plain": new Blob([plainText], { type: "text/plain" }),
+              })]);
+            }
+            applyRangeReplacement(copied.range.start, copied.range.end, [], false);
           }}
           onKeyUp={(event) => {
             if (event.key !== "Escape") updateCompletionFromSelection();
