@@ -2437,8 +2437,7 @@ export class TaskboardDatabase {
           AND attachments.comment_id IS NULL
           AND attachments.content_type LIKE 'image/%'
           AND (
-            attachments.kind = 'attachment'
-            OR instr(tasks.description, 'api/attachments/' || attachments.id || '/content') > 0
+            instr(tasks.description, 'api/attachments/' || attachments.id || '/content') > 0
             OR EXISTS (
               SELECT 1 FROM comments
               WHERE comments.task_id = attachments.task_id
