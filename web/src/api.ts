@@ -19,6 +19,7 @@ import type {
   IssueRelationType,
   JiraConnection,
   Project,
+  ProjectReadme,
   ProjectSummary,
   Task,
   TaskChangeActivity,
@@ -425,6 +426,32 @@ export async function listDeviceWorkspaces(signal?: AbortSignal): Promise<Record
     if (error instanceof ApiError && error.code === "LOCAL_COMPANION_REQUIRED") return {};
     throw error;
   }
+}
+
+export async function getProjectReadme(
+  projectId: string,
+  signal?: AbortSignal,
+): Promise<ProjectReadme> {
+  const data = await request<{ readme: ProjectReadme }>(
+    `/api/projects/${encodeURIComponent(projectId)}/readme`,
+    { signal },
+  );
+  return data.readme;
+}
+
+export async function saveProjectReadme(
+  projectId: string,
+  content: string,
+  version?: number,
+): Promise<ProjectReadme> {
+  const data = await request<{ readme: ProjectReadme }>(
+    `/api/projects/${encodeURIComponent(projectId)}/readme`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ content, ...(version !== undefined ? { version } : {}) }),
+    },
+  );
+  return data.readme;
 }
 
 export async function createProject(input: {

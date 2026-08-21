@@ -333,6 +333,16 @@ function projectSummaryFromRow(row) {
   };
 }
 
+function projectReadmeFromRow(row, projectId) {
+  return {
+    projectId: row.project_id ?? projectId,
+    content: row.content,
+    version: row.version,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 function aiChatRunFromRow(row) {
   return {
     id: row.id,
@@ -507,6 +517,14 @@ export class TaskboardDatabase {
 
       CREATE INDEX IF NOT EXISTS attachments_task_created
         ON attachments(task_id, created_at, id);
+
+      CREATE TABLE IF NOT EXISTS project_readmes (
+        project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+        content TEXT NOT NULL DEFAULT '',
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
 
       CREATE TABLE IF NOT EXISTS project_summaries (
         project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -1333,6 +1351,63 @@ export class TaskboardDatabase {
         error = excluded.error
     `).run(projectId, timestamp, error);
     return this.getProjectSummary(projectId);
+  }
+
+  getProjectReadme(projectId) {
+    if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
+    }
+    const row = this.database.prepare(`
+      SELECT project_id, content, version, created_at, updated_at
+      FROM project_readmes
+      WHERE project_id = ?
+    `).get(projectId);
+    return row
+      ? projectReadmeFromRow(row, projectId)
+      : { projectId, content: "", version: 0, createdAt: null, updatedAt: null };
+  }
+
+  saveProjectReadme(projectId, content, expectedVersion) {
+    const timestamp = now();
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
+        throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
+      }
+      const current = this.database.prepare(`
+        SELECT version FROM project_readmes WHERE project_id = ?
+      `).get(projectId);
+      if (expectedVersion !== undefined) {
+        const actualVersion = current?.version ?? 0;
+        if (actualVersion !== expectedVersion) {
+          throw new ApiError(409, "VERSION_CONFLICT", "Project README changed since it was last read", {
+            expectedVersion,
+            actualVersion,
+          });
+        }
+      }
+      if (current) {
+        const versionCondition = expectedVersion !== undefined ? " AND version = ?" : "";
+        const params = expectedVersion !== undefined
+          ? [content, timestamp, projectId, expectedVersion]
+          : [content, timestamp, projectId];
+        this.database.prepare(`
+          UPDATE project_readmes
+          SET content = ?, version = version + 1, updated_at = ?
+          WHERE project_id = ?${versionCondition}
+        `).run(...params);
+      } else {
+        this.database.prepare(`
+          INSERT INTO project_readmes (project_id, content, version, created_at, updated_at)
+          VALUES (?, ?, 1, ?, ?)
+        `).run(projectId, content, timestamp, timestamp);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+    return this.getProjectReadme(projectId);
   }
 
   listAiChatThreads() {
