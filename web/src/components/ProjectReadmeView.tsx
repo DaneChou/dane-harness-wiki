@@ -100,7 +100,7 @@ export function ProjectReadmeView({
 
   async function save() {
     if (saving || !readme) return;
-    const draftContent = serializeInlineMedia(segments).trim();
+    const draftContent = serializeInlineMedia(segments);
     const inlineImages = inlineMediaImages(segments);
     if (draftContent === readme.content && inlineImages.length === 0) {
       setEditing(false);
@@ -119,7 +119,7 @@ export function ProjectReadmeView({
         draftContent,
         inlineImages,
         uploaded,
-      ).trim();
+      );
       const updated = await saveProjectReadme(project.id, resolvedContent, readme.version);
       setReadme(updated);
       setSegments(createInlineMediaSegments(updated.content, referenceTasks));
