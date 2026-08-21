@@ -37,7 +37,6 @@ import {
   getJiraConnection,
   getTask,
   getTaskboardRevision,
-  getWorkflowWorkspace,
   getTaskboardMetadata,
   listArchivedTasks,
   listDevelopmentContexts,
@@ -74,6 +73,14 @@ import {
   type PendingInlineImage,
 } from "./components/InlineMediaComposer";
 import { LinearIcon } from "./components/LinearIcon";
+import {
+  DeleteIcon,
+  MoreIcon,
+  PlusIcon,
+  ProjectIcon,
+  RefreshIcon,
+  RelationIcon,
+} from "./components/SemanticIcons";
 import { ProjectAutomationMenu } from "./components/ProjectAutomationMenu";
 import { TaskboardIcon } from "./components/TaskboardIcon";
 import { TaskContextMenu } from "./components/TaskContextMenu";
@@ -130,20 +137,14 @@ import {
   type TaskboardMetadata,
   type TaskDraft,
   type TaskStatus,
-  type WorkflowOption,
 } from "./types";
-import {
-  DEFAULT_WORKFLOW_OPTIONS,
-  readLegacyWorkflowWorkspace,
-  workflowOptionsFromWorkspace,
-} from "./workflowStore";
 // The poller stays in ESM JavaScript so its lifecycle can be tested directly with node:test.
 // @ts-expect-error The module's option contract is enforced by its focused node tests.
 import { createRevisionPoller, getRevisionPollingInterval } from "./revisionPolling.mjs";
 
 type ConnectionState = "connecting" | "live" | "reconnecting";
 type Theme = "light" | "dark";
-type BoardView = "readme" | "dashboard" | "issues" | "list" | "gantt" | "workflow";
+type BoardView = "readme" | "dashboard" | "issues" | "list" | "gantt";
 type DetailSourceScroll =
   | { projectId: string; view: "issues"; status: TaskStatus; scrollTop: number }
   | { projectId: string; view: "list"; scrollTop: number };
@@ -162,14 +163,10 @@ type TasksLoadError = {
   message: string;
 };
 type LoadError = ProjectLoadError | TasksLoadError;
-const SHOW_WORKFLOW_BOARD_ENTRY = false;
 const GANTT_ZOOM_OPTIONS: GanttZoom[] = ["day", "week", "month"];
 
 const AiChat = lazy(() => import("./components/AiChat").then((module) => ({
   default: module.AiChat,
-})));
-const WorkflowBoard = lazy(() => import("./components/WorkflowBoard").then((module) => ({
-  default: module.WorkflowBoard,
 })));
 const GanttView = lazy(() => import("./components/GanttView").then((module) => ({
   default: module.GanttView,
@@ -386,7 +383,6 @@ const EVENT_NAMES = [
   "project.created",
   "project.labels.updated",
   "project.readme.updated",
-  "workflow.updated",
 ] as const;
 
 function isTheme(value: unknown): value is Theme {
@@ -575,7 +571,6 @@ interface LocalRealtimeSyncProps {
     projectId: string,
     options?: { quiet?: boolean; signal?: AbortSignal },
   ) => Promise<void>;
-  refreshWorkflowOptions: (projectId: string, signal?: AbortSignal) => Promise<void>;
   setConnection: Dispatch<SetStateAction<ConnectionState>>;
   setCommentsRevision: Dispatch<SetStateAction<number>>;
   setAttachmentsRevision: Dispatch<SetStateAction<number>>;
@@ -587,7 +582,6 @@ function LocalRealtimeSync({
   detailTaskId,
   refreshProjectList,
   refreshTasks,
-  refreshWorkflowOptions,
   setConnection,
   setCommentsRevision,
   setAttachmentsRevision,
@@ -645,12 +639,6 @@ function LocalRealtimeSync({
         return;
       }
       if (!affectsSelectedProject) return;
-      if (event.type === "workflow.updated") {
-        if (selectedProjectId && selectedProjectId !== ALL_PROJECTS_ID) {
-          void refreshWorkflowOptions(selectedProjectId);
-        }
-        return;
-      }
       if (event.type === "project.readme.updated") {
         setReadmeRevision((current) => current + 1);
         return;
@@ -675,7 +663,6 @@ function LocalRealtimeSync({
       setConnection("live");
       scheduleRefresh({ projects: true, tasks: Boolean(selectedProjectId) });
       if (selectedProjectId && selectedProjectId !== ALL_PROJECTS_ID) {
-        void refreshWorkflowOptions(selectedProjectId);
         setReadmeRevision((current) => current + 1);
       }
       if (detailTaskId) {
@@ -694,7 +681,6 @@ function LocalRealtimeSync({
     detailTaskId,
     refreshProjectList,
     refreshTasks,
-    refreshWorkflowOptions,
     selectedProjectId,
     setAttachmentsRevision,
     setCommentsRevision,
@@ -779,9 +765,7 @@ export function App() {
   );
   const [commentsRevision, setCommentsRevision] = useState(0);
   const [attachmentsRevision, setAttachmentsRevision] = useState(0);
-  const [workflowRevision, setWorkflowRevision] = useState(0);
   const [readmeRevision, setReadmeRevision] = useState(0);
-  const [workflowOptions, setWorkflowOptions] = useState<WorkflowOption[]>(DEFAULT_WORKFLOW_OPTIONS);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [draggedTaskHeight, setDraggedTaskHeight] = useState(0);
@@ -1896,26 +1880,6 @@ export function App() {
     return () => window.clearInterval(timer);
   }, [isAllProjects, isJiraProject, jiraConnection?.configured, refreshTasks, selectedProjectId]);
 
-  const refreshWorkflowOptions = useCallback(async (projectId: string, signal?: AbortSignal) => {
-    const record = await getWorkflowWorkspace<unknown>(projectId, signal);
-    if (!signal?.aborted) setWorkflowOptions(workflowOptionsFromWorkspace(record.workspace));
-  }, []);
-
-  useEffect(() => {
-    if (!selectedProjectId || isAllProjects) {
-      setWorkflowOptions(DEFAULT_WORKFLOW_OPTIONS);
-      return;
-    }
-    setWorkflowOptions(workflowOptionsFromWorkspace(readLegacyWorkflowWorkspace(selectedProjectId)));
-    const controller = new AbortController();
-    void refreshWorkflowOptions(selectedProjectId, controller.signal).catch((error) => {
-      if ((error as Error).name !== "AbortError") {
-        setWorkflowOptions(workflowOptionsFromWorkspace(readLegacyWorkflowWorkspace(selectedProjectId)));
-      }
-    });
-    return () => controller.abort();
-  }, [isAllProjects, refreshWorkflowOptions, selectedProjectId]);
-
   useEffect(() => {
     if (!selectedProjectId || isAllProjects) {
       setDevelopmentScan({ workspacePath: null, contexts: [] });
@@ -1978,9 +1942,7 @@ export function App() {
         const projectId = selectedProjectIdRef.current;
         if (projectId) {
           void refreshTasks(projectId, { quiet: true });
-          if (projectId !== ALL_PROJECTS_ID) void refreshWorkflowOptions(projectId).catch(() => {});
         }
-        setWorkflowRevision((current) => current + 1);
         setReadmeRevision((current) => current + 1);
         setCommentsRevision((current) => current + 1);
         setAttachmentsRevision((current) => current + 1);
@@ -1995,7 +1957,6 @@ export function App() {
     revisionPollingInterval,
     refreshProjectList,
     refreshTasks,
-    refreshWorkflowOptions,
   ]);
 
   function pushUndo(message: string | null, undo: () => Promise<void>) {
@@ -2066,7 +2027,6 @@ export function App() {
         && selectedProjectId
         && !isAllProjects
         && !isJiraProject
-        && boardView !== "workflow"
       ) {
         event.preventDefault();
         setEditor({ task: null, status: "todo" });
@@ -3348,7 +3308,6 @@ export function App() {
           detailTaskId={detailTaskId}
           refreshProjectList={refreshProjectList}
           refreshTasks={refreshTasks}
-          refreshWorkflowOptions={refreshWorkflowOptions}
           setConnection={setConnection}
           setCommentsRevision={setCommentsRevision}
           setAttachmentsRevision={setAttachmentsRevision}
@@ -3358,7 +3317,7 @@ export function App() {
       {!embedded && (
         <aside className="app-nav" aria-label={text("任务面板导航", "Taskboard navigation")}>
           <div className="brand-row">
-            <span className="brand-mark" aria-hidden="true"><LinearIcon name="project" /></span>
+            <span className="brand-mark" aria-hidden="true"><ProjectIcon color="currentColor" /></span>
             <span>{text("任务面板", "Taskboard")}</span>
           </div>
 
@@ -3493,7 +3452,7 @@ export function App() {
                       disabled={openingProjectId !== null}
                       onClick={openJiraDialog}
                     >
-                      <LinearIcon className="project-avatar" name="link" />
+                      <RelationIcon className="project-avatar" color="currentColor" size={16} />
                       <span>
                         {jiraConnection?.configured
                           ? text("Jira 设置", "Jira settings")
@@ -3506,7 +3465,7 @@ export function App() {
                       disabled={openingProjectId !== null}
                       onClick={openCreateProjectDialog}
                     >
-                      <TaskboardIcon className="project-avatar" name="create" />
+                      <PlusIcon className="project-avatar" color="currentColor" size={16} />
                       <span>{text("创建项目", "Create project")}</span>
                     </button>
                   </div>
@@ -3537,10 +3496,10 @@ export function App() {
                 aria-label={text("同步 Jira", "Sync Jira")}
                 title={text("同步 Jira", "Sync Jira")}
               >
-                <LinearIcon name="recurrence" />
+                <RefreshIcon color="currentColor" />
               </button>
             )}
-            {selectedProjectId && !isJiraProject && boardView !== "workflow" && (
+            {selectedProjectId && !isJiraProject && (
               <button
                 className="icon-button header-create-button"
                 type="button"
@@ -3548,7 +3507,7 @@ export function App() {
                 aria-label={text("新建议题", "Create issue")}
                 title={text("新建议题 (C)", "Create issue (C)")}
               >
-                <TaskboardIcon name="create" />
+                <PlusIcon color="currentColor" size={14} />
               </button>
             )}
           </div>
@@ -3600,16 +3559,6 @@ export function App() {
                 Readme
               </button>
             )}
-            {SHOW_WORKFLOW_BOARD_ENTRY && (
-              <button
-                className={`view-tab${boardView === "workflow" ? " active" : ""}`}
-                type="button"
-                aria-pressed={boardView === "workflow"}
-                onClick={() => selectBoardView("workflow")}
-              >
-                {text("节点模式", "Workflow")}
-              </button>
-            )}
           </div>
           {(boardView === "issues" || boardView === "list" || boardView === "gantt") && <div className="toolbar-tools">
             <div className={`search-field${search ? " has-value" : ""}`} title={text("搜索议题 (/)", "Search issues (/)")}>
@@ -3647,7 +3596,7 @@ export function App() {
                 <button type="button" className="gantt-today-button" onClick={() => setGanttTodayRequest((current) => current + 1)}>{text("今天", "Today")}</button>
                 <div className="gantt-view-menu-wrap">
                   <button type="button" className="gantt-view-menu-trigger" aria-label={text("时间轴视图选项", "Timeline view options")} aria-expanded={ganttViewMenuOpen} onClick={() => setGanttViewMenuOpen((current) => !current)}>
-                    <LinearIcon name="more" />
+                    <MoreIcon color="currentColor" />
                   </button>
                   {ganttViewMenuOpen && (
                     <div className="gantt-view-menu" role="menu">
@@ -3814,7 +3763,7 @@ export function App() {
             onUpdate={updateTaskProperties}
           />
         ) : boardView === "gantt" ? (
-          <Suspense fallback={<div className="workflow-board-loading">{text("正在打开甘特图…", "Opening Gantt…")}</div>}>
+          <Suspense fallback={<div className="board-view-loading">{text("正在打开甘特图…", "Opening Gantt…")}</div>}>
             <GanttView
               tasks={filteredTasks}
               presentations={taskPresentations}
@@ -3824,21 +3773,6 @@ export function App() {
               todayRequest={ganttTodayRequest}
               onOpenTask={openTaskDetail}
               onUpdate={updateTaskProperties}
-            />
-          </Suspense>
-        ) : boardView === "workflow" ? (
-          <Suspense fallback={<div className="workflow-board-loading">{text("正在打开节点模式…", "Opening workflow…")}</div>}>
-            <WorkflowBoard
-              key={selectedProject?.id ?? GLOBAL_PROJECT_ID}
-              projectId={selectedProject?.id ?? GLOBAL_PROJECT_ID}
-              projectName={selectedProject?.name ?? text("当前项目", "Current project")}
-              workspacePath={
-                selectedDeviceWorkspacePath
-                ?? developmentScan.workspacePath
-                ?? hostContext?.workspacePath
-              }
-              revision={workflowRevision}
-              onWorkflowsChange={setWorkflowOptions}
             />
           </Suspense>
         ) : (
@@ -3966,7 +3900,7 @@ export function App() {
             role="menuitem"
             onClick={() => requestProjectDelete(projectContextMenu.project)}
           >
-            <span className="context-menu-icon" aria-hidden="true"><LinearIcon name="trash" /></span>
+            <span className="context-menu-icon" aria-hidden="true"><DeleteIcon color="currentColor" /></span>
             <span className="context-menu-label">{text("删除项目", "Delete project")}</span>
           </button>
         </div>
