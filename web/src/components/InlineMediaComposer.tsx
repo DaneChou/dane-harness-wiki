@@ -1424,7 +1424,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         if (segment.type !== "text" && offset <= current) {
           return { node: root, offset: Math.max(childIndex, 0) };
         }
-        if (segment.type !== "text" && offset <= current + length) {
+        if (segment.type !== "text" && offset < current + length) {
           return { node: root, offset: Math.max(childIndex + 1, 0) };
         }
         current += length;
