@@ -67,7 +67,6 @@ import {
   ProjectIcon,
   RecurrenceIcon,
   RelationIcon,
-  StartDateIcon,
   StatusIcon,
 } from "./SemanticIcons";
 import {
@@ -331,7 +330,7 @@ function ActivityChangeIcon({ field, before, after }: {
   if (field === "labels") return <LabelIcon color="currentColor" size={14} />;
   if (field === "assignee") return <LinearIcon name="myIssues" />;
   if (field === "developmentContext") return <BranchIcon color="currentColor" size={14} />;
-  if (field === "startDate") return <StartDateIcon color="currentColor" size={14} />;
+  if (field === "startDate") return <DueDateIcon color="currentColor" size={14} />;
   if (field === "dueDate") return <DueDateIcon color="currentColor" size={14} />;
   if (field === "recurrence") return <RecurrenceIcon color="currentColor" size={14} />;
   if (field === "archivedAt") return <DeleteIcon color="currentColor" size={14} />;
@@ -409,7 +408,7 @@ function DescriptionDocument({
           <span className={`issue-reference-inline issue-reference-status-${task.status}`}>
             <span className="issue-reference-identity">
               <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-                <StatusIcon status={task.status} size={15} />
+                <StatusIcon status={task.status} color="var(--column-status-color)" size={15} />
               </span>
               <span className="issue-reference-id">{task.externalKey ?? task.identifier}</span>
             </span>
@@ -1687,8 +1686,7 @@ export function TaskDetail({
                 options={TASK_STATUSES.map((status) => ({
                   value: status,
                   label: taskStatusLabel(language, status),
-                  icon: <StatusIcon status={status} size={14} />,
-                  className: `status-icon-${STATUS_DETAILS[status].tone}`,
+                  icon: <StatusIcon status={status} color="currentColor" size={14} />,
                 }))}
                 open={propertyMenu === "status"}
                 disabled={savingProperty === "status"}
@@ -1816,7 +1814,7 @@ export function TaskDetail({
                 }
               }}
             >
-              <span className="detail-property-icon" aria-hidden="true"><StartDateIcon color="currentColor" size={14} /></span>
+              <span className="detail-property-icon" aria-hidden="true"><DueDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
               <input
                 type="date"

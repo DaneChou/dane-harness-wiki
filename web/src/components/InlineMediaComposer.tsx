@@ -983,7 +983,7 @@ function IssueReferenceChip({
       <span className="issue-reference-identity">
         {task && (
           <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-            <StatusIcon status={task.status} size={15} />
+            <StatusIcon status={task.status} color="var(--column-status-color)" size={15} />
           </span>
         )}
         <span className="issue-reference-id">{displayIdentifier}</span>
