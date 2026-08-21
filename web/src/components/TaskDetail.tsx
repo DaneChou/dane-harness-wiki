@@ -55,6 +55,7 @@ import { LabelPicker } from "./LabelPicker";
 import { LinearIcon } from "./LinearIcon";
 import {
   AttachmentIcon,
+  BlockingRelationIcon,
   BranchIcon,
   ConversationIcon,
   DeleteIcon,
@@ -322,9 +323,9 @@ function ActivityChangeIcon({ field, before, after }: {
   if (field === "relation" && typeof value === "object") {
     const relation = value as { type?: IssueRelationType };
     if (relation.type === "blocked_by" || relation.type === "blocks") {
-      return <RelationIcon type={relation.type} color="currentColor" size={14} />;
+      return <BlockingRelationIcon type={relation.type} color="currentColor" size={14} />;
     }
-    return <LinearIcon name="link" />;
+    return <RelationIcon color="currentColor" size={14} />;
   }
   if (field === "projectId") return <ProjectIcon color="currentColor" size={14} />;
   if (field === "labels") return <LabelIcon color="currentColor" size={14} />;
@@ -1663,6 +1664,16 @@ export function TaskDetail({
                 disabled={savingProperty === "status"}
                 className="detail-property-picker"
                 triggerClassName="detail-property-trigger"
+                triggerContent={(
+                  <>
+                    <span className="task-property-trigger-icon">
+                      <StatusIcon status={currentTask.status} color="currentColor" size={14} />
+                    </span>
+                    <span className="task-property-trigger-label">
+                      {taskStatusLabel(language, currentTask.status)}
+                    </span>
+                  </>
+                )}
                 ariaLabel={text("状态", "Status")}
                 onOpenChange={(open) => setPropertyMenu(open ? "status" : null)}
                 onChange={(status) => void saveTask({ status }, "status")}

@@ -4,7 +4,7 @@ import { useTaskboardI18n } from "../i18n";
 import type { ActorIdentity, Project, ProjectReadme } from "../types";
 import { LinearIcon } from "./LinearIcon";
 import { MarkdownDocument } from "./MarkdownDocument";
-import { EditIcon } from "./SemanticIcons";
+import { EditIcon, PlusIcon } from "./SemanticIcons";
 import "./ProjectReadmeView.css";
 
 interface ProjectReadmeViewProps {
@@ -308,7 +308,7 @@ export function ProjectReadmeView({
             className="button primary project-readme-create-btn"
             onClick={handleStartEditing}
           >
-            <LinearIcon name="plus" />
+            <PlusIcon color="currentColor" size={16} />
             <span>{text("开始编写 Readme", "Create Project Readme")}</span>
           </button>
         </div>

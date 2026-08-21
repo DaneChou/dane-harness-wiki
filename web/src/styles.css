@@ -8504,11 +8504,6 @@ kbd {
   height: 12px;
 }
 
-.column-actions .taskboard-icon {
-  width: 20px;
-  height: 20px;
-}
-
 .column-list {
   flex: 1 1 0;
   gap: 8px;
@@ -9263,11 +9258,6 @@ kbd {
 .other-tasks-add svg {
   width: 11px;
   height: 11px;
-}
-
-.other-tasks-add .taskboard-icon {
-  width: 20px;
-  height: 20px;
 }
 
 .other-tasks-list {

@@ -8,9 +8,8 @@ import {
   type OtherTaskTab,
 } from "../issueBoardStatuses";
 import { LinearIcon } from "./LinearIcon";
-import { DeleteIcon, RefreshIcon, StatusIcon } from "./SemanticIcons";
+import { DeleteIcon, PlusIcon, RefreshIcon, StatusIcon } from "./SemanticIcons";
 import { TaskCard } from "./TaskCard";
-import { TaskboardIcon } from "./TaskboardIcon";
 
 function archivedDate(
   value: string | null,
@@ -243,7 +242,7 @@ export function OtherTasksPanel({
           title={text(`添加到${activeLabel}`, `Add to ${activeLabel}`)}
           onClick={() => onCreate(activeTab)}
         >
-          <TaskboardIcon name="sidebarAdd" />
+          <PlusIcon color="currentColor" size={11} />
         </button>
       )}
 

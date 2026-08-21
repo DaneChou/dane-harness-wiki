@@ -179,6 +179,10 @@ export function MoreIcon(props: BasicIconProps) {
   return <SvgIcon {...props}><path d="M3 6.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm5 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" /></SvgIcon>;
 }
 
+export function PlusIcon(props: BasicIconProps) {
+  return <SvgIcon {...props}><path d="M8.75 4C8.75 3.58579 8.41421 3.25 8 3.25C7.58579 3.25 7.25 3.58579 7.25 4V7.25H4C3.58579 7.25 3.25 7.58579 3.25 8C3.25 8.41421 3.58579 8.75 4 8.75H7.25V12C7.25 12.4142 7.58579 12.75 8 12.75C8.41421 12.75 8.75 12.4142 8.75 12V8.75H12C12.4142 8.75 12.75 8.41421 12.75 8C12.75 7.58579 12.4142 7.25 12 7.25H8.75V4Z" /></SvgIcon>;
+}
+
 export function DeleteIcon(props: BasicIconProps) {
   return <SvgIcon {...props}><path fillRule="evenodd" d="M12.369 6.5a.5.5 0 0 1 .486.615l-1.492 6.343A2 2 0 0 1 9.416 15H6.584a2 2 0 0 1-1.947-1.542L3.145 7.115A.5.5 0 0 1 3.63 6.5zM8.5 1A2.5 2.5 0 0 1 11 3.5h2a1 1 0 0 1 1 1V5a.5.5 0 0 1-.5.5h-11A.5.5 0 0 1 2 5v-.5a1 1 0 0 1 1-1h2A2.5 2.5 0 0 1 7.5 1zm0 1.5h-1a1 1 0 0 0-1 1h3a1 1 0 0 0-1-1" clipRule="evenodd" /></SvgIcon>;
 }
@@ -191,7 +195,15 @@ export function ConversationIcon(props: Omit<MaskIconProps, "source">) {
   return <MaskIcon {...props} source={conversationSource} />;
 }
 
-export function RelationIcon({ type, ...props }: Omit<MaskIconProps, "source"> & {
+export function RelationIcon(props: BasicIconProps) {
+  return (
+    <SvgIcon {...props} fill="none">
+      <path d="M12.2429 9.4142L12.95 8.70709C14.5121 7.14499 14.5121 4.61233 12.95 3.05023C11.3879 1.48814 8.85522 1.48814 7.29312 3.05023L6.58601 3.75734M3.75759 6.58577L3.05048 7.29287C1.48838 8.85497 1.48838 11.3876 3.05048 12.9497C4.61258 14.5118 7.14524 14.5118 8.70733 12.9497L9.41444 12.2426M10.1215 5.87866L5.87891 10.1213" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </SvgIcon>
+  );
+}
+
+export function BlockingRelationIcon({ type, ...props }: Omit<MaskIconProps, "source"> & {
   type: "blocked_by" | "blocks";
 }) {
   return <MaskIcon {...props} source={type === "blocked_by" ? relationBlockedBySource : relationBlocksSource} />;

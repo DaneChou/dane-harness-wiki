@@ -23,6 +23,7 @@ import {
   EditIcon,
   LabelIcon,
   PriorityIcon,
+  RelationIcon,
   StatusIcon,
 } from "./SemanticIcons";
 
@@ -422,7 +423,7 @@ export function TaskContextMenu({
         </MenuItem>
         <MenuItem
           label={text("在新对话打开", "Open in new conversation")}
-          icon={<LinearIcon name="link" />}
+          icon={<RelationIcon color="currentColor" size={16} />}
           onPointerEnter={closeSubmenu}
           onClick={() => closeThen(() => onOpenInThread(task))}
         />

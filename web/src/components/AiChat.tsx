@@ -77,9 +77,11 @@ import {
   DeleteIcon,
   EditIcon,
   FullAccessPermissionIcon,
+  PlusIcon,
   ProjectIcon,
   ReadOnlyPermissionIcon,
   RefreshIcon,
+  RelationIcon,
   SendIcon,
   StatusIcon,
   WorkspaceWritePermissionIcon,
@@ -871,7 +873,7 @@ function ActivityIcon({ failed, type }: { failed: boolean; type: string }) {
   if (type === "todo" || type === "todo_list") return <StatusIcon status="todo" color="currentColor" />;
   if (type === "command" || type === "command_execution") return <LinearIcon name="terminal" />;
   if (type === "file" || type === "file_change") return <LinearIcon name="file" />;
-  if (type === "mcp" || type === "mcp_tool_call") return <LinearIcon name="link" />;
+  if (type === "mcp" || type === "mcp_tool_call") return <RelationIcon color="currentColor" size={16} />;
   if (type === "skill") return <ProjectIcon color="currentColor" />;
   if (type === "web" || type === "web_search") return <LinearIcon name="search" />;
   return <StatusIcon status="todo" color="currentColor" />;
@@ -2915,7 +2917,7 @@ export function AiChat({
               disabled={!projectId || loading}
               onClick={beginNewConversation}
             >
-              <LinearIcon name="plus" />
+              <PlusIcon color="currentColor" size={15} />
             </button>
             <button
               type="button"
@@ -3247,7 +3249,7 @@ export function AiChat({
                 disabled={attachmentBlocked}
                 onClick={() => attachmentInputRef.current?.click()}
               >
-                <LinearIcon name="plus" />
+                <PlusIcon color="currentColor" size={15} />
               </button>
               <div className="ai-chat-menu-wrap ai-chat-permission-menu-wrap">
                 <button

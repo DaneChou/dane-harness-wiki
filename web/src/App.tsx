@@ -76,8 +76,10 @@ import { LinearIcon } from "./components/LinearIcon";
 import {
   DeleteIcon,
   MoreIcon,
+  PlusIcon,
   ProjectIcon,
   RefreshIcon,
+  RelationIcon,
 } from "./components/SemanticIcons";
 import { ProjectAutomationMenu } from "./components/ProjectAutomationMenu";
 import { TaskboardIcon } from "./components/TaskboardIcon";
@@ -3450,7 +3452,7 @@ export function App() {
                       disabled={openingProjectId !== null}
                       onClick={openJiraDialog}
                     >
-                      <LinearIcon className="project-avatar" name="link" />
+                      <RelationIcon className="project-avatar" color="currentColor" size={16} />
                       <span>
                         {jiraConnection?.configured
                           ? text("Jira 设置", "Jira settings")
@@ -3463,7 +3465,7 @@ export function App() {
                       disabled={openingProjectId !== null}
                       onClick={openCreateProjectDialog}
                     >
-                      <TaskboardIcon className="project-avatar" name="create" />
+                      <PlusIcon className="project-avatar" color="currentColor" size={16} />
                       <span>{text("创建项目", "Create project")}</span>
                     </button>
                   </div>
@@ -3505,7 +3507,7 @@ export function App() {
                 aria-label={text("新建议题", "Create issue")}
                 title={text("新建议题 (C)", "Create issue (C)")}
               >
-                <TaskboardIcon name="create" />
+                <PlusIcon color="currentColor" size={14} />
               </button>
             )}
           </div>

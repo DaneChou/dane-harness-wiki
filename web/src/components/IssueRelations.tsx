@@ -14,7 +14,12 @@ import type {
 import { useTaskboardI18n } from "../i18n";
 import { ActorAvatar } from "./ActorAvatar";
 import { LinearIcon } from "./LinearIcon";
-import { RelationIcon, StatusIcon } from "./SemanticIcons";
+import {
+  BlockingRelationIcon,
+  PlusIcon,
+  RelationIcon,
+  StatusIcon,
+} from "./SemanticIcons";
 
 export interface RelationMutationResult {
   task: Task;
@@ -196,7 +201,7 @@ export function IssuePicker({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <LinearIcon name="plus" />
+        <PlusIcon color="currentColor" size={13} />
         <span>{label}</span>
       </button>
       {open && (
@@ -439,9 +444,9 @@ export function IssueRelationSidebar({
             <header>
               <span>
                 {group.type === "related" ? (
-                  <LinearIcon name="link" />
+                  <RelationIcon color="currentColor" size={14} />
                 ) : (
-                  <RelationIcon type={group.type} color="currentColor" />
+                  <BlockingRelationIcon type={group.type} color="currentColor" />
                 )}
                 {label}
               </span>
