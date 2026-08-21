@@ -17,7 +17,6 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type {
-  Attachment,
   ComposerCandidate,
   ComposerCandidatesResponse,
   ComposerSurface,
@@ -535,7 +534,7 @@ export function serializeInlineMedia(segments: InlineMediaSegment[]): string {
 export function resolveInlineMediaMarkdown(
   value: string,
   images: PendingInlineImage[],
-  attachments: Attachment[],
+  attachments: Array<{ id: string }>,
 ): string {
   return images.reduce((markdown, image, index) => {
     const attachment = attachments[index];

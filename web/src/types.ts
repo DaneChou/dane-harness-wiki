@@ -356,6 +356,16 @@ export interface ProjectReadme {
   updatedAt: string | null;
 }
 
+export interface ProjectReadmeAttachment {
+  id: string;
+  projectId: string;
+  kind: "inline";
+  filename: string;
+  contentType: string;
+  size: number;
+  createdAt: string;
+}
+
 export interface TaskRelationSummary {
   id: string;
   identifier: string;
