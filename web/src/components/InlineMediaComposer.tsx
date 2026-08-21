@@ -56,6 +56,7 @@ interface InlineImageSegment {
   token: string;
   file: File;
   dataUrl: string | null;
+  dataUrlReady: Promise<void>;
 }
 
 interface PersistedImageSegment {
@@ -200,11 +201,16 @@ function imageSegment(file: File, dataUrl: string | null = null): InlineImageSeg
     token: `<!--taskboard-inline-image:${id}-->`,
     file,
     dataUrl,
+    dataUrlReady: Promise.resolve(),
   };
   if (!dataUrl) {
     const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") segment.dataUrl = reader.result;
+    segment.dataUrlReady = new Promise((resolve, reject) => {
+      reader.addEventListener("load", () => {
+        segment.dataUrl = reader.result as string;
+        resolve();
+      });
+      reader.addEventListener("error", () => reject(reader.error));
     });
     reader.readAsDataURL(file);
   }
@@ -1802,16 +1808,18 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       applyRangeReplacement(start, end, insertion);
     }
 
-    function copyContent(event: ClipboardEvent<HTMLDivElement>): {
+    async function copyContent(event: ClipboardEvent<HTMLDivElement>): Promise<{
       range: { start: number; end: number };
       segments: InlineMediaSegment[];
-    } | null {
-      const selection = event.currentTarget.ownerDocument.getSelection();
+    } | null> {
+      const currentTarget = event.currentTarget;
+      const ownerDocument = currentTarget.ownerDocument;
+      const selection = ownerDocument.getSelection();
       if (!selection || selection.rangeCount === 0) return null;
       const selectedRange = selection.getRangeAt(0);
       if (
-        !event.currentTarget.contains(selectedRange.startContainer)
-        || !event.currentTarget.contains(selectedRange.endContainer)
+        !currentTarget.contains(selectedRange.startContainer)
+        || !currentTarget.contains(selectedRange.endContainer)
       ) return null;
       const range = currentLogicalRange();
       if (!range || range.start === range.end) return null;
@@ -1821,11 +1829,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         segment.type === "pending-image" && segment.file.type === "image/png"
       ));
       if (image) {
+        await Promise.all(copiedSegments.flatMap((segment) => (
+          segment.type === "pending-image" ? [segment.dataUrlReady] : []
+        )));
         const payload = inlineMediaClipboardPayload(
           copiedSegments,
-          event.currentTarget.ownerDocument,
+          ownerDocument,
         );
-        void navigator.clipboard.write([new ClipboardItem({
+        await navigator.clipboard.write([new ClipboardItem({
           "image/png": image.file,
           "text/html": new Blob([payload.html], { type: "text/html" }),
           "text/plain": new Blob([payload.plainText], { type: "text/plain" }),
@@ -1834,7 +1845,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         writeInlineMediaClipboard(
           event.clipboardData,
           copiedSegments,
-          event.currentTarget.ownerDocument,
+          ownerDocument,
         );
       }
       return { range, segments: copiedSegments };
@@ -2049,9 +2060,10 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           onPaste={pasteContent}
           onCopy={copyContent}
           onCut={(event) => {
-            const copied = copyContent(event);
-            if (!copied) return;
-            applyRangeReplacement(copied.range.start, copied.range.end, [], false);
+            void copyContent(event).then((copied) => {
+              if (!copied) return;
+              applyRangeReplacement(copied.range.start, copied.range.end, [], false);
+            });
           }}
           onKeyUp={(event) => {
             if (event.key !== "Escape") updateCompletionFromSelection();

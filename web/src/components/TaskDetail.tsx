@@ -13,6 +13,7 @@ import {
   createComment,
   deleteAttachment,
   deleteComment,
+  getTask,
   listAttachments,
   listComments,
   listTaskActivities,
@@ -744,6 +745,15 @@ export function TaskDetail({
         referencedIds.has(relatedTaskId)
         || !current.relations.related.some((relation) => relation.id === relatedTaskId)
       ) continue;
+      const relatedTask = await getTask(relatedTaskId);
+      if (
+        mentionTaskIds(createInlineMediaSegments(relatedTask.description, referenceTasks))
+          .has(anchor.id)
+      ) continue;
+      const relatedComments = await listComments(relatedTaskId);
+      if (relatedComments.some((comment) => (
+        mentionTaskIds(createInlineMediaSegments(comment.body, referenceTasks)).has(anchor.id)
+      ))) continue;
       const result = await applyRelationMutation(
         () => onRemoveRelation(current, "related", relatedTaskId, "mention"),
       );
