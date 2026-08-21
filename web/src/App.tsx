@@ -1090,12 +1090,15 @@ export function App() {
       ...sortedChoices.filter((project) => project.issueCount === 0),
     ];
   }, [hostContext?.projects, projectCodexIdentities, projects, recentProjectIds, text]);
-  const firstEmptyProjectId = projectChoices.find((project) => project.issueCount === 0)?.id ?? null;
-  const hasProjectsWithIssues = projectChoices.some((project) => project.issueCount > 0);
+  const projectMenuChoices = projectChoices.filter(
+    (project) => project.id !== GLOBAL_PROJECT_ID || project.issueCount > 0,
+  );
+  const firstEmptyProjectId = projectMenuChoices.find((project) => project.issueCount === 0)?.id ?? null;
+  const hasProjectsWithIssues = projectMenuChoices.some((project) => project.issueCount > 0);
   const editorProjectId = editor?.task?.projectId
     ?? editor?.projectId
     ?? (newTaskDraft?.projectId === selectedProjectId ? newTaskDraft.targetProjectId : undefined)
-    ?? (isAllProjects ? null : selectedProjectId);
+    ?? (isAllProjects ? GLOBAL_PROJECT_ID : selectedProjectId);
   const createTargetProjects = projectChoices.flatMap((choice) => {
     const project = projects.find((candidate) => candidate.id === choice.id);
     return project && project.source !== "jira"
@@ -2028,7 +2031,6 @@ export function App() {
         && !event.metaKey
         && !event.ctrlKey
         && selectedProjectId
-        && !isAllProjects
         && !isJiraProject
       ) {
         event.preventDefault();
@@ -2050,7 +2052,7 @@ export function App() {
 
     window.addEventListener("keydown", handleShortcut);
     return () => window.removeEventListener("keydown", handleShortcut);
-  }, [boardView, contextMenu, detailTaskId, editor, isAllProjects, isJiraProject, projectMenuOpen, selectedProjectId]);
+  }, [boardView, contextMenu, detailTaskId, editor, isJiraProject, projectMenuOpen, selectedProjectId]);
 
   const filteredTasks = useMemo(() => {
     return tasks.filter(
@@ -3419,7 +3421,7 @@ export function App() {
                       {isAllProjects && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
                     </button>
                     <div className="project-menu-divider" role="separator" />
-                    {projectChoices.map((project) => (
+                    {projectMenuChoices.map((project) => (
                       <Fragment key={project.id}>
                         {hasProjectsWithIssues && project.id === firstEmptyProjectId && (
                           <div className="project-menu-divider" role="separator" />
