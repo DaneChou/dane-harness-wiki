@@ -56,6 +56,7 @@ interface InlineImageSegment {
   token: string;
   file: File;
   dataUrl: string | null;
+  dataUrlReady: Promise<void>;
 }
 
 interface PersistedImageSegment {
@@ -163,6 +164,7 @@ function completionSelectionId(selection: CompletionSelection): string {
 let segmentSequence = 0;
 const inlineMediaMarkdownParser = unified().use(remarkParse).use(remarkGfm);
 const EMPTY_MENTION_TASKS: readonly Task[] = [];
+const EMPTY_TEXT_CARET = "\uFEFF";
 const INLINE_MEDIA_CLIPBOARD_MIME = "application/x-taskboard-inline-media";
 const INLINE_MEDIA_HTML_BLOCKS = new Set([
   "ADDRESS",
@@ -199,11 +201,16 @@ function imageSegment(file: File, dataUrl: string | null = null): InlineImageSeg
     token: `<!--taskboard-inline-image:${id}-->`,
     file,
     dataUrl,
+    dataUrlReady: Promise.resolve(),
   };
   if (!dataUrl) {
     const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") segment.dataUrl = reader.result;
+    segment.dataUrlReady = new Promise((resolve, reject) => {
+      reader.addEventListener("load", () => {
+        segment.dataUrl = reader.result as string;
+        resolve();
+      });
+      reader.addEventListener("error", () => reject(reader.error));
     });
     reader.readAsDataURL(file);
   }
@@ -691,6 +698,18 @@ function inlineMediaClipboardHtml(
       wrapper.append(text);
       continue;
     }
+    if (segment.type === "issue-reference") {
+      const route = new URLSearchParams({
+        project: segment.projectId,
+        issue: segment.issueIdentifier,
+      });
+      const issue = ownerDocument.createElement("a");
+      issue.dataset.taskboardInlineMediaMarkdown = segment.markdown;
+      issue.href = new URL(`?${route}`, ownerDocument.baseURI).toString();
+      issue.textContent = `@${segment.identifier}`;
+      wrapper.append(issue);
+      continue;
+    }
     if (isInlineReference(segment) || segment.type === "persisted-image") {
       const markdown = ownerDocument.createElement("span");
       markdown.dataset.taskboardInlineMediaMarkdown = segment.markdown;
@@ -701,6 +720,7 @@ function inlineMediaClipboardHtml(
     if (segment.dataUrl) {
       const pendingImage = ownerDocument.createElement("img");
       pendingImage.dataset.taskboardInlineMediaPendingImage = segment.id;
+      pendingImage.dataset.taskboardInlineMediaMarkdown = pendingImageClipboardMarkdown(segment) ?? "";
       pendingImage.src = segment.dataUrl;
       pendingImage.alt = segment.file.name;
       wrapper.append(pendingImage);
@@ -715,21 +735,30 @@ function inlineMediaClipboardHtml(
   return wrapper.outerHTML;
 }
 
+function inlineMediaClipboardPayload(
+  segments: InlineMediaSegment[],
+  ownerDocument: Document,
+): { id: string; plainText: string; html: string } {
+  const id = segmentId("clipboard");
+  const clipboardSegments = selfContainedClipboardSegments(segments);
+  const exportedSegments = stableClipboardSegments(clipboardSegments);
+  inlineMediaClipboard = { id, segments: clipboardSegments };
+  return {
+    id,
+    plainText: inlineMediaClipboardText(exportedSegments),
+    html: inlineMediaClipboardHtml(exportedSegments, id, ownerDocument),
+  };
+}
+
 export function writeInlineMediaClipboard(
   clipboardData: DataTransfer,
   segments: InlineMediaSegment[],
   ownerDocument: Document,
 ) {
-  const clipboardId = segmentId("clipboard");
-  const clipboardSegments = selfContainedClipboardSegments(segments);
-  const exportedSegments = stableClipboardSegments(clipboardSegments);
-  inlineMediaClipboard = { id: clipboardId, segments: clipboardSegments };
-  clipboardData.setData(INLINE_MEDIA_CLIPBOARD_MIME, clipboardId);
-  clipboardData.setData("text/plain", inlineMediaClipboardText(exportedSegments));
-  clipboardData.setData(
-    "text/html",
-    inlineMediaClipboardHtml(exportedSegments, clipboardId, ownerDocument),
-  );
+  const payload = inlineMediaClipboardPayload(segments, ownerDocument);
+  clipboardData.setData(INLINE_MEDIA_CLIPBOARD_MIME, payload.id);
+  clipboardData.setData("text/plain", payload.plainText);
+  clipboardData.setData("text/html", payload.html);
 }
 
 function inlineMediaClipboardIdFromHtml(html: string): string {
@@ -1052,6 +1081,8 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
   }, ref) {
     const { text } = useTaskboardI18n();
     const rootRef = useRef<HTMLDivElement>(null);
+    const latestSegments = useRef(segments);
+    latestSegments.current = segments;
     const atomHosts = useRef(new Map<string, HTMLElement>());
     const nativeSegments = useRef(new Map<string, InlineMediaSegment>());
     const pendingSelection = useRef<number | null>(null);
@@ -1167,7 +1198,8 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             element.textContent = segment.text;
             if (segment.text.endsWith("\n")) element.append(document.createElement("br"));
           } else {
-            element.append(document.createTextNode(""), document.createElement("br"));
+            element.dataset.inlineMediaEmptyText = "true";
+            element.append(document.createTextNode(EMPTY_TEXT_CARET), document.createElement("br"));
           }
         } else {
           element.className = isInlineReference(segment)
@@ -1508,14 +1540,25 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       applyRangeReplacement(start, start + segmentLength(segments[index]), [], false);
     }
 
+    function completionRangeFromCaret(caretRange: Range, triggerLength: number): Range | null {
+      const root = rootRef.current;
+      if (!root || !caretRange.collapsed || !root.contains(caretRange.startContainer)) return null;
+      const textNode = caretRange.startContainer;
+      if (!(textNode instanceof Text) || caretRange.startOffset < triggerLength) return null;
+      const range = document.createRange();
+      const triggerOffset = caretRange.startOffset - triggerLength;
+      range.setStart(textNode, triggerOffset);
+      range.setEnd(textNode, triggerOffset + 1);
+      return range;
+    }
+
     function completionAnchorRect(query: ComposerQuery): DOMRect {
-      const element = elementForSegment(query.segmentId);
-      const textNode = element?.firstChild;
-      if (!element || !(textNode instanceof Text)) return query.anchorRect;
-      const anchorRange = document.createRange();
-      anchorRange.setStart(textNode, Math.min(query.start, textNode.length));
-      anchorRange.collapse(true);
-      return anchorRange.getBoundingClientRect();
+      const root = rootRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.rangeCount === 0) return query.anchorRect;
+      const caretRange = selection.getRangeAt(0);
+      return completionRangeFromCaret(caretRange, query.end - query.start)
+        ?.getBoundingClientRect() ?? query.anchorRect;
     }
 
     function updateCompletionFromSelection() {
@@ -1583,13 +1626,10 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         return;
       }
       const start = prefix.lastIndexOf(trigger);
-      const anchorRange = document.createRange();
-      const element = elementForSegment(segment.id);
-      const textNode = element?.firstChild;
-      if (textNode instanceof Text) {
-        anchorRange.setStart(textNode, Math.min(start, textNode.length));
-        anchorRange.collapse(true);
-      } else {
+      const triggerLength = end - start;
+      let anchorRange = completionRangeFromCaret(range, triggerLength);
+      if (!anchorRange) {
+        anchorRange = range.cloneRange();
         anchorRange.setStart(range.startContainer, range.startOffset);
         anchorRange.collapse(true);
       }
@@ -1778,26 +1818,53 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       applyRangeReplacement(start, end, insertion);
     }
 
-    function copyContent(event: ClipboardEvent<HTMLDivElement>): {
+    async function copyContent(event: ClipboardEvent<HTMLDivElement>): Promise<{
       range: { start: number; end: number };
       segments: InlineMediaSegment[];
-    } | null {
-      const selection = event.currentTarget.ownerDocument.getSelection();
+    } | null> {
+      const currentTarget = event.currentTarget;
+      const ownerDocument = currentTarget.ownerDocument;
+      const selection = ownerDocument.getSelection();
       if (!selection || selection.rangeCount === 0) return null;
       const selectedRange = selection.getRangeAt(0);
       if (
-        !event.currentTarget.contains(selectedRange.startContainer)
-        || !event.currentTarget.contains(selectedRange.endContainer)
+        !currentTarget.contains(selectedRange.startContainer)
+        || !currentTarget.contains(selectedRange.endContainer)
       ) return null;
       const range = currentLogicalRange();
       if (!range || range.start === range.end) return null;
       const copiedSegments = inlineMediaRangeSegments(segments, range.start, range.end);
       event.preventDefault();
-      writeInlineMediaClipboard(
-        event.clipboardData,
-        copiedSegments,
-        event.currentTarget.ownerDocument,
-      );
+      const image = copiedSegments.find((segment): segment is InlineImageSegment => (
+        segment.type === "pending-image" && segment.file.type === "image/png"
+      ));
+      if (image) {
+        await Promise.all(copiedSegments.flatMap((segment) => (
+          segment.type === "pending-image" ? [segment.dataUrlReady] : []
+        )));
+        const payload = inlineMediaClipboardPayload(
+          copiedSegments,
+          ownerDocument,
+        );
+        const imageOnly = copiedSegments.every((segment) => (
+          segment.type === "pending-image"
+          || (segment.type === "text" && segment.text.length === 0)
+        ));
+        await navigator.clipboard.write([new ClipboardItem(imageOnly ? {
+          "image/png": image.file,
+          "text/html": new Blob([payload.html], { type: "text/html" }),
+          "text/plain": new Blob([payload.plainText], { type: "text/plain" }),
+        } : {
+          "text/html": new Blob([payload.html], { type: "text/html" }),
+          "text/plain": new Blob([payload.plainText], { type: "text/plain" }),
+        })]);
+      } else {
+        writeInlineMediaClipboard(
+          event.clipboardData,
+          copiedSegments,
+          ownerDocument,
+        );
+      }
       return { range, segments: copiedSegments };
     }
 
@@ -1822,7 +1889,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const pendingImageHtml = clipboardHtml.includes(
         "data-taskboard-inline-media-pending-image",
       );
-      if (taskboardHtml && !pendingImageHtml) {
+      if (taskboardHtml) {
         const htmlSegments = createInlineMediaSegmentsFromHtml(clipboardHtml, referenceTasks);
         if (htmlSegments) {
           event.preventDefault();
@@ -1902,7 +1969,21 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         const id = child.dataset.inlineMediaSegment;
         const segment = id ? existing.get(id) : null;
         if (segment?.type === "text") {
-          next.push({ ...segment, text: child.textContent ?? "" });
+          let text = child.textContent ?? "";
+          if (child.dataset.inlineMediaEmptyText) {
+            const textNode = child.firstChild;
+            const placeholderOffset = textNode instanceof Text
+              ? textNode.data.indexOf(EMPTY_TEXT_CARET)
+              : -1;
+            text = text.replace(EMPTY_TEXT_CARET, "");
+            if (text) {
+              if (textNode instanceof Text && placeholderOffset >= 0) {
+                textNode.deleteData(placeholderOffset, 1);
+              }
+              delete child.dataset.inlineMediaEmptyText;
+            }
+          }
+          next.push({ ...segment, text });
         } else if (segment) {
           next.push(segment);
           nextAtomHosts.set(segment.id, child);
@@ -1986,7 +2067,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           }}
           onCompositionEnd={(event) => {
             composing.current = false;
-            if (isEmpty && !event.currentTarget.textContent) {
+            if (isEmpty && !event.currentTarget.textContent?.replace(EMPTY_TEXT_CARET, "")) {
               event.currentTarget.dataset.empty = "true";
             }
             syncSegmentsFromDom();
@@ -1996,21 +2077,36 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           onPaste={pasteContent}
           onCopy={copyContent}
           onCut={(event) => {
-            const copied = copyContent(event);
-            if (!copied) return;
-            const image = copied.segments.find((segment): segment is InlineImageSegment => (
-              segment.type === "pending-image" && segment.file.type === "image/png"
-            ));
-            if (image) {
-              const plainText = event.clipboardData.getData("text/plain");
-              const html = event.clipboardData.getData("text/html");
-              void navigator.clipboard.write([new ClipboardItem({
-                "image/png": image.file,
-                "text/html": new Blob([html], { type: "text/html" }),
-                "text/plain": new Blob([plainText], { type: "text/plain" }),
-              })]);
-            }
-            applyRangeReplacement(copied.range.start, copied.range.end, [], false);
+            void copyContent(event).then((copied) => {
+              if (!copied) return;
+              const currentSegments = latestSegments.current;
+              const currentCut = inlineMediaRangeSegments(
+                currentSegments,
+                copied.range.start,
+                copied.range.end,
+              );
+              const unchanged = currentCut.length === copied.segments.length
+                && currentCut.every((segment, index) => {
+                  const snapshot = copied.segments[index];
+                  return segment.id === snapshot.id
+                    && segment.type === snapshot.type
+                    && (
+                      segment.type !== "text"
+                      || (snapshot.type === "text" && segment.text === snapshot.text)
+                    );
+                });
+              if (!unchanged) return;
+              const replacement = replaceInlineMediaRange(
+                currentSegments,
+                copied.range.start,
+                copied.range.end,
+                [],
+              );
+              pendingSelection.current = replacement.caret;
+              pendingMentionUpdate.current = false;
+              setCompletionQuery(null);
+              onChange(replacement.segments);
+            });
           }}
           onKeyUp={(event) => {
             if (event.key !== "Escape") updateCompletionFromSelection();
