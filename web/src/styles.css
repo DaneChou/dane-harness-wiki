@@ -4469,6 +4469,13 @@ kbd {
   display: none;
 }
 
+.detail-date-property-row input:focus::-webkit-datetime-edit-year-field,
+.detail-date-property-row input:focus::-webkit-datetime-edit-month-field,
+.detail-date-property-row input:focus::-webkit-datetime-edit-day-field {
+  background-color: transparent;
+  color: inherit;
+}
+
 .detail-property-picker {
   grid-column: 2;
   grid-row: 1;

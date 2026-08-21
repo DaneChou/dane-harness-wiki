@@ -272,7 +272,7 @@ export function TaskContextMenu({
       <div className="context-menu-group">
         <MenuItem
           label={text("状态", "Status")}
-          icon={<StatusIcon status={task.status} />}
+          icon={<StatusIcon status={task.status} color="currentColor" />}
           shortcut="S"
           submenu="status"
           submenuOpen={submenu === "status"}
@@ -286,7 +286,7 @@ export function TaskContextMenu({
                 <MenuItem
                   key={status}
                   label={taskStatusLabel(language, status)}
-                  icon={<StatusIcon status={status} />}
+                  icon={<StatusIcon status={status} color="currentColor" />}
                   shortcut={String(index + 1)}
                   checked={task.status === status}
                   onClick={() => closeThen(() => onStatusChange(task, status))}
