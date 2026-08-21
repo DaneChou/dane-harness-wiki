@@ -806,8 +806,9 @@ export function App() {
   const boardColumnScrollRefs = useRef<Partial<Record<TaskStatus, HTMLDivElement | null>>>({});
   const detailSourceProjectIdRef = useRef<string | null>(null);
   const pendingDetailSourceScrollRef = useRef<DetailSourceScroll | null>(null);
-  const selectedProjectIdRef = useRef(selectedProjectId);
-  selectedProjectIdRef.current = selectedProjectId;
+  const taskScopeProjectId = detailSourceProjectIdRef.current ?? selectedProjectId;
+  const taskScopeProjectIdRef = useRef(taskScopeProjectId);
+  taskScopeProjectIdRef.current = taskScopeProjectId;
 
   const revisionPollingInterval = getRevisionPollingInterval(taskboardMetadata);
   const textRef = useRef(text);
@@ -1498,6 +1499,7 @@ export function App() {
           };
         }
       }
+      if (!routeIssueIdentifier) detailSourceProjectIdRef.current = null;
       setDetailTaskIdentifier(routeIssueIdentifier);
       if (routeProjectId === selectedProjectId) return;
       setBoardView(routeProjectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(routeProjectId));
@@ -1860,7 +1862,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (!selectedProjectId) {
+    if (!taskScopeProjectId) {
       setTasks([]);
       setArchivedTasks([]);
       setHasLoadedTasks(false);
@@ -1868,17 +1870,18 @@ export function App() {
     }
     setHasLoadedTasks(false);
     const controller = new AbortController();
-    void refreshTasks(selectedProjectId, { signal: controller.signal });
+    void refreshTasks(taskScopeProjectId, { signal: controller.signal });
     return () => controller.abort();
-  }, [refreshTasks, selectedProjectId]);
+  }, [refreshTasks, taskScopeProjectId]);
 
   useEffect(() => {
-    if ((!isJiraProject && !(isAllProjects && jiraConnection?.configured)) || !selectedProjectId) return;
+    const isAllProjectTaskScope = taskScopeProjectId === ALL_PROJECTS_ID;
+    if ((!isJiraProject && !(isAllProjectTaskScope && jiraConnection?.configured)) || !taskScopeProjectId) return;
     const timer = window.setInterval(() => {
-      void refreshTasks(selectedProjectId, { quiet: true });
+      void refreshTasks(taskScopeProjectId, { quiet: true });
     }, 60_000);
     return () => window.clearInterval(timer);
-  }, [isAllProjects, isJiraProject, jiraConnection?.configured, refreshTasks, selectedProjectId]);
+  }, [isJiraProject, jiraConnection?.configured, refreshTasks, taskScopeProjectId]);
 
   useEffect(() => {
     if (!selectedProjectId || isAllProjects) {
@@ -1939,7 +1942,7 @@ export function App() {
       },
       onInvalidate: () => {
         void refreshProjectList();
-        const projectId = selectedProjectIdRef.current;
+        const projectId = taskScopeProjectIdRef.current;
         if (projectId) {
           void refreshTasks(projectId, { quiet: true });
         }
@@ -1984,7 +1987,7 @@ export function App() {
         `无法撤回这次操作：${errorMessage(error)}`,
         `Could not undo this action: ${errorMessage(error)}`,
       ));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
     } finally {
       undoInFlightRef.current = false;
     }
@@ -2175,7 +2178,7 @@ export function App() {
         : await createTaskRequest(targetProjectId, draft);
     } catch (error) {
       if (error instanceof ApiError && error.code === "VERSION_CONFLICT") {
-        void refreshTasks(selectedProjectId, { quiet: true });
+        void refreshTasks(taskScopeProjectId, { quiet: true });
       }
       throw error;
     }
@@ -2398,7 +2401,7 @@ export function App() {
           "This issue changed elsewhere. The board has been synced.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
     } finally {
       setMovingTaskId(null);
       setDropTarget(null);
@@ -2472,7 +2475,7 @@ export function App() {
           "This issue changed elsewhere. The board has been synced.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
       throw error;
     }
   }
@@ -2497,7 +2500,7 @@ export function App() {
       setProjects((current) => current.map((candidate) => (
         candidate.id === project.id ? project : candidate
       )));
-      await refreshTasks(selectedProjectId, { quiet: true });
+      await refreshTasks(taskScopeProjectId, { quiet: true });
     } catch (error) {
       setActionError(errorMessage(error));
       throw error;
@@ -2520,7 +2523,7 @@ export function App() {
         if (candidate.id === result.relatedTask.id) return result.relatedTask;
         return candidate;
       })));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
       return result;
     } catch (error) {
       setActionError(error instanceof ApiError && error.code === "VERSION_CONFLICT"
@@ -2529,7 +2532,7 @@ export function App() {
           "This issue changed elsewhere. The board has been synced.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
       throw error;
     }
   }
@@ -2581,7 +2584,7 @@ export function App() {
           "This issue changed elsewhere. The board has been synced.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
     }
   }
 
@@ -2606,7 +2609,7 @@ export function App() {
           "This issue changed elsewhere. The board has been synced.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
     } finally {
       setRestoringTaskId(null);
     }
@@ -2632,7 +2635,7 @@ export function App() {
           "This issue changed elsewhere. The board has been synced.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
     } finally {
       setDeletingArchivedTaskId(null);
     }
@@ -2980,7 +2983,7 @@ export function App() {
           "This issue changed elsewhere. No duplicate conversation was created.",
         )
         : errorMessage(error));
-      if (selectedProjectId) void refreshTasks(selectedProjectId, { quiet: true });
+      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
     }
   }
 
@@ -3190,7 +3193,7 @@ export function App() {
       const connection = await syncJiraConnection();
       setJiraConnection(connection);
       await Promise.all([
-        refreshTasks(selectedProjectId, { quiet: true }),
+        refreshTasks(taskScopeProjectId, { quiet: true }),
         refreshProjectList(),
       ]);
       setAnnouncement(text("Jira 任务已同步", "Jira issues synced"));
@@ -3304,7 +3307,7 @@ export function App() {
       <div className={`app-shell${embedded ? " embedded" : ""}`} style={appShellStyle}>
       {taskboardMetadata && taskboardMetadata.mode !== "cloud" && (
         <LocalRealtimeSync
-          selectedProjectId={selectedProjectId}
+          selectedProjectId={taskScopeProjectId}
           detailTaskId={detailTaskId}
           refreshProjectList={refreshProjectList}
           refreshTasks={refreshTasks}
@@ -3656,7 +3659,7 @@ export function App() {
                 if (loadError?.source === "projects") {
                   if (loadError.operation === "initial") void loadProjectList();
                   else void refreshProjectList();
-                } else if (selectedProjectId) void refreshTasks(selectedProjectId);
+                } else if (taskScopeProjectId) void refreshTasks(taskScopeProjectId);
                 else void loadProjectList();
               }}
             >
@@ -3669,8 +3672,8 @@ export function App() {
           <TaskDetail
             key={detailTask.id}
             task={detailTask}
-            tasks={tasks}
-            referenceTasks={referenceTasks}
+            tasks={tasks.filter((task) => task.projectId === detailTask.projectId)}
+            referenceTasks={referenceTasks.filter((task) => task.projectId === detailTask.projectId)}
             currentUser={currentUser}
             availableLabels={availableLabels}
             developmentScan={developmentScan}
