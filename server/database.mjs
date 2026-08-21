@@ -749,6 +749,7 @@ export class TaskboardDatabase {
         relation_type TEXT NOT NULL CHECK (relation_type IN ('parent', 'blocks', 'related')),
         source_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
         target_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+        origin TEXT NOT NULL DEFAULT 'manual' CHECK (origin IN ('manual', 'mention')),
         created_at TEXT NOT NULL,
         CHECK (source_task_id <> target_task_id),
         CHECK (relation_type <> 'related' OR source_task_id < target_task_id),
@@ -762,6 +763,15 @@ export class TaskboardDatabase {
         ON task_relations(target_task_id)
         WHERE relation_type = 'parent';
     `);
+
+    const taskRelationColumns = this.database.prepare("PRAGMA table_info(task_relations)").all();
+    if (!taskRelationColumns.some((column) => column.name === "origin")) {
+      this.database.exec(`
+        ALTER TABLE task_relations
+        ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'
+          CHECK (origin IN ('manual', 'mention'))
+      `);
+    }
 
     const commentColumns = this.database.prepare("PRAGMA table_info(comments)").all();
     if (!commentColumns.some((column) => column.name === "thread_id")) {
@@ -2122,7 +2132,7 @@ export class TaskboardDatabase {
     }
   }
 
-  addTaskRelation(id, version, type, relatedId, threadId, threadBinding, actor) {
+  addTaskRelation(id, version, type, relatedId, threadId, threadBinding, actor, origin = "manual") {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const task = this.#requireTask(id);
@@ -2168,9 +2178,9 @@ export class TaskboardDatabase {
         : null;
       this.database.prepare(`
         INSERT INTO task_relations (
-          relation_type, source_task_id, target_task_id, created_at
-        ) VALUES (?, ?, ?, ?)
-      `).run(relationType, sourceTaskId, targetTaskId, timestamp);
+          relation_type, source_task_id, target_task_id, origin, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(relationType, sourceTaskId, targetTaskId, origin, timestamp);
       this.#touchTask(task.id, version, threadId, threadBinding, timestamp);
       this.#recordTaskActivity(task.id, actor, [{
         field: "relation",
@@ -2188,7 +2198,7 @@ export class TaskboardDatabase {
     }
   }
 
-  removeTaskRelation(id, version, type, relatedId, threadId, threadBinding, actor) {
+  removeTaskRelation(id, version, type, relatedId, threadId, threadBinding, actor, origin) {
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const task = this.#requireTask(id);
@@ -2200,13 +2210,25 @@ export class TaskboardDatabase {
         task.id,
         relatedTask.id,
       );
-      const removed = this.database.prepare(`
+      const relation = this.database.prepare(`
+        SELECT origin
+        FROM task_relations
+        WHERE relation_type = ? AND source_task_id = ? AND target_task_id = ?
+      `).get(relationType, sourceTaskId, targetTaskId);
+      if (!relation) {
+        throw new ApiError(404, "RELATION_NOT_FOUND", "This issue relation does not exist");
+      }
+      if (origin && relation.origin !== origin) {
+        this.database.exec("COMMIT");
+        return {
+          task: this.getTask(task.id),
+          relatedTask: this.getTask(relatedTask.id),
+        };
+      }
+      this.database.prepare(`
         DELETE FROM task_relations
         WHERE relation_type = ? AND source_task_id = ? AND target_task_id = ?
       `).run(relationType, sourceTaskId, targetTaskId);
-      if (removed.changes !== 1) {
-        throw new ApiError(404, "RELATION_NOT_FOUND", "This issue relation does not exist");
-      }
       const timestamp = now();
       this.#touchTask(task.id, version, threadId, threadBinding, timestamp);
       this.#recordTaskActivity(task.id, actor, [{

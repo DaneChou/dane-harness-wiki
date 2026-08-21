@@ -14,6 +14,7 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export type ActorType = "user" | "agent";
 export type AssigneeTarget = "current-user" | "codex-agent";
 export type IssueRelationType = "parent" | "blocks" | "blocked_by" | "related";
+export type IssueRelationOrigin = "manual" | "mention";
 
 export interface ActorIdentity {
   type: ActorType;

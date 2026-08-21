@@ -1157,6 +1157,25 @@ function parseVersionMutation(body) {
   };
 }
 
+function parseRelationOrigin(value) {
+  if (value === undefined) return undefined;
+  if (value !== "manual" && value !== "mention") {
+    throw new ApiError(400, "INVALID_FIELD", "'origin' must be manual or mention");
+  }
+  return value;
+}
+
+function parseRelationMutation(body) {
+  assertPlainObject(body);
+  assertAllowedKeys(body, new Set(["version", "threadId", "threadBinding", "origin"]));
+  return {
+    version: parseVersion(body.version),
+    threadId: parseThreadId(body.threadId),
+    threadBinding: parseThreadBinding(body.threadBinding),
+    origin: parseRelationOrigin(body.origin),
+  };
+}
+
 function parseCommentCreate(body) {
   assertPlainObject(body);
   assertAllowedKeys(body, new Set(["body", "threadId", "threadBinding"]));
@@ -2051,9 +2070,9 @@ async function addRelation(env, taskId, type, relatedTaskId, input, actor) {
   statements.push(
     env.DB.prepare(`
       INSERT INTO task_relations (
-        relation_type, source_task_id, target_task_id, created_at
+        relation_type, source_task_id, target_task_id, origin, created_at
       )
-      SELECT ?, ?, ?, ?
+      SELECT ?, ?, ?, ?, ?
       WHERE EXISTS (
         SELECT 1 FROM tasks WHERE id = ? AND version = ?
       )
@@ -2061,6 +2080,7 @@ async function addRelation(env, taskId, type, relatedTaskId, input, actor) {
       endpoints.relationType,
       endpoints.sourceTaskId,
       endpoints.targetTaskId,
+      input.origin ?? "manual",
       timestamp,
       task.id,
       input.version,
@@ -2133,8 +2153,8 @@ async function removeRelation(env, taskId, type, relatedTaskId, input, actor) {
     input.version,
   );
   const endpoints = relationEndpoints(type, task.id, relatedTask.id);
-  const exists = await env.DB.prepare(`
-    SELECT 1 AS found
+  const relation = await env.DB.prepare(`
+    SELECT origin
     FROM task_relations
     WHERE relation_type = ? AND source_task_id = ? AND target_task_id = ?
   `).bind(
@@ -2142,8 +2162,14 @@ async function removeRelation(env, taskId, type, relatedTaskId, input, actor) {
     endpoints.sourceTaskId,
     endpoints.targetTaskId,
   ).first();
-  if (!exists) {
+  if (!relation) {
     throw new ApiError(404, "RELATION_NOT_FOUND", "This issue relation does not exist");
+  }
+  if (input.origin && relation.origin !== input.origin) {
+    return {
+      task: await getTask(env, task.id),
+      relatedTask: await getTask(env, relatedTask.id),
+    };
   }
   const timestamp = now();
   const storedBinding = storedThreadBinding(input.threadBinding, input.threadId);
@@ -2712,7 +2738,7 @@ async function routeApi(request, env, actor, url) {
     const taskId = decodePathPart(relationMatch[1], "Task id");
     const type = decodePathPart(relationMatch[2], "Relation type");
     const relatedTaskId = decodePathPart(relationMatch[3], "Related task id");
-    const input = parseVersionMutation(await readJson(request));
+    const input = parseRelationMutation(await readJson(request));
     if (request.method === "POST") {
       return json(200, await addRelation(env, taskId, type, relatedTaskId, input, actor));
     }

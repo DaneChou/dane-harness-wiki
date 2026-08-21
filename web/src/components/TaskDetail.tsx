@@ -35,6 +35,7 @@ import type {
   CodexThreadBinding,
   DevelopmentContext,
   DevelopmentScan,
+  IssueRelationOrigin,
   IssueRelationType,
   Recurrence,
   Task,
@@ -119,11 +120,13 @@ interface TaskDetailProps {
     task: Task,
     type: IssueRelationType,
     relatedTaskId: string,
+    origin?: IssueRelationOrigin,
   ) => Promise<RelationMutationResult>;
   onRemoveRelation: (
     task: Task,
     type: IssueRelationType,
     relatedTaskId: string,
+    origin?: IssueRelationOrigin,
   ) => Promise<RelationMutationResult>;
   onOpenThread: (binding: CodexThreadBinding) => void;
   onOpenLegacyLocalThread: (threadId: string) => void;
@@ -700,10 +703,51 @@ export function TaskDetail({
         || relatedIds.has(relatedTaskId)
       ) continue;
       const result = await applyRelationMutation(
-        () => onAddRelation(current, "related", relatedTaskId),
+        () => onAddRelation(current, "related", relatedTaskId, "mention"),
       );
       current = result.task;
       relatedIds.add(relatedTaskId);
+    }
+    return current;
+  }
+
+  function mentionTaskIds(segments: InlineMediaSegment[]): Set<string> {
+    return new Set(segments.flatMap((segment) => (
+      segment.type === "issue-reference" && segment.taskId ? [segment.taskId] : []
+    )));
+  }
+
+  function removedMentionTaskIds(
+    previous: InlineMediaSegment[],
+    next: InlineMediaSegment[],
+  ): Set<string> {
+    const nextIds = mentionTaskIds(next);
+    return new Set([...mentionTaskIds(previous)].filter((taskId) => !nextIds.has(taskId)));
+  }
+
+  async function removeUnreferencedMentionRelations(
+    anchor: Task,
+    candidates: Set<string>,
+  ): Promise<Task> {
+    if (candidates.size === 0) return anchor;
+    const savedComments = await listComments(anchor.id);
+    const referencedIds = mentionTaskIds(createInlineMediaSegments(anchor.description, referenceTasks));
+    for (const comment of savedComments) {
+      for (const taskId of mentionTaskIds(createInlineMediaSegments(comment.body, referenceTasks))) {
+        referencedIds.add(taskId);
+      }
+    }
+
+    let current = anchor;
+    for (const relatedTaskId of candidates) {
+      if (
+        referencedIds.has(relatedTaskId)
+        || !current.relations.related.some((relation) => relation.id === relatedTaskId)
+      ) continue;
+      const result = await applyRelationMutation(
+        () => onRemoveRelation(current, "related", relatedTaskId, "mention"),
+      );
+      current = result.task;
     }
     return current;
   }
@@ -741,6 +785,10 @@ export function TaskDetail({
       setEditingDescription(false);
       return;
     }
+    const removedMentionIds = removedMentionTaskIds(
+      createInlineMediaSegments(currentTask.description, referenceTasks),
+      descriptionSegments,
+    );
 
     setSavingProperty("description");
     onError(null);
@@ -758,7 +806,11 @@ export function TaskDetail({
         return null;
       });
       if (!saved) return;
-      const savedWithRelations = await addMentionRelations(saved, descriptionSegments);
+      const savedWithAddedRelations = await addMentionRelations(saved, descriptionSegments);
+      const savedWithRelations = await removeUnreferencedMentionRelations(
+        savedWithAddedRelations,
+        removedMentionIds,
+      );
       setCurrentTask(savedWithRelations);
       setDescription(savedWithRelations.description);
       setDescriptionSegments(createInlineMediaSegments(savedWithRelations.description, referenceTasks));
@@ -866,6 +918,10 @@ export function TaskDetail({
       if (body === comment.body) endCommentEdit();
       return;
     }
+    const removedMentionIds = removedMentionTaskIds(
+      createInlineMediaSegments(comment.body, referenceTasks),
+      editingSegments,
+    );
     setSavingCommentId(comment.id);
     setCommentsError(null);
     try {
@@ -883,7 +939,11 @@ export function TaskDetail({
         resolveInlineMediaMarkdown(body, editingInlineImages, uploaded).trim(),
       );
       setComments((current) => current.map((item) => item.id === updated.id ? updated : item));
-      const savedWithRelations = await addMentionRelations(currentTask, editingSegments);
+      const savedWithAddedRelations = await addMentionRelations(currentTask, editingSegments);
+      const savedWithRelations = await removeUnreferencedMentionRelations(
+        savedWithAddedRelations,
+        removedMentionIds,
+      );
       setCurrentTask(savedWithRelations);
       endCommentEdit();
     } catch (error) {
@@ -895,12 +955,20 @@ export function TaskDetail({
 
   async function confirmDelete() {
     if (!pendingDelete || deleting) return;
+    const removedMentionIds = mentionTaskIds(
+      createInlineMediaSegments(pendingDelete.body, referenceTasks),
+    );
     setDeleting(true);
     setCommentsError(null);
     try {
       await deleteComment(pendingDelete);
       setComments((current) => current.filter((comment) => comment.id !== pendingDelete.id));
       setPendingDelete(null);
+      const savedWithRelations = await removeUnreferencedMentionRelations(
+        currentTask,
+        removedMentionIds,
+      );
+      setCurrentTask(savedWithRelations);
     } catch (error) {
       setCommentsError(messageFor(error));
     } finally {
