@@ -1081,6 +1081,8 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
   }, ref) {
     const { text } = useTaskboardI18n();
     const rootRef = useRef<HTMLDivElement>(null);
+    const latestSegments = useRef(segments);
+    latestSegments.current = segments;
     const atomHosts = useRef(new Map<string, HTMLElement>());
     const nativeSegments = useRef(new Map<string, InlineMediaSegment>());
     const pendingSelection = useRef<number | null>(null);
@@ -1538,14 +1540,25 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       applyRangeReplacement(start, start + segmentLength(segments[index]), [], false);
     }
 
+    function completionRangeFromCaret(caretRange: Range, triggerLength: number): Range | null {
+      const root = rootRef.current;
+      if (!root || !caretRange.collapsed || !root.contains(caretRange.startContainer)) return null;
+      const textNode = caretRange.startContainer;
+      if (!(textNode instanceof Text) || caretRange.startOffset < triggerLength) return null;
+      const range = document.createRange();
+      const triggerOffset = caretRange.startOffset - triggerLength;
+      range.setStart(textNode, triggerOffset);
+      range.setEnd(textNode, triggerOffset + 1);
+      return range;
+    }
+
     function completionAnchorRect(query: ComposerQuery): DOMRect {
-      const element = elementForSegment(query.segmentId);
-      const textNode = element?.firstChild;
-      if (!element || !(textNode instanceof Text)) return query.anchorRect;
-      const anchorRange = document.createRange();
-      anchorRange.setStart(textNode, Math.min(query.start, textNode.length));
-      anchorRange.setEnd(textNode, Math.min(query.start + 1, textNode.length));
-      return anchorRange.getBoundingClientRect();
+      const root = rootRef.current;
+      const selection = window.getSelection();
+      if (!root || !selection || selection.rangeCount === 0) return query.anchorRect;
+      const caretRange = selection.getRangeAt(0);
+      return completionRangeFromCaret(caretRange, query.end - query.start)
+        ?.getBoundingClientRect() ?? query.anchorRect;
     }
 
     function updateCompletionFromSelection() {
@@ -1613,13 +1626,10 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         return;
       }
       const start = prefix.lastIndexOf(trigger);
-      const anchorRange = document.createRange();
-      const element = elementForSegment(segment.id);
-      const textNode = element?.firstChild;
-      if (textNode instanceof Text) {
-        anchorRange.setStart(textNode, Math.min(start, textNode.length));
-        anchorRange.setEnd(textNode, Math.min(start + 1, textNode.length));
-      } else {
+      const triggerLength = end - start;
+      let anchorRange = completionRangeFromCaret(range, triggerLength);
+      if (!anchorRange) {
+        anchorRange = range.cloneRange();
         anchorRange.setStart(range.startContainer, range.startOffset);
         anchorRange.collapse(true);
       }
@@ -1836,8 +1846,15 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           copiedSegments,
           ownerDocument,
         );
-        await navigator.clipboard.write([new ClipboardItem({
+        const imageOnly = copiedSegments.every((segment) => (
+          segment.type === "pending-image"
+          || (segment.type === "text" && segment.text.length === 0)
+        ));
+        await navigator.clipboard.write([new ClipboardItem(imageOnly ? {
           "image/png": image.file,
+          "text/html": new Blob([payload.html], { type: "text/html" }),
+          "text/plain": new Blob([payload.plainText], { type: "text/plain" }),
+        } : {
           "text/html": new Blob([payload.html], { type: "text/html" }),
           "text/plain": new Blob([payload.plainText], { type: "text/plain" }),
         })]);
@@ -2062,7 +2079,33 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           onCut={(event) => {
             void copyContent(event).then((copied) => {
               if (!copied) return;
-              applyRangeReplacement(copied.range.start, copied.range.end, [], false);
+              const currentSegments = latestSegments.current;
+              const currentCut = inlineMediaRangeSegments(
+                currentSegments,
+                copied.range.start,
+                copied.range.end,
+              );
+              const unchanged = currentCut.length === copied.segments.length
+                && currentCut.every((segment, index) => {
+                  const snapshot = copied.segments[index];
+                  return segment.id === snapshot.id
+                    && segment.type === snapshot.type
+                    && (
+                      segment.type !== "text"
+                      || (snapshot.type === "text" && segment.text === snapshot.text)
+                    );
+                });
+              if (!unchanged) return;
+              const replacement = replaceInlineMediaRange(
+                currentSegments,
+                copied.range.start,
+                copied.range.end,
+                [],
+              );
+              pendingSelection.current = replacement.caret;
+              pendingMentionUpdate.current = false;
+              setCompletionQuery(null);
+              onChange(replacement.segments);
             });
           }}
           onKeyUp={(event) => {

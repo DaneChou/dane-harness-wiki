@@ -2177,8 +2177,54 @@ async function removeRelation(env, taskId, type, relatedTaskId, input, actor) {
     ? `thread_id = ?, thread_codex_project_id = ?, thread_codex_project_kind = ?,
       thread_codex_host_id = ?, thread_workspace_path = ?,`
     : "";
-  const results = await env.DB.batch([
-    env.DB.prepare(`
+  const mentionRemoval = input.origin === "mention"
+    && endpoints.relationType === "related";
+  const taskReference = `](?${new URLSearchParams({
+    project: task.project_id,
+    issue: relatedTask.identifier,
+  })})`;
+  const relatedTaskReference = `](?${new URLSearchParams({
+    project: task.project_id,
+    issue: task.identifier,
+  })})`;
+  const deleteStatement = mentionRemoval
+    ? env.DB.prepare(`
+      DELETE FROM task_relations
+      WHERE relation_type = ?
+        AND source_task_id = ?
+        AND target_task_id = ?
+        AND origin = 'mention'
+        AND EXISTS (
+          SELECT 1 FROM tasks WHERE id = ? AND version = ?
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM tasks
+          WHERE (id = ? AND instr(description, ?) > 0)
+            OR (id = ? AND instr(description, ?) > 0)
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM comments
+          WHERE (task_id = ? AND instr(body, ?) > 0)
+            OR (task_id = ? AND instr(body, ?) > 0)
+        )
+    `).bind(
+      endpoints.relationType,
+      endpoints.sourceTaskId,
+      endpoints.targetTaskId,
+      task.id,
+      input.version,
+      task.id,
+      taskReference,
+      relatedTask.id,
+      relatedTaskReference,
+      task.id,
+      taskReference,
+      relatedTask.id,
+      relatedTaskReference,
+    )
+    : env.DB.prepare(`
       DELETE FROM task_relations
       WHERE relation_type = ?
         AND source_task_id = ?
@@ -2192,14 +2238,16 @@ async function removeRelation(env, taskId, type, relatedTaskId, input, actor) {
       endpoints.targetTaskId,
       task.id,
       input.version,
-    ),
+    );
+  const results = await env.DB.batch([
+    deleteStatement,
     env.DB.prepare(`
       UPDATE tasks
       SET
         ${threadAssignment}
         version = version + 1,
         updated_at = ?
-      WHERE id = ? AND version = ?
+      WHERE id = ? AND version = ?${mentionRemoval ? " AND changes() = 1" : ""}
     `).bind(...(storedBinding ?? []), timestamp, task.id, input.version),
     taskActivityStatement(
       env,
@@ -2216,6 +2264,12 @@ async function removeRelation(env, taskId, type, relatedTaskId, input, actor) {
   ]);
   if (!changed(results[1])) {
     const latest = await requireTaskRow(env, task.id);
+    if (mentionRemoval && latest.version === input.version) {
+      return {
+        task: await getTask(env, task.id),
+        relatedTask: await getTask(env, relatedTask.id),
+      };
+    }
     throw new ApiError(
       409,
       "VERSION_CONFLICT",
