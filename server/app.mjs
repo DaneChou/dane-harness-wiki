@@ -2423,6 +2423,44 @@ export function createTaskboardServer(options = {}) {
         return sendJson(response, 200, { project });
       }
 
+      const projectReadmeAttachmentsRoute = pathname.match(
+        /^\/api\/projects\/([^/]+)\/readme\/attachments$/,
+      );
+      if (projectReadmeAttachmentsRoute) {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Project README attachment routes do not accept query parameters");
+        }
+        let projectId;
+        try {
+          projectId = decodeURIComponent(projectReadmeAttachmentsRoute[1]);
+        } catch {
+          throw new ApiError(400, "INVALID_PATH", "Project id contains invalid encoding");
+        }
+        validateProjectId(projectId);
+        if (request.method !== "POST") return methodNotAllowed(response, ["POST"]);
+        const metadata = parseAttachmentHeaders(request);
+        if (metadata.kind !== "inline") {
+          throw new ApiError(400, "INVALID_ATTACHMENT_KIND", "Project README attachments must be inline");
+        }
+        const body = await readBody(request, ATTACHMENT_BODY_LIMIT, "Attachment cannot exceed 25 MiB");
+        const id = randomUUID();
+        await mkdir(resolved.attachmentsDirectory, { recursive: true });
+        const storagePath = path.join(resolved.attachmentsDirectory, id);
+        await writeFile(storagePath, body, { flag: "wx" });
+        let attachment;
+        try {
+          attachment = database.createProjectReadmeAttachment(projectId, {
+            id,
+            ...metadata,
+            size: body.length,
+          });
+        } catch (error) {
+          await unlink(storagePath);
+          throw error;
+        }
+        return sendJson(response, 201, { attachment });
+      }
+
       const projectReadmeRoute = pathname.match(/^\/api\/projects\/([^/]+)\/readme$/);
       if (projectReadmeRoute) {
         if ([...url.searchParams.keys()].length > 0) {
@@ -2798,7 +2836,7 @@ export function createTaskboardServer(options = {}) {
         if (request.method !== "GET" && request.method !== "HEAD") {
           return methodNotAllowed(response, ["GET", "HEAD"]);
         }
-        const attachment = database.getAttachment(id);
+        const attachment = database.getAttachment(id) ?? database.getProjectReadmeAttachment(id);
         if (!attachment) throw new ApiError(404, "ATTACHMENT_NOT_FOUND", `Attachment '${id}' does not exist`);
         const body = await readFile(path.join(resolved.attachmentsDirectory, attachment.id));
         const encodedFilename = encodeURIComponent(attachment.filename).replace(/['()*]/g, (character) => (

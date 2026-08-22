@@ -3761,8 +3761,10 @@ export function App() {
           <ProjectReadmeView
             key={selectedProjectId}
             project={selectedProject}
-            currentUser={currentUser}
+            tasks={tasks.filter((task) => task.projectId === selectedProject.id)}
+            referenceTasks={referenceTasks.filter((task) => task.projectId === selectedProject.id)}
             revision={readmeRevision}
+            onOpenTask={openTaskDetail}
             onError={setActionError}
           />
         ) : boardView === "dashboard" && selectedProject ? (

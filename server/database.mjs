@@ -343,6 +343,18 @@ function projectReadmeFromRow(row, projectId) {
   };
 }
 
+function projectReadmeAttachmentFromRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    kind: "inline",
+    filename: row.filename,
+    contentType: row.content_type,
+    size: row.size,
+    createdAt: row.created_at,
+  };
+}
+
 function aiChatRunFromRow(row) {
   return {
     id: row.id,
@@ -524,6 +536,15 @@ export class TaskboardDatabase {
         version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS project_readme_attachments (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        filename TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        size INTEGER NOT NULL CHECK (size >= 0),
+        created_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS project_summaries (
@@ -1418,6 +1439,32 @@ export class TaskboardDatabase {
       throw error;
     }
     return this.getProjectReadme(projectId);
+  }
+
+  createProjectReadmeAttachment(projectId, input) {
+    if (!this.database.prepare("SELECT 1 FROM projects WHERE id = ?").get(projectId)) {
+      throw new ApiError(404, "PROJECT_NOT_FOUND", `Project '${projectId}' does not exist`);
+    }
+    this.database.prepare(`
+      INSERT INTO project_readme_attachments (
+        id, project_id, filename, content_type, size, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      input.id,
+      projectId,
+      input.filename,
+      input.contentType,
+      input.size,
+      now(),
+    );
+    return this.getProjectReadmeAttachment(input.id);
+  }
+
+  getProjectReadmeAttachment(id) {
+    const row = this.database.prepare(`
+      SELECT * FROM project_readme_attachments WHERE id = ?
+    `).get(id);
+    return row ? projectReadmeAttachmentFromRow(row) : null;
   }
 
   listAiChatThreads() {

@@ -798,6 +798,18 @@ function attachmentFromRow(row) {
   };
 }
 
+function projectReadmeAttachmentFromRow(row) {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    kind: "inline",
+    filename: row.filename,
+    contentType: row.content_type,
+    size: row.size,
+    createdAt: row.created_at,
+  };
+}
+
 async function all(statement) {
   return (await statement.all()).results;
 }
@@ -2553,17 +2565,63 @@ async function uploadAttachment(env, ownerType, ownerId, request) {
   return attachmentFromRow(row);
 }
 
+async function uploadProjectReadmeAttachment(env, projectId, request) {
+  await requireProject(env, projectId);
+  const metadata = parseAttachmentHeaders(request);
+  if (metadata.kind !== "inline") {
+    throw new ApiError(
+      400,
+      "INVALID_ATTACHMENT_KIND",
+      "Project README attachments must be inline",
+    );
+  }
+  const body = await readAttachment(request);
+  const id = uuid();
+  await env.ATTACHMENTS.put(id, body, {
+    httpMetadata: { contentType: metadata.contentType },
+  });
+  try {
+    await env.DB.prepare(`
+      INSERT INTO project_readme_attachments (
+        id, project_id, filename, content_type, size, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).bind(
+      id,
+      projectId,
+      metadata.filename,
+      metadata.contentType,
+      body.byteLength,
+      now(),
+    ).run();
+  } catch (error) {
+    await env.ATTACHMENTS.delete(id);
+    throw error;
+  }
+  const row = await env.DB.prepare(
+    "SELECT * FROM project_readme_attachments WHERE id = ?",
+  ).bind(id).first();
+  return projectReadmeAttachmentFromRow(row);
+}
+
 async function requireAttachment(env, id) {
   const row = await env.DB.prepare("SELECT * FROM attachments WHERE id = ?").bind(id).first();
-  if (!row) {
-    throw new ApiError(404, "ATTACHMENT_NOT_FOUND", `Attachment '${id}' does not exist`);
-  }
-  return attachmentFromRow(row);
+  if (row) return attachmentFromRow(row);
+  const projectReadmeRow = await env.DB.prepare(
+    "SELECT * FROM project_readme_attachments WHERE id = ?",
+  ).bind(id).first();
+  if (projectReadmeRow) return projectReadmeAttachmentFromRow(projectReadmeRow);
+  throw new ApiError(404, "ATTACHMENT_NOT_FOUND", `Attachment '${id}' does not exist`);
 }
 
 async function deleteAttachment(env, id) {
   const attachment = await requireAttachment(env, id);
-  await env.DB.prepare("DELETE FROM attachments WHERE id = ?").bind(attachment.id).run();
+  if (attachment.projectId) {
+    await env.DB.prepare(
+      "DELETE FROM project_readme_attachments WHERE id = ?",
+    ).bind(attachment.id).run();
+  } else {
+    await env.DB.prepare("DELETE FROM attachments WHERE id = ?").bind(attachment.id).run();
+  }
   await env.ATTACHMENTS.delete(attachment.id);
   return attachment;
 }
@@ -2732,6 +2790,20 @@ async function routeApi(request, env, actor, url) {
       ? await addProjectLabel(env, projectId, label)
       : await deleteProjectLabel(env, projectId, label);
     return json(200, { project });
+  }
+
+  const projectReadmeAttachmentsMatch = pathname.match(
+    /^\/api\/projects\/([^/]+)\/readme\/attachments$/,
+  );
+  if (projectReadmeAttachmentsMatch) {
+    requireNoQuery(url, "Project README attachment routes");
+    const projectId = validateProjectId(
+      decodePathPart(projectReadmeAttachmentsMatch[1], "Project id"),
+    );
+    if (request.method !== "POST") methodNotAllowed(["POST"]);
+    return json(201, {
+      attachment: await uploadProjectReadmeAttachment(env, projectId, request),
+    });
   }
 
   const projectReadmeMatch = pathname.match(
