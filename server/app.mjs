@@ -1445,7 +1445,7 @@ async function resolveProjectWorkspace(project, codexProjectId, codexThreadId, c
   }
 }
 
-function parseWorktrees(output) {
+async function parseWorktrees(output) {
   const contexts = [];
   for (const block of output.trim().split(/\n\s*\n/)) {
     if (!block) continue;
@@ -1457,7 +1457,14 @@ function parseWorktrees(output) {
       if (line.startsWith("branch refs/heads/")) branch = line.slice(18);
       if (line.startsWith("prunable")) prunable = true;
     }
-    if (worktreePath && !prunable) contexts.push({ type: "worktree", path: worktreePath, branch });
+    if (!worktreePath || prunable) continue;
+    try {
+      await stat(worktreePath);
+    } catch (error) {
+      if (error?.code === "ENOENT") continue;
+      throw error;
+    }
+    contexts.push({ type: "worktree", path: worktreePath, branch });
   }
   return contexts;
 }
@@ -1489,7 +1496,7 @@ async function scanDevelopmentContexts(workspacePath, processEnv = process.env) 
       workspacePath: root,
       contexts: [
         ...branches.map((branch) => ({ type: "branch", branch })),
-        ...parseWorktrees(worktreesResult.stdout),
+        ...(await parseWorktrees(worktreesResult.stdout)),
       ],
     };
   } catch {
