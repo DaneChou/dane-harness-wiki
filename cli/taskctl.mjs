@@ -167,9 +167,10 @@ Actions:
     [--recurrence-interval N --recurrence-unit day|week|month|year]
     [--if-version N] [--json]
   move ISSUE_ID --status STATUS [--thread-id ID]
-    [--binding-thread-id ID --binding-codex-project-id ID]
-    [--binding-codex-project-kind local|remote --binding-codex-host-id ID]
-    [--binding-workspace-path PATH | --clear-binding-thread]
+    [--binding-thread-id ID
+      [--binding-codex-project-id ID --binding-codex-project-kind local|remote
+       --binding-codex-host-id ID --binding-workspace-path PATH]
+     | --clear-binding-thread]
     [--if-version N] [--json]
   archive ISSUE_ID [--thread-id ID] [--if-version N] [--json]
   restore ISSUE_ID [--thread-id ID] [--if-version N] [--json]

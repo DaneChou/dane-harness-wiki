@@ -279,7 +279,7 @@ function taskRelationSummaryFromRow(row) {
 }
 
 function commentFromRow(row) {
-  return {
+  const comment = {
     id: row.id,
     taskId: row.task_id,
     body: row.body,
@@ -295,10 +295,12 @@ function commentFromRow(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+  Object.defineProperty(comment, "changeRevision", { value: row.change_revision });
+  return comment;
 }
 
 function attachmentFromRow(row) {
-  return {
+  const attachment = {
     id: row.id,
     taskId: row.task_id,
     commentId: row.comment_id,
@@ -308,6 +310,8 @@ function attachmentFromRow(row) {
     size: row.size,
     createdAt: row.created_at,
   };
+  Object.defineProperty(attachment, "changeRevision", { value: row.change_revision });
+  return attachment;
 }
 
 function projectFromRow(row) {
@@ -496,14 +500,12 @@ export class TaskboardDatabase {
         author_avatar_url TEXT,
         version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        change_revision INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE INDEX IF NOT EXISTS comments_task_created
         ON comments(task_id, created_at, id);
-
-      CREATE INDEX IF NOT EXISTS comments_task_updated
-        ON comments(task_id, updated_at, id);
 
       CREATE TABLE IF NOT EXISTS task_activities (
         id TEXT PRIMARY KEY,
@@ -527,11 +529,17 @@ export class TaskboardDatabase {
         filename TEXT NOT NULL,
         content_type TEXT NOT NULL,
         size INTEGER NOT NULL CHECK (size >= 0),
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        change_revision INTEGER NOT NULL DEFAULT 0
       );
 
       CREATE INDEX IF NOT EXISTS attachments_task_created
         ON attachments(task_id, created_at, id);
+
+      CREATE TABLE IF NOT EXISTS comment_attachment_revision (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        value INTEGER NOT NULL CHECK (value >= 0)
+      );
 
       CREATE TABLE IF NOT EXISTS project_readmes (
         project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
@@ -817,6 +825,9 @@ export class TaskboardDatabase {
     if (!commentColumns.some((column) => column.name === "author_avatar_url")) {
       this.database.exec("ALTER TABLE comments ADD COLUMN author_avatar_url TEXT");
     }
+    if (!commentColumns.some((column) => column.name === "change_revision")) {
+      this.database.exec("ALTER TABLE comments ADD COLUMN change_revision INTEGER NOT NULL DEFAULT 0");
+    }
     this.database.exec(`
       UPDATE comments
       SET author_type = 'agent', author_id = 'codex-agent', author_name = 'Codex Agent'
@@ -882,7 +893,26 @@ export class TaskboardDatabase {
           )
       `);
     }
+    if (!attachmentColumns.some((column) => column.name === "change_revision")) {
+      this.database.exec("ALTER TABLE attachments ADD COLUMN change_revision INTEGER NOT NULL DEFAULT 0");
+    }
+    this.database.exec("CREATE INDEX IF NOT EXISTS comments_task_change_revision ON comments(task_id, change_revision)");
     this.database.exec("CREATE INDEX IF NOT EXISTS attachments_comment_created ON attachments(comment_id, created_at, id)");
+    this.database.exec("CREATE INDEX IF NOT EXISTS attachments_task_change_revision ON attachments(task_id, change_revision) WHERE comment_id IS NULL");
+    this.database.exec("CREATE INDEX IF NOT EXISTS attachments_comment_change_revision ON attachments(comment_id, change_revision) WHERE comment_id IS NOT NULL");
+    const maxChangeRevision = this.database.prepare(`
+      SELECT MAX(change_revision) AS value
+      FROM (
+        SELECT change_revision FROM comments
+        UNION ALL
+        SELECT change_revision FROM attachments
+      )
+    `).get().value ?? 0;
+    this.database.prepare(`
+      INSERT INTO comment_attachment_revision (id, value)
+      VALUES (1, ?)
+      ON CONFLICT(id) DO UPDATE SET value = MAX(value, excluded.value)
+    `).run(maxChangeRevision);
 
     const timestamp = now();
     this.database.prepare(`
@@ -2368,35 +2398,44 @@ export class TaskboardDatabase {
     return this.database.prepare(`
       SELECT * FROM comments
       WHERE task_id = ?
-        AND (updated_at > ? OR (updated_at = ? AND id > ?))
-      ORDER BY updated_at, id
-    `).all(task.id, after.timestamp, after.timestamp, after.id)
+        AND change_revision > ?
+      ORDER BY change_revision
+    `).all(task.id, after.revision)
       .map((row) => this.#commentWithAttachments(row));
   }
 
   createComment(taskId, input) {
-    const task = this.#requireTask(taskId);
     const id = randomUUID();
     const timestamp = now();
-    this.database.prepare(`
-      INSERT INTO comments (
-        id, task_id, body, thread_id, thread_codex_project_id, thread_codex_project_kind,
-        thread_codex_host_id, thread_workspace_path,
-        author_type, author_id, author_name, author_avatar_url,
-        version, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
-    `).run(
-      id,
-      task.id,
-      input.body,
-      ...(storedThreadBinding(input.threadBinding, input.threadId) ?? [null, null, null, null, null]),
-      input.actor.type,
-      input.actor.id,
-      input.actor.name,
-      input.actor.avatarUrl,
-      timestamp,
-      timestamp,
-    );
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const task = this.#requireTask(taskId);
+      const changeRevision = this.#nextCommentAttachmentRevision();
+      this.database.prepare(`
+        INSERT INTO comments (
+          id, task_id, body, thread_id, thread_codex_project_id, thread_codex_project_kind,
+          thread_codex_host_id, thread_workspace_path,
+          author_type, author_id, author_name, author_avatar_url,
+          version, created_at, updated_at, change_revision
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+      `).run(
+        id,
+        task.id,
+        input.body,
+        ...(storedThreadBinding(input.threadBinding, input.threadId) ?? [null, null, null, null, null]),
+        input.actor.type,
+        input.actor.id,
+        input.actor.name,
+        input.actor.avatarUrl,
+        timestamp,
+        timestamp,
+        changeRevision,
+      );
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
     return this.getComment(id);
   }
 
@@ -2406,20 +2445,29 @@ export class TaskboardDatabase {
   }
 
   updateComment(id, version, body, threadId, threadBinding) {
-    const current = this.#requireComment(id);
-    this.#requireCommentVersion(current, version);
     const storedBinding = storedThreadBinding(threadBinding, threadId);
     const threadAssignment = storedBinding
       ? `thread_id = ?, thread_codex_project_id = ?, thread_codex_project_kind = ?,
         thread_codex_host_id = ?, thread_workspace_path = ?,`
       : "";
-    const result = this.database.prepare(`
-      UPDATE comments
-      SET body = ?, ${threadAssignment} version = version + 1, updated_at = ?
-      WHERE id = ? AND version = ?
-    `).run(body, ...(storedBinding ?? []), now(), id, version);
-    if (result.changes !== 1) {
-      this.#throwMissingCommentOrConflict(id, version);
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const current = this.#requireComment(id);
+      this.#requireCommentVersion(current, version);
+      const changeRevision = this.#nextCommentAttachmentRevision();
+      const result = this.database.prepare(`
+        UPDATE comments
+        SET body = ?, ${threadAssignment} version = version + 1, updated_at = ?,
+          change_revision = ?
+        WHERE id = ? AND version = ?
+      `).run(body, ...(storedBinding ?? []), now(), changeRevision, id, version);
+      if (result.changes !== 1) {
+        this.#throwMissingCommentOrConflict(id, version);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
     }
     return this.getComment(id);
   }
@@ -2442,9 +2490,9 @@ export class TaskboardDatabase {
       return this.database.prepare(`
         SELECT * FROM attachments
         WHERE task_id = ? AND comment_id IS NULL
-          AND (created_at > ? OR (created_at = ? AND id > ?))
-        ORDER BY created_at, id
-      `).all(task.id, after.timestamp, after.timestamp, after.id).map(attachmentFromRow);
+          AND change_revision > ?
+        ORDER BY change_revision
+      `).all(task.id, after.revision).map(attachmentFromRow);
     }
     return this.database.prepare(`
       SELECT * FROM attachments
@@ -2454,11 +2502,29 @@ export class TaskboardDatabase {
   }
 
   createAttachment(taskId, input) {
-    const task = this.#requireTask(taskId);
-    this.database.prepare(`
-      INSERT INTO attachments (id, task_id, comment_id, kind, filename, content_type, size, created_at)
-      VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
-    `).run(input.id, task.id, input.kind, input.filename, input.contentType, input.size, now());
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const task = this.#requireTask(taskId);
+      const changeRevision = this.#nextCommentAttachmentRevision();
+      this.database.prepare(`
+        INSERT INTO attachments (
+          id, task_id, comment_id, kind, filename, content_type, size, created_at, change_revision
+        ) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.id,
+        task.id,
+        input.kind,
+        input.filename,
+        input.contentType,
+        input.size,
+        now(),
+        changeRevision,
+      );
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
     return this.getAttachment(input.id);
   }
 
@@ -2471,11 +2537,30 @@ export class TaskboardDatabase {
   }
 
   createCommentAttachment(commentId, input) {
-    const comment = this.#requireComment(commentId);
-    this.database.prepare(`
-      INSERT INTO attachments (id, task_id, comment_id, kind, filename, content_type, size, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(input.id, comment.taskId, comment.id, input.kind, input.filename, input.contentType, input.size, now());
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      const comment = this.#requireComment(commentId);
+      const changeRevision = this.#nextCommentAttachmentRevision();
+      this.database.prepare(`
+        INSERT INTO attachments (
+          id, task_id, comment_id, kind, filename, content_type, size, created_at, change_revision
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.id,
+        comment.taskId,
+        comment.id,
+        input.kind,
+        input.filename,
+        input.contentType,
+        input.size,
+        now(),
+        changeRevision,
+      );
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
     return this.getAttachment(input.id);
   }
 
@@ -2590,15 +2675,24 @@ export class TaskboardDatabase {
       return this.database.prepare(`
         SELECT * FROM attachments
         WHERE comment_id = ?
-          AND (created_at > ? OR (created_at = ? AND id > ?))
-        ORDER BY created_at, id
-      `).all(commentId, after.timestamp, after.timestamp, after.id).map(attachmentFromRow);
+          AND change_revision > ?
+        ORDER BY change_revision
+      `).all(commentId, after.revision).map(attachmentFromRow);
     }
     return this.database.prepare(`
       SELECT * FROM attachments
       WHERE comment_id = ?
       ORDER BY created_at, id
     `).all(commentId).map(attachmentFromRow);
+  }
+
+  #nextCommentAttachmentRevision() {
+    return this.database.prepare(`
+      UPDATE comment_attachment_revision
+      SET value = value + 1
+      WHERE id = 1
+      RETURNING value
+    `).get().value;
   }
 
   #taskWithRelations(row) {

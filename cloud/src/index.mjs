@@ -1248,31 +1248,21 @@ function parseAfterCursor(searchParams) {
   if (values.length !== 1) {
     throw new ApiError(400, "INVALID_CURSOR", "'after' must be provided once");
   }
-  const [timestamp, id, extra] = values[0].split("@");
-  const parsedTimestamp = Date.parse(timestamp);
-  if (
-    extra !== undefined
-    || !id
-    || !Number.isFinite(parsedTimestamp)
-    || new Date(parsedTimestamp).toISOString() !== timestamp
-  ) {
-    throw new ApiError(400, "INVALID_CURSOR", "'after' must use timestamp@id");
+  const value = values[0];
+  const revision = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(revision)) {
+    throw new ApiError(400, "INVALID_CURSOR", "'after' must be a non-negative decimal integer");
   }
-  return { value: values[0], timestamp, id };
+  return { value, revision };
 }
 
-function nextCursor(rows, timestampColumn, after) {
-  if (rows.length === 0) return after?.value ?? null;
-  let latest = rows[0];
+function nextCursor(rows, after) {
+  if (rows.length === 0) return after?.value ?? "0";
+  let revision = rows[0].change_revision;
   for (const row of rows.slice(1)) {
-    if (
-      row[timestampColumn] > latest[timestampColumn]
-      || (row[timestampColumn] === latest[timestampColumn] && row.id > latest.id)
-    ) {
-      latest = row;
-    }
+    if (row.change_revision > revision) revision = row.change_revision;
   }
-  return `${latest[timestampColumn]}@${latest.id}`;
+  return String(revision);
 }
 
 async function listProjects(env) {
@@ -2447,7 +2437,7 @@ async function listComments(env, taskId) {
   `).bind(task.id));
   return {
     comments: await Promise.all(rows.map((row) => hydrateComment(env, row))),
-    nextCursor: nextCursor(rows, "updated_at", null),
+    nextCursor: nextCursor(rows, null),
   };
 }
 
@@ -2456,12 +2446,12 @@ async function listCommentsAfter(env, taskId, after) {
   const rows = await all(env.DB.prepare(`
     SELECT * FROM comments
     WHERE task_id = ?
-      AND (updated_at > ? OR (updated_at = ? AND id > ?))
-    ORDER BY updated_at, id
-  `).bind(task.id, after.timestamp, after.timestamp, after.id));
+      AND change_revision > ?
+    ORDER BY change_revision
+  `).bind(task.id, after.revision));
   return {
     comments: await Promise.all(rows.map((row) => hydrateComment(env, row))),
-    nextCursor: nextCursor(rows, "updated_at", after),
+    nextCursor: nextCursor(rows, after),
   };
 }
 
@@ -2473,8 +2463,9 @@ async function createComment(env, taskId, input, actor) {
     INSERT INTO comments (
       id, task_id, body, thread_id, thread_codex_project_id, thread_codex_project_kind,
       thread_codex_host_id, thread_workspace_path, author_type, author_id, author_name,
-      author_avatar_url, version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      author_avatar_url, version, created_at, updated_at, change_revision
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?,
+      (SELECT revision + 1 FROM global_revision WHERE singleton = 1))
   `).bind(
     id,
     task.id,
@@ -2524,7 +2515,8 @@ async function updateComment(env, id, input) {
       body = ?,
       ${threadAssignment}
       version = version + 1,
-      updated_at = ?
+      updated_at = ?,
+      change_revision = (SELECT revision + 1 FROM global_revision WHERE singleton = 1)
     WHERE id = ? AND version = ?
   `).bind(
     input.body,
@@ -2571,9 +2563,9 @@ async function listTaskAttachments(env, taskId, after) {
     ? await all(env.DB.prepare(`
       SELECT * FROM attachments
       WHERE task_id = ? AND comment_id IS NULL
-        AND (created_at > ? OR (created_at = ? AND id > ?))
-      ORDER BY created_at, id
-    `).bind(task.id, after.timestamp, after.timestamp, after.id))
+        AND change_revision > ?
+      ORDER BY change_revision
+    `).bind(task.id, after.revision))
     : await all(env.DB.prepare(`
       SELECT * FROM attachments
       WHERE task_id = ? AND comment_id IS NULL
@@ -2581,7 +2573,7 @@ async function listTaskAttachments(env, taskId, after) {
     `).bind(task.id));
   return {
     attachments: rows.map(attachmentFromRow),
-    nextCursor: nextCursor(rows, "created_at", after),
+    nextCursor: nextCursor(rows, after),
   };
 }
 
@@ -2591,9 +2583,9 @@ async function listCommentAttachments(env, commentId, after) {
     ? await all(env.DB.prepare(`
       SELECT * FROM attachments
       WHERE comment_id = ?
-        AND (created_at > ? OR (created_at = ? AND id > ?))
-      ORDER BY created_at, id
-    `).bind(commentId, after.timestamp, after.timestamp, after.id))
+        AND change_revision > ?
+      ORDER BY change_revision
+    `).bind(commentId, after.revision))
     : await all(env.DB.prepare(`
       SELECT * FROM attachments
       WHERE comment_id = ?
@@ -2601,7 +2593,7 @@ async function listCommentAttachments(env, commentId, after) {
     `).bind(commentId));
   return {
     attachments: rows.map(attachmentFromRow),
-    nextCursor: nextCursor(rows, "created_at", after),
+    nextCursor: nextCursor(rows, after),
   };
 }
 
@@ -2624,8 +2616,9 @@ async function uploadAttachment(env, ownerType, ownerId, request) {
   try {
     await env.DB.prepare(`
       INSERT INTO attachments (
-        id, task_id, comment_id, kind, filename, content_type, size, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, task_id, comment_id, kind, filename, content_type, size, created_at, change_revision
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+        (SELECT revision + 1 FROM global_revision WHERE singleton = 1))
     `).bind(
       id,
       taskId,

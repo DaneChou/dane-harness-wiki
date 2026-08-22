@@ -229,31 +229,19 @@ function parseAfterCursor(searchParams, routeLabel) {
   assertAllowedQuery(searchParams, new Set(["after"]), routeLabel);
   const value = searchParams.get("after");
   if (value === null) return null;
-  const separator = value.lastIndexOf("@");
-  const timestamp = value.slice(0, separator);
-  const id = value.slice(separator + 1);
-  const milliseconds = Date.parse(timestamp);
-  if (
-    separator <= 0
-    || !id
-    || !Number.isFinite(milliseconds)
-    || new Date(milliseconds).toISOString() !== timestamp
-  ) {
-    throw new ApiError(400, "INVALID_CURSOR", "Cursor must use timestamp@id");
+  const revision = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(revision)) {
+    throw new ApiError(400, "INVALID_CURSOR", "Cursor must be a non-negative integer revision");
   }
-  return { value, timestamp, id };
+  return { value, revision };
 }
 
-function nextCursor(items, field, after) {
-  const latest = items.reduce((current, item) => {
-    if (
-      current === null
-      || item[field] > current[field]
-      || (item[field] === current[field] && item.id > current.id)
-    ) return item;
-    return current;
-  }, null);
-  return latest ? `${latest[field]}@${latest.id}` : after?.value ?? null;
+function nextCursor(items, after) {
+  if (items.length === 0) return after?.value ?? "0";
+  return String(items.reduce(
+    (revision, item) => Math.max(revision, item.changeRevision),
+    0,
+  ));
 }
 
 function decodeRouteSegment(value, name) {
@@ -2716,7 +2704,7 @@ export function createTaskboardServer(options = {}) {
             : database.listComments(taskId);
           return sendJson(response, 200, {
             comments,
-            nextCursor: nextCursor(comments, "updatedAt", after),
+            nextCursor: nextCursor(comments, after),
           });
         }
         if ([...url.searchParams.keys()].length > 0) {
@@ -2794,7 +2782,7 @@ export function createTaskboardServer(options = {}) {
           const attachments = database.listCommentAttachments(commentId, after);
           return sendJson(response, 200, {
             attachments,
-            nextCursor: nextCursor(attachments, "createdAt", after),
+            nextCursor: nextCursor(attachments, after),
           });
         }
         if ([...url.searchParams.keys()].length > 0) {
@@ -2839,7 +2827,7 @@ export function createTaskboardServer(options = {}) {
           const attachments = database.listAttachments(taskId, after);
           return sendJson(response, 200, {
             attachments,
-            nextCursor: nextCursor(attachments, "createdAt", after),
+            nextCursor: nextCursor(attachments, after),
           });
         }
         if ([...url.searchParams.keys()].length > 0) {
