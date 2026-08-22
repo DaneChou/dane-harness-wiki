@@ -1237,6 +1237,44 @@ function parseTaskFilters(searchParams) {
   return { projectId, status, archived };
 }
 
+function parseAfterCursor(searchParams) {
+  for (const key of searchParams.keys()) {
+    if (key !== "after") {
+      throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", `Unknown query parameter: ${key}`);
+    }
+  }
+  const values = searchParams.getAll("after");
+  if (values.length === 0) return null;
+  if (values.length !== 1) {
+    throw new ApiError(400, "INVALID_CURSOR", "'after' must be provided once");
+  }
+  const [timestamp, id, extra] = values[0].split("@");
+  const parsedTimestamp = Date.parse(timestamp);
+  if (
+    extra !== undefined
+    || !id
+    || !Number.isFinite(parsedTimestamp)
+    || new Date(parsedTimestamp).toISOString() !== timestamp
+  ) {
+    throw new ApiError(400, "INVALID_CURSOR", "'after' must use timestamp@id");
+  }
+  return { value: values[0], timestamp, id };
+}
+
+function nextCursor(rows, timestampColumn, after) {
+  if (rows.length === 0) return after?.value ?? null;
+  let latest = rows[0];
+  for (const row of rows.slice(1)) {
+    if (
+      row[timestampColumn] > latest[timestampColumn]
+      || (row[timestampColumn] === latest[timestampColumn] && row.id > latest.id)
+    ) {
+      latest = row;
+    }
+  }
+  return `${latest[timestampColumn]}@${latest.id}`;
+}
+
 async function listProjects(env) {
   const rows = await all(env.DB.prepare(`
     SELECT
@@ -2407,7 +2445,24 @@ async function listComments(env, taskId) {
     WHERE task_id = ?
     ORDER BY created_at, id
   `).bind(task.id));
-  return Promise.all(rows.map((row) => hydrateComment(env, row)));
+  return {
+    comments: await Promise.all(rows.map((row) => hydrateComment(env, row))),
+    nextCursor: nextCursor(rows, "updated_at", null),
+  };
+}
+
+async function listCommentsAfter(env, taskId, after) {
+  const task = await requireTaskRow(env, taskId);
+  const rows = await all(env.DB.prepare(`
+    SELECT * FROM comments
+    WHERE task_id = ?
+      AND (updated_at > ? OR (updated_at = ? AND id > ?))
+    ORDER BY updated_at, id
+  `).bind(task.id, after.timestamp, after.timestamp, after.id));
+  return {
+    comments: await Promise.all(rows.map((row) => hydrateComment(env, row))),
+    nextCursor: nextCursor(rows, "updated_at", after),
+  };
 }
 
 async function createComment(env, taskId, input, actor) {
@@ -2510,20 +2565,44 @@ async function deleteComment(env, id, expectedVersion) {
   await Promise.all(attachments.map((attachment) => env.ATTACHMENTS.delete(attachment.id)));
 }
 
-async function listTaskAttachments(env, taskId) {
+async function listTaskAttachments(env, taskId, after) {
   const task = await requireTaskRow(env, taskId);
-  return (
-    await all(env.DB.prepare(`
+  const rows = after
+    ? await all(env.DB.prepare(`
+      SELECT * FROM attachments
+      WHERE task_id = ? AND comment_id IS NULL
+        AND (created_at > ? OR (created_at = ? AND id > ?))
+      ORDER BY created_at, id
+    `).bind(task.id, after.timestamp, after.timestamp, after.id))
+    : await all(env.DB.prepare(`
       SELECT * FROM attachments
       WHERE task_id = ? AND comment_id IS NULL
       ORDER BY created_at, id
-    `).bind(task.id))
-  ).map(attachmentFromRow);
+    `).bind(task.id));
+  return {
+    attachments: rows.map(attachmentFromRow),
+    nextCursor: nextCursor(rows, "created_at", after),
+  };
 }
 
-async function listCommentAttachments(env, commentId) {
+async function listCommentAttachments(env, commentId, after) {
   await requireCommentRow(env, commentId);
-  return attachmentsForComment(env, commentId);
+  const rows = after
+    ? await all(env.DB.prepare(`
+      SELECT * FROM attachments
+      WHERE comment_id = ?
+        AND (created_at > ? OR (created_at = ? AND id > ?))
+      ORDER BY created_at, id
+    `).bind(commentId, after.timestamp, after.timestamp, after.id))
+    : await all(env.DB.prepare(`
+      SELECT * FROM attachments
+      WHERE comment_id = ?
+      ORDER BY created_at, id
+    `).bind(commentId));
+  return {
+    attachments: rows.map(attachmentFromRow),
+    nextCursor: nextCursor(rows, "created_at", after),
+  };
 }
 
 async function uploadAttachment(env, ownerType, ownerId, request) {
@@ -2886,11 +2965,14 @@ async function routeApi(request, env, actor, url) {
 
   const taskCommentsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/comments$/);
   if (taskCommentsMatch) {
-    requireNoQuery(url, "Comment routes");
     const taskId = decodePathPart(taskCommentsMatch[1], "Task id");
     if (request.method === "GET") {
-      return json(200, { comments: await listComments(env, taskId) });
+      const after = parseAfterCursor(url.searchParams);
+      return json(200, after
+        ? await listCommentsAfter(env, taskId, after)
+        : await listComments(env, taskId));
     }
+    requireNoQuery(url, "Comment routes");
     if (request.method === "POST") {
       return json(201, {
         comment: await createComment(
@@ -2908,13 +2990,14 @@ async function routeApi(request, env, actor, url) {
     /^\/api\/comments\/([^/]+)\/attachments$/,
   );
   if (commentAttachmentsMatch) {
-    requireNoQuery(url, "Attachment routes");
     const commentId = decodePathPart(commentAttachmentsMatch[1], "Comment id");
     if (request.method === "GET") {
-      return json(200, {
-        attachments: await listCommentAttachments(env, commentId),
-      });
+      return json(
+        200,
+        await listCommentAttachments(env, commentId, parseAfterCursor(url.searchParams)),
+      );
     }
+    requireNoQuery(url, "Attachment routes");
     if (request.method === "POST") {
       return json(201, {
         attachment: await uploadAttachment(env, "comment", commentId, request),
@@ -2948,13 +3031,11 @@ async function routeApi(request, env, actor, url) {
     /^\/api\/tasks\/([^/]+)\/attachments$/,
   );
   if (taskAttachmentsMatch) {
-    requireNoQuery(url, "Attachment routes");
     const taskId = decodePathPart(taskAttachmentsMatch[1], "Task id");
     if (request.method === "GET") {
-      return json(200, {
-        attachments: await listTaskAttachments(env, taskId),
-      });
+      return json(200, await listTaskAttachments(env, taskId, parseAfterCursor(url.searchParams)));
     }
+    requireNoQuery(url, "Attachment routes");
     if (request.method === "POST") {
       return json(201, {
         attachment: await uploadAttachment(env, "task", taskId, request),

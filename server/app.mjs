@@ -225,6 +225,37 @@ function assertNoQuery(searchParams, routeLabel) {
   assertAllowedQuery(searchParams, new Set(), routeLabel);
 }
 
+function parseAfterCursor(searchParams, routeLabel) {
+  assertAllowedQuery(searchParams, new Set(["after"]), routeLabel);
+  const value = searchParams.get("after");
+  if (value === null) return null;
+  const separator = value.lastIndexOf("@");
+  const timestamp = value.slice(0, separator);
+  const id = value.slice(separator + 1);
+  const milliseconds = Date.parse(timestamp);
+  if (
+    separator <= 0
+    || !id
+    || !Number.isFinite(milliseconds)
+    || new Date(milliseconds).toISOString() !== timestamp
+  ) {
+    throw new ApiError(400, "INVALID_CURSOR", "Cursor must use timestamp@id");
+  }
+  return { value, timestamp, id };
+}
+
+function nextCursor(items, field, after) {
+  const latest = items.reduce((current, item) => {
+    if (
+      current === null
+      || item[field] > current[field]
+      || (item[field] === current[field] && item.id > current.id)
+    ) return item;
+    return current;
+  }, null);
+  return latest ? `${latest[field]}@${latest.id}` : after?.value ?? null;
+}
+
 function decodeRouteSegment(value, name) {
   let decoded;
   try {
@@ -2678,11 +2709,18 @@ export function createTaskboardServer(options = {}) {
         if (taskId.length === 0 || taskId.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Task id is invalid");
         }
+        if (request.method === "GET") {
+          const after = parseAfterCursor(url.searchParams, "Comment routes");
+          const comments = after
+            ? database.listCommentsAfter(taskId, after)
+            : database.listComments(taskId);
+          return sendJson(response, 200, {
+            comments,
+            nextCursor: nextCursor(comments, "updatedAt", after),
+          });
+        }
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Comment routes do not accept query parameters");
-        }
-        if (request.method === "GET") {
-          return sendJson(response, 200, { comments: database.listComments(taskId) });
         }
         if (request.method === "POST") {
           const comment = database.createComment(taskId, {
@@ -2751,11 +2789,16 @@ export function createTaskboardServer(options = {}) {
         if (commentId.length === 0 || commentId.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Comment id is invalid");
         }
+        if (request.method === "GET") {
+          const after = parseAfterCursor(url.searchParams, "Attachment routes");
+          const attachments = database.listCommentAttachments(commentId, after);
+          return sendJson(response, 200, {
+            attachments,
+            nextCursor: nextCursor(attachments, "createdAt", after),
+          });
+        }
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Attachment routes do not accept query parameters");
-        }
-        if (request.method === "GET") {
-          return sendJson(response, 200, { attachments: database.listCommentAttachments(commentId) });
         }
         if (request.method === "POST") {
           const comment = database.getComment(commentId);
@@ -2791,11 +2834,16 @@ export function createTaskboardServer(options = {}) {
         if (taskId.length === 0 || taskId.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Task id is invalid");
         }
+        if (request.method === "GET") {
+          const after = parseAfterCursor(url.searchParams, "Attachment routes");
+          const attachments = database.listAttachments(taskId, after);
+          return sendJson(response, 200, {
+            attachments,
+            nextCursor: nextCursor(attachments, "createdAt", after),
+          });
+        }
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Attachment routes do not accept query parameters");
-        }
-        if (request.method === "GET") {
-          return sendJson(response, 200, { attachments: database.listAttachments(taskId) });
         }
         if (request.method === "POST") {
           const task = database.getTask(taskId);

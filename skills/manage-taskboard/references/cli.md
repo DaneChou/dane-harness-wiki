@@ -2,6 +2,14 @@
 
 `taskctl` emits JSON. Add `--json` when making the output contract explicit.
 
+Use built-in help for the current command tree or a specific supported level:
+
+```bash
+taskctl --help
+taskctl issue --help
+taskctl comment list --help
+```
+
 ## Terminology: local companion
 
 **Companion** here is a product term for the **device-local loopback HTTP service** that `taskctl` talks to in cloud mode. It applies Basic Authentication, stores device-only project path mappings, and keeps Codex/Git/Skill/MCP capabilities on the machine. It is not a chat persona and not a separate public “companion product API”.
@@ -146,11 +154,13 @@ For `blocks`, the anchor issue blocks the related issue. For `blocked_by`, the r
 Use the issue id to read or append comments. Comment updates and deletes require the latest comment `version` returned by `comment list`.
 
 ```bash
-taskctl comment list ISSUE_ID [--json]
-taskctl comment add ISSUE_ID --body TEXT [--thread-id ID] [--json]
+taskctl comment list ISSUE_ID [--after CURSOR] [--json]
+taskctl comment add ISSUE_ID (--body TEXT | --body-file FILE) [--thread-id ID] [--json]
 taskctl comment update COMMENT_ID --body TEXT --if-version N [--thread-id ID] [--json]
 taskctl comment delete COMMENT_ID --if-version N [--thread-id ID] [--json]
 ```
+
+Without `--after`, `comment list` returns the full list. Its response includes `nextCursor`; keep that value and pass it to the next read of the same issue to return only comments created or modified after that cursor. `--body-file` reads the UTF-8 file and passes its contents directly to the existing comment write path.
 
 Each comment JSON object independently records the most recent conversation that created or changed that comment as `threadId`. Comment operations never change the parent issue's `threadId`.
 
@@ -165,9 +175,12 @@ Issue descriptions and comments may contain inline images at exact positions in 
 Upload a local file to a task or a comment. Provide exactly one of `--task` or `--comment`:
 
 ```bash
+taskctl attachment list (--task TASK_ID | --comment COMMENT_ID) [--after CURSOR] [--json]
 taskctl attachment upload --task TASK_ID --file PATH [--content-type TYPE] [--kind inline|attachment] [--json]
 taskctl attachment upload --comment COMMENT_ID --file PATH [--content-type TYPE] [--kind inline|attachment] [--json]
 ```
+
+Without `--after`, `attachment list` returns the full list for that task or comment. Its response includes `nextCursor`; keep a separate cursor for every attachment list target and pass it to the next read to return only later attachments.
 
 The command sends the file bytes to:
 

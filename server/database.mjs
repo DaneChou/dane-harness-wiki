@@ -502,6 +502,9 @@ export class TaskboardDatabase {
       CREATE INDEX IF NOT EXISTS comments_task_created
         ON comments(task_id, created_at, id);
 
+      CREATE INDEX IF NOT EXISTS comments_task_updated
+        ON comments(task_id, updated_at, id);
+
       CREATE TABLE IF NOT EXISTS task_activities (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -2360,6 +2363,17 @@ export class TaskboardDatabase {
     `).all(task.id).map((row) => this.#commentWithAttachments(row));
   }
 
+  listCommentsAfter(taskId, after) {
+    const task = this.#requireTask(taskId);
+    return this.database.prepare(`
+      SELECT * FROM comments
+      WHERE task_id = ?
+        AND (updated_at > ? OR (updated_at = ? AND id > ?))
+      ORDER BY updated_at, id
+    `).all(task.id, after.timestamp, after.timestamp, after.id)
+      .map((row) => this.#commentWithAttachments(row));
+  }
+
   createComment(taskId, input) {
     const task = this.#requireTask(taskId);
     const id = randomUUID();
@@ -2422,8 +2436,16 @@ export class TaskboardDatabase {
     return current;
   }
 
-  listAttachments(taskId) {
+  listAttachments(taskId, after = null) {
     const task = this.#requireTask(taskId);
+    if (after) {
+      return this.database.prepare(`
+        SELECT * FROM attachments
+        WHERE task_id = ? AND comment_id IS NULL
+          AND (created_at > ? OR (created_at = ? AND id > ?))
+        ORDER BY created_at, id
+      `).all(task.id, after.timestamp, after.timestamp, after.id).map(attachmentFromRow);
+    }
     return this.database.prepare(`
       SELECT * FROM attachments
       WHERE task_id = ? AND comment_id IS NULL
@@ -2440,12 +2462,12 @@ export class TaskboardDatabase {
     return this.getAttachment(input.id);
   }
 
-  listCommentAttachments(commentId) {
+  listCommentAttachments(commentId, after = null) {
     const comment = this.database.prepare("SELECT id FROM comments WHERE id = ?").get(commentId);
     if (!comment) {
       throw new ApiError(404, "COMMENT_NOT_FOUND", `Comment '${commentId}' does not exist`);
     }
-    return this.#attachmentsForComment(commentId);
+    return this.#attachmentsForComment(commentId, after);
   }
 
   createCommentAttachment(commentId, input) {
@@ -2563,7 +2585,15 @@ export class TaskboardDatabase {
     return imagesByTask;
   }
 
-  #attachmentsForComment(commentId) {
+  #attachmentsForComment(commentId, after = null) {
+    if (after) {
+      return this.database.prepare(`
+        SELECT * FROM attachments
+        WHERE comment_id = ?
+          AND (created_at > ? OR (created_at = ? AND id > ?))
+        ORDER BY created_at, id
+      `).all(commentId, after.timestamp, after.timestamp, after.id).map(attachmentFromRow);
+    }
     return this.database.prepare(`
       SELECT * FROM attachments
       WHERE comment_id = ?
