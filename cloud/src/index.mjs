@@ -1237,6 +1237,34 @@ function parseTaskFilters(searchParams) {
   return { projectId, status, archived };
 }
 
+function parseAfterCursor(searchParams) {
+  for (const key of searchParams.keys()) {
+    if (key !== "after") {
+      throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", `Unknown query parameter: ${key}`);
+    }
+  }
+  const values = searchParams.getAll("after");
+  if (values.length === 0) return null;
+  if (values.length !== 1) {
+    throw new ApiError(400, "INVALID_CURSOR", "'after' must be provided once");
+  }
+  const value = values[0];
+  const revision = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(revision)) {
+    throw new ApiError(400, "INVALID_CURSOR", "'after' must be a non-negative decimal integer");
+  }
+  return { value, revision };
+}
+
+function nextCursor(rows, after) {
+  if (rows.length === 0) return after?.value ?? "0";
+  let revision = rows[0].change_revision;
+  for (const row of rows.slice(1)) {
+    if (row.change_revision > revision) revision = row.change_revision;
+  }
+  return String(revision);
+}
+
 async function listProjects(env) {
   const rows = await all(env.DB.prepare(`
     SELECT
@@ -2407,7 +2435,24 @@ async function listComments(env, taskId) {
     WHERE task_id = ?
     ORDER BY created_at, id
   `).bind(task.id));
-  return Promise.all(rows.map((row) => hydrateComment(env, row)));
+  return {
+    comments: await Promise.all(rows.map((row) => hydrateComment(env, row))),
+    nextCursor: nextCursor(rows, null),
+  };
+}
+
+async function listCommentsAfter(env, taskId, after) {
+  const task = await requireTaskRow(env, taskId);
+  const rows = await all(env.DB.prepare(`
+    SELECT * FROM comments
+    WHERE task_id = ?
+      AND change_revision > ?
+    ORDER BY change_revision
+  `).bind(task.id, after.revision));
+  return {
+    comments: await Promise.all(rows.map((row) => hydrateComment(env, row))),
+    nextCursor: nextCursor(rows, after),
+  };
 }
 
 async function createComment(env, taskId, input, actor) {
@@ -2418,8 +2463,9 @@ async function createComment(env, taskId, input, actor) {
     INSERT INTO comments (
       id, task_id, body, thread_id, thread_codex_project_id, thread_codex_project_kind,
       thread_codex_host_id, thread_workspace_path, author_type, author_id, author_name,
-      author_avatar_url, version, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      author_avatar_url, version, created_at, updated_at, change_revision
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?,
+      (SELECT revision + 1 FROM global_revision WHERE singleton = 1))
   `).bind(
     id,
     task.id,
@@ -2469,7 +2515,8 @@ async function updateComment(env, id, input) {
       body = ?,
       ${threadAssignment}
       version = version + 1,
-      updated_at = ?
+      updated_at = ?,
+      change_revision = (SELECT revision + 1 FROM global_revision WHERE singleton = 1)
     WHERE id = ? AND version = ?
   `).bind(
     input.body,
@@ -2510,20 +2557,44 @@ async function deleteComment(env, id, expectedVersion) {
   await Promise.all(attachments.map((attachment) => env.ATTACHMENTS.delete(attachment.id)));
 }
 
-async function listTaskAttachments(env, taskId) {
+async function listTaskAttachments(env, taskId, after) {
   const task = await requireTaskRow(env, taskId);
-  return (
-    await all(env.DB.prepare(`
+  const rows = after
+    ? await all(env.DB.prepare(`
+      SELECT * FROM attachments
+      WHERE task_id = ? AND comment_id IS NULL
+        AND change_revision > ?
+      ORDER BY change_revision
+    `).bind(task.id, after.revision))
+    : await all(env.DB.prepare(`
       SELECT * FROM attachments
       WHERE task_id = ? AND comment_id IS NULL
       ORDER BY created_at, id
-    `).bind(task.id))
-  ).map(attachmentFromRow);
+    `).bind(task.id));
+  return {
+    attachments: rows.map(attachmentFromRow),
+    nextCursor: nextCursor(rows, after),
+  };
 }
 
-async function listCommentAttachments(env, commentId) {
+async function listCommentAttachments(env, commentId, after) {
   await requireCommentRow(env, commentId);
-  return attachmentsForComment(env, commentId);
+  const rows = after
+    ? await all(env.DB.prepare(`
+      SELECT * FROM attachments
+      WHERE comment_id = ?
+        AND change_revision > ?
+      ORDER BY change_revision
+    `).bind(commentId, after.revision))
+    : await all(env.DB.prepare(`
+      SELECT * FROM attachments
+      WHERE comment_id = ?
+      ORDER BY created_at, id
+    `).bind(commentId));
+  return {
+    attachments: rows.map(attachmentFromRow),
+    nextCursor: nextCursor(rows, after),
+  };
 }
 
 async function uploadAttachment(env, ownerType, ownerId, request) {
@@ -2545,8 +2616,9 @@ async function uploadAttachment(env, ownerType, ownerId, request) {
   try {
     await env.DB.prepare(`
       INSERT INTO attachments (
-        id, task_id, comment_id, kind, filename, content_type, size, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        id, task_id, comment_id, kind, filename, content_type, size, created_at, change_revision
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?,
+        (SELECT revision + 1 FROM global_revision WHERE singleton = 1))
     `).bind(
       id,
       taskId,
@@ -2886,11 +2958,14 @@ async function routeApi(request, env, actor, url) {
 
   const taskCommentsMatch = pathname.match(/^\/api\/tasks\/([^/]+)\/comments$/);
   if (taskCommentsMatch) {
-    requireNoQuery(url, "Comment routes");
     const taskId = decodePathPart(taskCommentsMatch[1], "Task id");
     if (request.method === "GET") {
-      return json(200, { comments: await listComments(env, taskId) });
+      const after = parseAfterCursor(url.searchParams);
+      return json(200, after
+        ? await listCommentsAfter(env, taskId, after)
+        : await listComments(env, taskId));
     }
+    requireNoQuery(url, "Comment routes");
     if (request.method === "POST") {
       return json(201, {
         comment: await createComment(
@@ -2908,13 +2983,14 @@ async function routeApi(request, env, actor, url) {
     /^\/api\/comments\/([^/]+)\/attachments$/,
   );
   if (commentAttachmentsMatch) {
-    requireNoQuery(url, "Attachment routes");
     const commentId = decodePathPart(commentAttachmentsMatch[1], "Comment id");
     if (request.method === "GET") {
-      return json(200, {
-        attachments: await listCommentAttachments(env, commentId),
-      });
+      return json(
+        200,
+        await listCommentAttachments(env, commentId, parseAfterCursor(url.searchParams)),
+      );
     }
+    requireNoQuery(url, "Attachment routes");
     if (request.method === "POST") {
       return json(201, {
         attachment: await uploadAttachment(env, "comment", commentId, request),
@@ -2948,13 +3024,11 @@ async function routeApi(request, env, actor, url) {
     /^\/api\/tasks\/([^/]+)\/attachments$/,
   );
   if (taskAttachmentsMatch) {
-    requireNoQuery(url, "Attachment routes");
     const taskId = decodePathPart(taskAttachmentsMatch[1], "Task id");
     if (request.method === "GET") {
-      return json(200, {
-        attachments: await listTaskAttachments(env, taskId),
-      });
+      return json(200, await listTaskAttachments(env, taskId, parseAfterCursor(url.searchParams)));
     }
+    requireNoQuery(url, "Attachment routes");
     if (request.method === "POST") {
       return json(201, {
         attachment: await uploadAttachment(env, "task", taskId, request),

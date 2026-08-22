@@ -225,6 +225,25 @@ function assertNoQuery(searchParams, routeLabel) {
   assertAllowedQuery(searchParams, new Set(), routeLabel);
 }
 
+function parseAfterCursor(searchParams, routeLabel) {
+  assertAllowedQuery(searchParams, new Set(["after"]), routeLabel);
+  const value = searchParams.get("after");
+  if (value === null) return null;
+  const revision = Number(value);
+  if (!/^\d+$/.test(value) || !Number.isSafeInteger(revision)) {
+    throw new ApiError(400, "INVALID_CURSOR", "Cursor must be a non-negative integer revision");
+  }
+  return { value, revision };
+}
+
+function nextCursor(items, after) {
+  if (items.length === 0) return after?.value ?? "0";
+  return String(items.reduce(
+    (revision, item) => Math.max(revision, item.changeRevision),
+    0,
+  ));
+}
+
 function decodeRouteSegment(value, name) {
   let decoded;
   try {
@@ -2678,11 +2697,18 @@ export function createTaskboardServer(options = {}) {
         if (taskId.length === 0 || taskId.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Task id is invalid");
         }
+        if (request.method === "GET") {
+          const after = parseAfterCursor(url.searchParams, "Comment routes");
+          const comments = after
+            ? database.listCommentsAfter(taskId, after)
+            : database.listComments(taskId);
+          return sendJson(response, 200, {
+            comments,
+            nextCursor: nextCursor(comments, after),
+          });
+        }
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Comment routes do not accept query parameters");
-        }
-        if (request.method === "GET") {
-          return sendJson(response, 200, { comments: database.listComments(taskId) });
         }
         if (request.method === "POST") {
           const comment = database.createComment(taskId, {
@@ -2751,11 +2777,16 @@ export function createTaskboardServer(options = {}) {
         if (commentId.length === 0 || commentId.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Comment id is invalid");
         }
+        if (request.method === "GET") {
+          const after = parseAfterCursor(url.searchParams, "Attachment routes");
+          const attachments = database.listCommentAttachments(commentId, after);
+          return sendJson(response, 200, {
+            attachments,
+            nextCursor: nextCursor(attachments, after),
+          });
+        }
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Attachment routes do not accept query parameters");
-        }
-        if (request.method === "GET") {
-          return sendJson(response, 200, { attachments: database.listCommentAttachments(commentId) });
         }
         if (request.method === "POST") {
           const comment = database.getComment(commentId);
@@ -2791,11 +2822,16 @@ export function createTaskboardServer(options = {}) {
         if (taskId.length === 0 || taskId.length > 128) {
           throw new ApiError(400, "INVALID_PATH", "Task id is invalid");
         }
+        if (request.method === "GET") {
+          const after = parseAfterCursor(url.searchParams, "Attachment routes");
+          const attachments = database.listAttachments(taskId, after);
+          return sendJson(response, 200, {
+            attachments,
+            nextCursor: nextCursor(attachments, after),
+          });
+        }
         if ([...url.searchParams.keys()].length > 0) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "Attachment routes do not accept query parameters");
-        }
-        if (request.method === "GET") {
-          return sendJson(response, 200, { attachments: database.listAttachments(taskId) });
         }
         if (request.method === "POST") {
           const task = database.getTask(taskId);
