@@ -1608,7 +1608,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         targetRange.startOffset,
         "start",
       );
-      const end = logicalOffsetForPoint(
+      let end = logicalOffsetForPoint(
         targetRange.endContainer,
         targetRange.endOffset,
         "end",
@@ -1617,20 +1617,23 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const startElement = segmentElement(targetRange.startContainer);
       const endElement = segmentElement(targetRange.endContainer);
       let backwardImageDelete = false;
+      const caretRange = input.inputType === "deleteContentBackward"
+        ? currentLogicalRange()
+        : null;
       if (
         input.inputType === "deleteContentBackward"
-        && start === end
-        && startElement === endElement
-        && startElement?.dataset.inlineMediaEmptyText === "true"
+        && caretRange
+        && caretRange.start === caretRange.end
       ) {
         let offset = 0;
         for (const segment of segments) {
           const nextOffset = offset + segmentLength(segment);
           if (
-            nextOffset === start
+            nextOffset === caretRange.start
             && (segment.type === "pending-image" || segment.type === "persisted-image")
           ) {
             start = offset;
+            end = nextOffset;
             backwardImageDelete = true;
             break;
           }
