@@ -3027,14 +3027,6 @@ export function App() {
 
   async function openTaskInThread(task: Task) {
     const standalone = !embedded || window.parent === window;
-    if (standalone && task.threadBinding) {
-      openThread(task.threadBinding);
-      return;
-    }
-    if (standalone && task.legacyLocalThreadId) {
-      openLegacyLocalThread(task.legacyLocalThreadId);
-      return;
-    }
     const projectless = task.projectId === GLOBAL_PROJECT_ID;
     const taskboardProject = projects.find((project) => project.id === task.projectId);
     const savedRemoteIdentity = projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
@@ -3070,21 +3062,28 @@ export function App() {
       const baseWorkspacePath = codexProjectContext?.workspacePath
         ?? deviceWorkspacePaths[task.projectId]
         ?? taskboardProject?.workspacePath;
-      try {
-        const scan = await listDevelopmentContexts(
-          task.projectId,
-          codexProjectContext?.codexProjectId,
-          hostContext?.threadId ?? undefined,
-          undefined,
-          baseWorkspacePath,
-        );
-        const worktreeExists = scan.contexts.some((context) => (
+      if (standalone) {
+        const worktreeExists = developmentScan.contexts.some((context) => (
           context.type === "worktree" && context.path === expectedWorktreePath
         ));
-        if (!worktreeExists) workspacePath = scan.workspacePath ?? baseWorkspacePath;
-      } catch (error) {
-        setActionError(errorMessage(error));
-        return;
+        if (!worktreeExists) workspacePath = developmentScan.workspacePath ?? baseWorkspacePath;
+      } else {
+        try {
+          const scan = await listDevelopmentContexts(
+            task.projectId,
+            codexProjectContext?.codexProjectId,
+            hostContext?.threadId ?? undefined,
+            undefined,
+            baseWorkspacePath,
+          );
+          const worktreeExists = scan.contexts.some((context) => (
+            context.type === "worktree" && context.path === expectedWorktreePath
+          ));
+          if (!worktreeExists) workspacePath = scan.workspacePath ?? baseWorkspacePath;
+        } catch (error) {
+          setActionError(errorMessage(error));
+          return;
+        }
       }
     }
 
