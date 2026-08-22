@@ -422,14 +422,6 @@ export function createCloudD1ImportPlan(tables) {
   });
 }
 
-const CLOUD_INCREMENTAL_REVISION_SQL = `UPDATE global_revision
-  SET revision = MAX(
-    revision,
-    COALESCE((SELECT MAX(change_revision) FROM comments), 0),
-    COALESCE((SELECT MAX(change_revision) FROM attachments), 0)
-  )
-  WHERE singleton = 1`;
-
 function inlineD1InsertStatement(table, values) {
   const json = JSON.stringify(values);
   if (json.includes("\0")) throw new Error("D1 migration JSON cannot contain null bytes");
@@ -494,7 +486,6 @@ export function createCloudD1ImportSql(tables) {
     }
     statements.push(inlineD1InsertStatement(table, chunk));
   }
-  statements.push(`${CLOUD_INCREMENTAL_REVISION_SQL};`);
   return statements.join("\n");
 }
 
@@ -559,7 +550,6 @@ export function createCloudBindingMigrationAdapters({ d1, r2 }) {
             ));
           }
         }
-        statements.push(d1.prepare(CLOUD_INCREMENTAL_REVISION_SQL));
         await d1.batch(statements);
       },
       async countByProject() {
