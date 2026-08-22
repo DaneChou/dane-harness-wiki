@@ -1042,6 +1042,9 @@ export function App() {
   const contextMenuTask = contextMenu
     ? tasks.find((task) => task.id === contextMenu.taskId) ?? null
     : null;
+  const contextMenuWorkspacePath = contextMenuTask
+    ? deviceWorkspacePaths[contextMenuTask.projectId]
+    : undefined;
   const availableLabels = isAllProjects
     ? [...new Set(projects.flatMap((project) => project.labels))]
     : selectedProject?.labels ?? [];
@@ -1113,6 +1116,16 @@ export function App() {
       : [];
   });
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  function openTaskContextMenu(task: Task, position: { x: number; y: number }) {
+    if (
+      isAllProjects
+      && (!embedded || window.parent === window)
+      && task.developmentContext?.type === "worktree"
+    ) {
+      setDevelopmentScanLoading(true);
+    }
+    setContextMenu({ taskId: task.id, ...position });
+  }
   const issueReadStorageKey = selectedProjectId
     ? `${ISSUE_READ_KEY_PREFIX}:${taskboardMetadata?.mode ?? "local"}:${selectedProjectId}`
     : null;
@@ -1922,30 +1935,39 @@ export function App() {
   }, [isJiraProject, jiraConnection?.configured, refreshTasks, taskScopeProjectId]);
 
   useEffect(() => {
-    if (!selectedProjectId || isAllProjects) {
+    const standalone = !embedded || window.parent === window;
+    const developmentProjectId = isAllProjects
+      ? standalone ? contextMenuTask?.projectId : null
+      : selectedProjectId;
+    if (!developmentProjectId) {
       setDevelopmentScan({ workspacePath: null, contexts: [] });
       setDevelopmentScanLoading(false);
       return;
     }
     const controller = new AbortController();
-    const codexProjectId = selectedProjectId === GLOBAL_PROJECT_ID ? hostContext?.projectId : selectedProjectId;
-    const codexThreadId = hostContext?.threadId ?? detailTask?.threadId ?? undefined;
-    setDevelopmentScan({ workspacePath: selectedDeviceWorkspacePath ?? null, contexts: [] });
+    const codexProjectId = developmentProjectId === GLOBAL_PROJECT_ID
+      ? hostContext?.projectId
+      : developmentProjectId;
+    const codexThreadId = hostContext?.threadId
+      ?? (isAllProjects ? contextMenuTask?.threadId : detailTask?.threadId)
+      ?? undefined;
+    const workspacePath = isAllProjects ? contextMenuWorkspacePath : selectedDeviceWorkspacePath;
+    setDevelopmentScan({ workspacePath: workspacePath ?? null, contexts: [] });
     setDevelopmentScanLoading(true);
     void listDevelopmentContexts(
-      selectedProjectId,
+      developmentProjectId,
       codexProjectId,
       codexThreadId,
       controller.signal,
-      selectedDeviceWorkspacePath,
+      workspacePath,
     )
       .then((scan) => {
         setDevelopmentScan(scan);
-        if (scan.workspacePath) rememberDeviceWorkspacePath(selectedProjectId, scan.workspacePath);
+        if (scan.workspacePath) rememberDeviceWorkspacePath(developmentProjectId, scan.workspacePath);
       })
       .catch((error) => {
         if ((error as Error).name !== "AbortError") {
-          setDevelopmentScan({ workspacePath: selectedDeviceWorkspacePath ?? null, contexts: [] });
+          setDevelopmentScan({ workspacePath: workspacePath ?? null, contexts: [] });
         }
       })
       .finally(() => {
@@ -1953,7 +1975,11 @@ export function App() {
       });
     return () => controller.abort();
   }, [
+    contextMenuTask?.projectId,
+    contextMenuTask?.threadId,
+    contextMenuWorkspacePath,
     detailTask?.threadId,
+    embedded,
     hostContext?.projectId,
     hostContext?.threadId,
     isAllProjects,
@@ -3870,7 +3896,7 @@ export function App() {
                         onEdit={openTaskDetail}
                         onUpdate={updateTaskProperties}
                         onComplete={(task) => void moveTask(task, "done")}
-                        onContextMenu={(task, position) => setContextMenu({ taskId: task.id, ...position })}
+                        onContextMenu={openTaskContextMenu}
                         onDragStart={startTaskDrag}
                         onDragEnd={endTaskDrag}
                         onDragEnter={setDropTarget}
@@ -3911,7 +3937,7 @@ export function App() {
                     onDelete={setPendingArchivedTaskDelete}
                     onEdit={openTaskDetail}
                     onUpdate={updateTaskProperties}
-                    onContextMenu={(task, position) => setContextMenu({ taskId: task.id, ...position })}
+                    onContextMenu={openTaskContextMenu}
                     onDragStart={startTaskDrag}
                     onDragEnd={endTaskDrag}
                     onDragEnter={setDropTarget}
@@ -4187,6 +4213,7 @@ export function App() {
           ).catch(() => {})}
           onDuplicate={(task) => void duplicateTask(task)}
           onCopy={(text, message) => void copyText(text, message)}
+          openInThreadDisabled={developmentScanLoading}
           onOpenInThread={openTaskInThread}
           onArchive={(task) => void archiveTask(task)}
         />
