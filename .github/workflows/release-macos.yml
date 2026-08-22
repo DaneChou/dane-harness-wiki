@@ -311,15 +311,15 @@ jobs:
           cp "$BUNDLE_ROOT/release/latest.json" "$RELEASE_ASSETS/"
           cp \
             "$RUNNER_TEMP/windows-preview/Codex Taskboard_${PACKAGE_VERSION}_x64-setup.exe" \
-            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_Windows-x64-unsigned-preview-setup.exe"
+            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_NSIS-x64-unsigned.exe"
           (
             cd "$RELEASE_ASSETS"
             shasum -a 256 \
               "Codex.Taskboard_${PACKAGE_VERSION}_macOS-universal.dmg" \
+              "Codex.Taskboard_${PACKAGE_VERSION}_NSIS-x64-unsigned.exe" \
               "Codex.Taskboard_${PACKAGE_VERSION}_universal.app.tar.gz" \
               "Codex.Taskboard_${PACKAGE_VERSION}_universal.app.tar.gz.sig" \
-              "latest.json" \
-              "Codex.Taskboard_${PACKAGE_VERSION}_Windows-x64-unsigned-preview-setup.exe" > "$MANIFEST_ROOT/release-assets.sha256"
+              "latest.json" > "$MANIFEST_ROOT/release-assets.sha256"
           )
 
       - name: Preserve trusted release asset manifest
@@ -342,11 +342,19 @@ jobs:
             --draft \
             --title "Codex Taskboard $RELEASE_TAG" \
             --generate-notes \
-            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_macOS-universal.dmg" \
-            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_universal.app.tar.gz" \
-            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_universal.app.tar.gz.sig" \
-            "$RELEASE_ASSETS/latest.json" \
-            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_Windows-x64-unsigned-preview-setup.exe"
+            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_macOS-universal.dmg"
+          gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_NSIS-x64-unsigned.exe"
+          gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_universal.app.tar.gz"
+          gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "$RELEASE_ASSETS/Codex.Taskboard_${PACKAGE_VERSION}_universal.app.tar.gz.sig"
+          gh release upload "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            "$RELEASE_ASSETS/latest.json"
 
       - name: Remove temporary signing files
         if: always()

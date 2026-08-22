@@ -373,7 +373,6 @@ async function launchCodexWithLaunchServices(appPath, port, shouldStop = () => f
   const launcher = spawn(
     "/usr/bin/open",
     [
-      "-n",
       "-a",
       appPath,
       "--args",
