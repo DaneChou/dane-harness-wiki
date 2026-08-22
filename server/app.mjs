@@ -1451,11 +1451,13 @@ function parseWorktrees(output) {
     if (!block) continue;
     let worktreePath = "";
     let branch = null;
+    let prunable = false;
     for (const line of block.split("\n")) {
       if (line.startsWith("worktree ")) worktreePath = line.slice(9);
       if (line.startsWith("branch refs/heads/")) branch = line.slice(18);
+      if (line.startsWith("prunable")) prunable = true;
     }
-    if (worktreePath) contexts.push({ type: "worktree", path: worktreePath, branch });
+    if (worktreePath && !prunable) contexts.push({ type: "worktree", path: worktreePath, branch });
   }
   return contexts;
 }

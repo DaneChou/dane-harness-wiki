@@ -114,8 +114,8 @@ test("the collapsed Codex sidebar can be expanded immediately left of the projec
   assert.match(styles, /\.codex-sidebar-expand-button \{[\s\S]*?width: 28px;[\s\S]*?height: 28px;/);
 });
 
-test("embedded mode omits the app navigation and keeps a draggable header region", () => {
-  assert.match(appSource, /!embedded && \([\s\S]*?<aside className="app-nav"/);
+test("the app omits the old navigation and keeps the embedded draggable header region", () => {
+  assert.doesNotMatch(appSource, /<aside className="app-nav"/);
   assert.match(appSource, /<header className="workspace-header">/);
   assert.match(appSource, /ref=\{dragRegionRef\} className="workspace-drag-region"/);
   assert.match(styles, /\.workspace-drag-region \{[\s\S]*?flex: 1;[\s\S]*?align-self: stretch/);
