@@ -709,7 +709,18 @@ function inlineMediaClipboardHtml(
       wrapper.append(issue);
       continue;
     }
-    if (isInlineReference(segment) || segment.type === "persisted-image") {
+    if (segment.type === "persisted-image") {
+      const persistedImage = ownerDocument.createElement("img");
+      persistedImage.dataset.taskboardInlineMediaMarkdown = segment.markdown;
+      persistedImage.src = new URL(
+        resolvePersistedAttachmentUrl(segment.url),
+        ownerDocument.baseURI,
+      ).toString();
+      persistedImage.alt = segment.alt;
+      wrapper.append(persistedImage);
+      continue;
+    }
+    if (isInlineReference(segment)) {
       const markdown = ownerDocument.createElement("span");
       markdown.dataset.taskboardInlineMediaMarkdown = segment.markdown;
       markdown.textContent = segment.markdown;
