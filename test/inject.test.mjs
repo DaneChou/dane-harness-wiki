@@ -366,9 +366,9 @@ test("host navigation follows Codex's renderer message bus", () => {
   assert.doesNotMatch(source, /new CustomEvent\("codex-message-from-view"/);
 });
 
-test("the standalone web page opens the linked thread or a project-scoped Codex composer", () => {
-  assert.match(webApp, /standalone && task\.threadBinding[\s\S]*?openThread\(task\.threadBinding\)/);
-  assert.match(webApp, /standalone && task\.legacyLocalThreadId[\s\S]*?openLegacyLocalThread\(task\.legacyLocalThreadId\)/);
+test("the standalone web page always opens a project-scoped Codex composer", () => {
+  assert.doesNotMatch(webApp, /standalone && task\.threadBinding[\s\S]*?openThread\(task\.threadBinding\)/);
+  assert.doesNotMatch(webApp, /standalone && task\.legacyLocalThreadId[\s\S]*?openLegacyLocalThread\(task\.legacyLocalThreadId\)/);
   assert.match(webApp, /new URL\("codex:\/\/threads\/new"\)/);
   assert.match(webApp, /deepLink\.searchParams\.set\("path", workspacePath\)/);
   assert.match(webApp, /deepLink\.searchParams\.set\("prompt", embeddedInstruction\)/);
