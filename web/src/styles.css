@@ -6807,12 +6807,12 @@ kbd {
 
 .ai-chat-thinking-detail-trigger {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   width: 100%;
   min-width: 0;
   min-height: 26px;
   gap: 6px;
-  padding: 4px 12px;
+  padding: 0 12px;
   border: 0;
   border-radius: 6px;
   background: transparent;
