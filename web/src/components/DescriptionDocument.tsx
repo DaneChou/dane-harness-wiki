@@ -60,7 +60,6 @@ export function DescriptionDocument({
         writeInlineMediaClipboard(
           event.clipboardData,
           segments,
-          event.currentTarget.ownerDocument,
         );
       }}
       renderLink={(href) => {
