@@ -727,7 +727,9 @@ fn find_codex_app(_home_directory: &Path) -> Option<PathBuf> {
         return None;
     }
     let install_location = String::from_utf8_lossy(&output.stdout);
-    let candidate = PathBuf::from(install_location.trim()).join("app/ChatGPT.exe");
+    let candidate = PathBuf::from(install_location.trim())
+        .join("app")
+        .join("ChatGPT.exe");
     candidate.is_file().then_some(candidate)
 }
 
