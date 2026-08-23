@@ -18,7 +18,6 @@ import {
   archiveTask as archiveTaskRequest,
   createProjectLabel as createProjectLabelRequest,
   createProject as createProjectRequest,
-  createComment,
   createTask as createTaskRequest,
   configureJiraConnection,
   deleteArchivedTask as deleteArchivedTaskRequest,
@@ -28,14 +27,12 @@ import {
   getCodexThreadProgress,
   getHostRuntime,
   getJiraConnection,
-  getTask,
   getTaskboardRevision,
   getTaskboardMetadata,
   listArchivedTasks,
   listDevelopmentContexts,
   listDeviceWorkspaces,
   listProjects,
-  listComments,
   listTasks,
   moveTask as moveTaskRequest,
   publishHostRuntime,
@@ -201,12 +198,6 @@ interface UndoOperation {
 interface UndoNotice {
   id: number;
   message: string;
-}
-
-interface PendingRemoteThreadClaim {
-  claimedTask: Task;
-  previousTask: Task;
-  identity: CodexProjectIdentity;
 }
 
 type ProjectAutomationStatus = "ACTIVE" | "PAUSED";
@@ -825,7 +816,6 @@ export function App() {
     );
   }
   const pendingAutomationRequestsRef = useRef(new Map<string, PendingAutomationRequest>());
-  const pendingRemoteThreadClaimsRef = useRef(new Map<string, PendingRemoteThreadClaim>());
   const automationRequestInFlightRef = useRef<"list" | "save" | null>(null);
   const loadedAutomationProjectIdsRef = useRef(new Set<string>());
   const queuedAutomationSavesRef = useRef(new Map<string, QueuedProjectAutomationSave>());
@@ -1696,35 +1686,16 @@ export function App() {
       }
 
       if (message.type === "taskboard:thread-prepared" && message.payload) {
-        const payload = message.payload as { taskId?: unknown; threadId?: unknown };
-        if (typeof payload.taskId === "string" && pendingRemoteThreadClaimsRef.current.has(payload.taskId)) {
-          void bindPreparedRemoteThread(payload.taskId, payload.threadId);
-        } else {
-          setOpeningThreadTaskId(null);
-        }
+        setOpeningThreadTaskId(null);
         return;
       }
 
       if (message.type === "taskboard:thread-create-error" && message.payload) {
-        const payload = message.payload as {
-          taskId?: unknown;
-          error?: unknown;
-          threadId?: unknown;
-          uncertain?: unknown;
-        };
-        if (typeof payload.taskId === "string" && pendingRemoteThreadClaimsRef.current.has(payload.taskId)) {
-          void compensateFailedRemoteThread(
-            payload.taskId,
-            payload.error,
-            payload.threadId,
-            payload.uncertain === true,
-          );
-        } else {
-          setOpeningThreadTaskId(null);
-          setActionError(typeof payload.error === "string"
-            ? payload.error
-            : textRef.current("无法在 Codex 中创建对话。", "Could not create the conversation in Codex."));
-        }
+        const payload = message.payload as { error?: unknown };
+        setOpeningThreadTaskId(null);
+        setActionError(typeof payload.error === "string"
+          ? payload.error
+          : textRef.current("无法在 Codex 中打开新对话。", "Could not open a new conversation in Codex."));
         return;
       }
 
@@ -2875,218 +2846,6 @@ export function App() {
     return liveProject ? baseIdentity : null;
   }
 
-  function remoteTaskInstruction(task: Task, comments: Awaited<ReturnType<typeof listComments>>) {
-    const commentText = comments.length === 0
-      ? "（无评论）"
-      : comments.map((comment) => (
-          `- ${comment.authorName}（${comment.createdAt}）\n${comment.body}`
-        )).join("\n\n");
-    return [
-      `处理 Taskboard 议题 ${task.identifier}：${task.title}`,
-      `\n完整描述：\n${task.description || "（无描述）"}`,
-      `\n全部评论：\n${commentText}`,
-      `\n开发上下文：\n${JSON.stringify(task.developmentContext)}`,
-      "\n本地 Taskboard 控制器已负责认领、对话绑定、评论和状态写回。远程 worker 不得运行 taskctl。请只完成实现和必要验证，并返回改动、验证结果、执行结果和剩余风险。",
-    ].join("\n");
-  }
-
-  function updateTaskFromRemoteThread(task: Task) {
-    setTasks((current) => sortTasks(current.map((candidate) => (
-      candidate.id === task.id ? task : candidate
-    ))));
-  }
-
-  async function addRemoteThreadFailureComment(taskId: string, body: string) {
-    try {
-      await createComment(taskId, body, undefined, null);
-      setCommentsRevision((current) => current + 1);
-    } catch {}
-  }
-
-  async function bindPreparedRemoteThread(taskId: string, rawThreadId: unknown) {
-    const pending = pendingRemoteThreadClaimsRef.current.get(taskId);
-    if (!pending) return;
-    const threadId = typeof rawThreadId === "string" ? rawThreadId.trim() : "";
-    if (!threadId) {
-      await compensateFailedRemoteThread(taskId, textRef.current(
-        "Codex 没有返回新对话 ID。",
-        "Codex did not return the new conversation ID.",
-      ));
-      return;
-    }
-    const binding: CodexThreadBinding = { threadId, ...pending.identity };
-    try {
-      const boundTask = await moveTaskRequest(
-        pending.claimedTask,
-        "in_progress",
-        pending.claimedTask.sortOrder,
-        binding,
-      );
-      pendingRemoteThreadClaimsRef.current.delete(taskId);
-      updateTaskFromRemoteThread(boundTask);
-      setOpeningThreadTaskId(null);
-      setAnnouncement(textRef.current(
-        `${boundTask.identifier} 已绑定到新的 SSH 对话。`,
-        `${boundTask.identifier} is bound to the new SSH conversation.`,
-      ));
-    } catch (error) {
-      let recoveredTask: Task | null = null;
-      if (!(error instanceof ApiError && error.code === "VERSION_CONFLICT")) {
-        try {
-          const latest = await getTask(taskId);
-          const bindingWasSaved = latest.status === "in_progress"
-            && latest.projectId === pending.claimedTask.projectId
-            && latest.archivedAt === null
-            && latest.threadBinding?.threadId === binding.threadId
-            && latest.threadBinding.codexProjectId === binding.codexProjectId
-            && latest.threadBinding.codexProjectKind === binding.codexProjectKind
-            && latest.threadBinding.codexHostId === binding.codexHostId
-            && latest.threadBinding.workspacePath === binding.workspacePath;
-          if (bindingWasSaved) {
-            recoveredTask = latest;
-          } else if (
-            latest.version === pending.claimedTask.version
-            && latest.projectId === pending.claimedTask.projectId
-            && latest.status === "in_progress"
-            && latest.archivedAt === null
-            && latest.threadId === null
-            && latest.threadBinding === null
-          ) {
-            recoveredTask = await moveTaskRequest(
-              latest,
-              "blocked",
-              undefined,
-              binding,
-            );
-          }
-        } catch {}
-      }
-      pendingRemoteThreadClaimsRef.current.delete(taskId);
-      setOpeningThreadTaskId(null);
-      if (recoveredTask) {
-        updateTaskFromRemoteThread(recoveredTask);
-        if (recoveredTask.status === "in_progress") return;
-      }
-      await addRemoteThreadFailureComment(taskId, textRef.current(
-        `已创建 SSH 对话 ${threadId}，但任务 binding 写入发生冲突或失败；未覆盖其他控制端的更新。`,
-        `SSH conversation ${threadId} was created, but saving the task binding conflicted or failed. No other controller update was overwritten.`,
-      ));
-      setActionError(error instanceof ApiError && error.code === "VERSION_CONFLICT"
-        ? textRef.current(
-          `SSH 对话 ${threadId} 已创建，但议题已在其他位置更新，未覆盖该更新。`,
-          `SSH conversation ${threadId} was created, but the issue changed elsewhere. That update was not overwritten.`,
-        )
-        : errorMessage(error));
-    }
-  }
-
-  async function compensateFailedRemoteThread(
-    taskId: string,
-    rawError: unknown,
-    rawThreadId?: unknown,
-    uncertain = false,
-  ) {
-    const pending = pendingRemoteThreadClaimsRef.current.get(taskId);
-    if (!pending) return;
-    pendingRemoteThreadClaimsRef.current.delete(taskId);
-    const error = typeof rawError === "string"
-      ? rawError
-      : textRef.current("无法创建 Codex 对话。", "Could not create the Codex conversation.");
-    const threadId = typeof rawThreadId === "string" ? rawThreadId.trim() : "";
-    const binding = threadId ? { threadId, ...pending.identity } : null;
-    const status: TaskStatus = threadId || uncertain ? "blocked" : pending.previousTask.status;
-    await addRemoteThreadFailureComment(taskId, threadId
-      ? textRef.current(
-        `SSH 对话 ${threadId} 已创建，但后续确认失败：${error}`,
-        `SSH conversation ${threadId} was created, but follow-up confirmation failed: ${error}`,
-      )
-      : uncertain
-        ? textRef.current(
-          `创建 SSH 对话的结果不确定，任务已停止自动重试：${error}`,
-          `The SSH conversation result is uncertain, so automatic retry was stopped: ${error}`,
-        )
-        : textRef.current(
-          `创建 SSH 对话失败，任务已退回 ${pending.previousTask.status}：${error}`,
-          `Creating the SSH conversation failed. The task was returned to ${pending.previousTask.status}: ${error}`,
-        ));
-    try {
-      const compensated = await moveTaskRequest(
-        pending.claimedTask,
-        status,
-        pending.previousTask.sortOrder,
-        binding,
-      );
-      updateTaskFromRemoteThread(compensated);
-    } catch (moveError) {
-      if (!(moveError instanceof ApiError && moveError.code === "VERSION_CONFLICT")) {
-        setActionError(errorMessage(moveError));
-      }
-    } finally {
-      setOpeningThreadTaskId(null);
-    }
-    setActionError(error);
-  }
-
-  async function openRemoteTaskInThread(task: Task, baseIdentity: CodexProjectIdentity) {
-    try {
-      const [latestTask, comments] = await Promise.all([getTask(task.id), listComments(task.id)]);
-      if (latestTask.threadBinding) {
-        setOpeningThreadTaskId(null);
-        openThread(latestTask.threadBinding);
-        return;
-      }
-      if (latestTask.status !== "todo" || latestTask.archivedAt !== null || latestTask.threadId) {
-        throw new Error(textRef.current(
-          "该议题已被其他控制器认领或绑定，请刷新后重试。",
-          "This issue was claimed or bound by another controller. Refresh and try again.",
-        ));
-      }
-      const identity = remoteIdentityForTask(latestTask, baseIdentity);
-      if (!identity) {
-        throw new Error(latestTask.developmentContext?.type === "worktree"
-          ? textRef.current(
-            "目标 SSH worktree 未在保存的主机中添加或映射。",
-            "The target SSH worktree is not added or mapped on the saved host.",
-          )
-          : textRef.current(
-            "已保存的 SSH 远程项目或主机当前不可用。",
-            "The saved SSH remote project or host is not available.",
-          ));
-      }
-      const claimedTask = await moveTaskRequest(latestTask, "in_progress", undefined, null);
-      pendingRemoteThreadClaimsRef.current.set(task.id, {
-        claimedTask,
-        previousTask: latestTask,
-        identity,
-      });
-      updateTaskFromRemoteThread(claimedTask);
-      postEmbeddedHostMessage({
-        type: "taskboard:create-thread",
-        payload: {
-          taskId: latestTask.id,
-          identifier: latestTask.identifier,
-          title: latestTask.title,
-          instruction: remoteTaskInstruction(latestTask, comments),
-          codexProjectId: identity.codexProjectId,
-          codexProjectKind: identity.codexProjectKind,
-          codexHostId: identity.codexHostId,
-          codexProjectWorkspacePath: identity.workspacePath,
-          workspacePath: identity.workspacePath,
-          projectless: false,
-        },
-      });
-    } catch (error) {
-      setOpeningThreadTaskId(null);
-      setActionError(error instanceof ApiError && error.code === "VERSION_CONFLICT"
-        ? textRef.current(
-          "该议题已在其他位置更新，未创建重复对话。",
-          "This issue changed elsewhere. No duplicate conversation was created.",
-        )
-        : errorMessage(error));
-      if (taskScopeProjectId) void refreshTasks(taskScopeProjectId, { quiet: true });
-    }
-  }
-
   async function openTaskInThread(task: Task) {
     const standalone = !embedded || window.parent === window;
     const projectless = task.projectId === GLOBAL_PROJECT_ID;
@@ -3094,7 +2853,7 @@ export function App() {
     const savedRemoteIdentity = projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
       ? projectCodexIdentities[task.projectId]
       : null;
-    const codexProjectContext = savedRemoteIdentity
+    let codexProjectContext = savedRemoteIdentity
       ?? codexProjectContextForTaskProject(task.projectId);
     if (
       projectCodexIdentities[task.projectId]?.codexProjectKind === "remote"
@@ -3106,6 +2865,22 @@ export function App() {
       ));
       return;
     }
+    if (!standalone && codexProjectContext?.codexProjectKind === "remote") {
+      const identity = remoteIdentityForTask(task, codexProjectContext);
+      if (!identity) {
+        setActionError(task.developmentContext?.type === "worktree"
+          ? text(
+            "目标 SSH worktree 未在保存的主机中添加或映射。",
+            "The target SSH worktree is not added or mapped on the saved host.",
+          )
+          : text(
+            "已保存的 SSH 远程项目或主机当前不可用。",
+            "The saved SSH remote project or host is not available.",
+          ));
+        return;
+      }
+      codexProjectContext = identity;
+    }
     let workspacePath = projectless
       ? undefined
       : task.developmentContext?.type === "worktree"
@@ -3113,7 +2888,10 @@ export function App() {
         : codexProjectContext?.workspacePath
           ?? deviceWorkspacePaths[task.projectId]
           ?? taskboardProject?.workspacePath;
-    const instruction = `e-taskboard 处理任务面板任务 ${task.identifier}，并同步进度状态。`;
+    const instruction = text(
+      `[$manage-taskboard](${manageTaskboardSkillPath}) 议题 ID：${task.identifier}`,
+      `[$manage-taskboard](${manageTaskboardSkillPath}) Issue ID: ${task.identifier}`,
+    );
 
     if (
       !projectless
@@ -3157,42 +2935,6 @@ export function App() {
       return;
     }
     if (openingThreadTaskId) return;
-    const canonicalReferences = [
-      ...(task.relations.parent
-        ? [{
-            relation: "parent",
-            identifier: task.relations.parent.identifier,
-            title: task.relations.parent.title,
-          }]
-        : []),
-      ...task.relations.subIssues.map((relation) => ({
-        relation: "subIssues",
-        identifier: relation.identifier,
-        title: relation.title,
-      })),
-      ...task.relations.blockedBy.map((relation) => ({
-        relation: "blockedBy",
-        identifier: relation.identifier,
-        title: relation.title,
-      })),
-      ...task.relations.blocks.map((relation) => ({
-        relation: "blocks",
-        identifier: relation.identifier,
-        title: relation.title,
-      })),
-      ...task.relations.related.map((relation) => ({
-        relation: "related",
-        identifier: relation.identifier,
-        title: relation.title,
-      })),
-    ];
-    const beforeDescription = `${instruction}\n\n议题：${task.identifier} ${task.title}\n\n正文：\n`;
-    const afterDescription = `\n\nCanonical references：\n${canonicalReferences.length > 0
-      ? canonicalReferences.map((reference) => (
-          `- ${reference.relation}: ${reference.identifier} ${reference.title}`
-        )).join("\n")
-      : "（无）"}`;
-    const embeddedInstruction = `${beforeDescription}${task.description}${afterDescription}`;
     if (standalone) {
       if (codexProjectContext?.codexProjectKind === "remote") {
         setActionError(text(
@@ -3203,29 +2945,19 @@ export function App() {
       }
       const deepLink = new URL("codex://threads/new");
       if (workspacePath) deepLink.searchParams.set("path", workspacePath);
-      deepLink.searchParams.set("prompt", embeddedInstruction);
+      deepLink.searchParams.set("prompt", instruction);
       window.location.assign(deepLink.toString());
       return;
     }
     setOpeningThreadTaskId(task.id);
     setActionError(null);
-    if (codexProjectContext?.codexProjectKind === "remote" && codexProjectContext.workspacePath) {
-      void openRemoteTaskInThread(task, {
-        ...codexProjectContext,
-        workspacePath: codexProjectContext.workspacePath,
-      });
-      return;
-    }
     postEmbeddedHostMessage({
       type: "taskboard:create-thread",
       payload: {
         taskId: task.id,
         identifier: task.identifier,
         title: task.title,
-        description: task.description,
-        canonicalReferences,
-        instruction: embeddedInstruction,
-        projectName: taskboardProject?.name,
+        instruction,
         projectless,
         codexProjectId: codexProjectContext?.codexProjectId,
         codexProjectKind: codexProjectContext?.codexProjectKind ?? "local",
