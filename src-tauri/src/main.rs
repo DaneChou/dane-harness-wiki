@@ -56,7 +56,7 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 use uuid::Uuid;
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const LAUNCHER_STOP_TIMEOUT: Duration = Duration::from_secs(36);
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 // Unique whole-directory snapshots shipped from app-v0.2.0 through v1.1.2.
@@ -714,6 +714,55 @@ fn find_codex_app(_home_directory: &Path) -> Option<PathBuf> {
     candidate.is_file().then_some(candidate)
 }
 
+#[cfg(target_os = "windows")]
+fn ordinary_codex_process(app_path: &Path) -> Result<Option<u32>, String> {
+    let output = StdCommand::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference = 'Stop'; $name = [IO.Path]::GetFileNameWithoutExtension($env:CODEX_TASKBOARD_CODEX_APP_PATH); $process = Get-Process -Name $name -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:CODEX_TASKBOARD_CODEX_APP_PATH -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1; if ($null -ne $process) { [Console]::Out.Write($process.Id) }",
+        ])
+        .env("CODEX_TASKBOARD_CODEX_APP_PATH", app_path)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err("无法检查正在运行的 Codex".to_string());
+    }
+    let pid = String::from_utf8_lossy(&output.stdout);
+    let pid = pid.trim();
+    if pid.is_empty() {
+        return Ok(None);
+    }
+    pid.parse()
+        .map(Some)
+        .map_err(|_| "无法检查正在运行的 Codex".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn quit_codex_normally(pid: u32) -> Result<(), String> {
+    let status = StdCommand::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference = 'Stop'; $process = Get-Process -Id $env:CODEX_TASKBOARD_CODEX_PID -ErrorAction SilentlyContinue; if ($null -eq $process) { exit 0 }; if (-not $process.CloseMainWindow()) { exit 2 }; if (-not $process.WaitForExit([int]$env:CODEX_TASKBOARD_CODEX_EXIT_TIMEOUT_MS)) { exit 3 }",
+        ])
+        .env("CODEX_TASKBOARD_CODEX_PID", pid.to_string())
+        .env(
+            "CODEX_TASKBOARD_CODEX_EXIT_TIMEOUT_MS",
+            LAUNCHER_STOP_TIMEOUT.as_millis().to_string(),
+        )
+        .status()
+        .map_err(|error| error.to_string())?;
+    match status.code() {
+        Some(0) => Ok(()),
+        Some(2) => Err("Codex 没有接受退出请求".to_string()),
+        Some(3) => Err("Codex 尚未退出，任务面板没有启动".to_string()),
+        _ => Err("无法正常关闭 Codex".to_string()),
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn missing_codex_app_message() -> String {
     "未找到官方 ChatGPT.app 或 Codex.app。请先安装到 Applications 文件夹。".to_string()
@@ -1039,7 +1088,7 @@ fn start_launcher_locked(
             "node"
         });
     stop_recorded_child(state);
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     if let Some(codex_pid) = ordinary_codex_process(&codex_app)? {
         let restart = app
             .dialog()
