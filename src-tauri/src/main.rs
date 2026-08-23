@@ -1211,6 +1211,8 @@ fn start_launcher_locked(
     let instance_token = Uuid::new_v4().to_string();
     let instance_secret = Uuid::new_v4().to_string();
     let version = state.snapshot.lock().unwrap().version.clone();
+    let manage_taskboard_skill_path =
+        home_directory.join(".agents/skills/manage-taskboard/SKILL.md");
     #[cfg(target_os = "macos")]
     let codex_source_profile = home_directory.join("Library/Application Support/Codex");
     #[cfg(target_os = "windows")]
@@ -1240,6 +1242,7 @@ fn start_launcher_locked(
         .env("CODEX_TASKBOARD_INSTANCE_TOKEN", &instance_token)
         .env("CODEX_TASKBOARD_INSTANCE_SECRET", &instance_secret)
         .env("CODEX_TASKBOARD_VERSION", &version)
+        .env("CODEX_TASKBOARD_SKILL_PATH", &manage_taskboard_skill_path)
         .env_remove("CODEX_API_KEY")
         .env(
             "CODEX_TASKBOARD_CODEX_PROFILE",
