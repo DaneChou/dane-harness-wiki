@@ -2888,7 +2888,7 @@ export function App() {
         : codexProjectContext?.workspacePath
           ?? deviceWorkspacePaths[task.projectId]
           ?? taskboardProject?.workspacePath;
-    const instruction = text(
+    const embeddedInstruction = text(
       `[$manage-taskboard](${manageTaskboardSkillPath}) 议题 ID：${task.identifier}`,
       `[$manage-taskboard](${manageTaskboardSkillPath}) Issue ID: ${task.identifier}`,
     );
@@ -2945,7 +2945,7 @@ export function App() {
       }
       const deepLink = new URL("codex://threads/new");
       if (workspacePath) deepLink.searchParams.set("path", workspacePath);
-      deepLink.searchParams.set("prompt", instruction);
+      deepLink.searchParams.set("prompt", embeddedInstruction);
       window.location.assign(deepLink.toString());
       return;
     }
@@ -2957,7 +2957,7 @@ export function App() {
         taskId: task.id,
         identifier: task.identifier,
         title: task.title,
-        instruction,
+        instruction: embeddedInstruction,
         projectless,
         codexProjectId: codexProjectContext?.codexProjectId,
         codexProjectKind: codexProjectContext?.codexProjectKind ?? "local",

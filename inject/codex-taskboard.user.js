@@ -1086,11 +1086,12 @@
             "The target project or worktree is not mapped in Codex",
           ));
         }
+        const { targetRoot } = target;
         bridge.sendMessageFromView({
           type: "electron-add-new-workspace-root-option",
-          root: target.targetRoot,
+          root: targetRoot,
         });
-        lastNativeProjectId = await waitForNativeProject(target.targetRoot);
+        lastNativeProjectId = await waitForNativeProject(targetRoot);
       }
 
       closeTaskboard(false);
