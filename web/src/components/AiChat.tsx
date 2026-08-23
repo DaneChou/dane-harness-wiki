@@ -1751,21 +1751,12 @@ export function AiChat({
       event.preventDefault();
       event.stopPropagation();
       if (typeof event.stopImmediatePropagation === "function") event.stopImmediatePropagation();
-      if (dangerConfirmOpen) setPendingDangerInput(null);
-      else if (composerQueryState) {
-        dismissedComposerQueryRef.current = `${composerQueryState.trigger}${composerQueryState.query}`;
-        setComposerQueryState(null);
-      }
-      else if (menu) setMenu(null);
-      else if (historyOpen) setHistoryOpen(false);
-      else {
-        restorePersistedConversationFromDraft();
-        setPanelOpen(false);
-      }
+      restorePersistedConversationFromDraft();
+      setPanelOpen(false);
     }
     document.addEventListener("keydown", closeWithEscape, true);
     return () => document.removeEventListener("keydown", closeWithEscape, true);
-  }, [composerQueryState, dangerConfirmOpen, draftOrigin, historyOpen, menu, panelOpen, threads]);
+  }, [draftOrigin, panelOpen, threads]);
 
   const visibleComposerCandidates = useMemo(() => {
     const candidates = composerCandidates?.candidates.filter((candidate) => (

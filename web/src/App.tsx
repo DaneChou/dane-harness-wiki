@@ -3350,16 +3350,14 @@ export function App() {
 
         {selectedProjectId && !detailTask && <div className="board-toolbar">
           <div className="view-tabs" aria-label={text("看板视图", "Board views")}>
-            {!isAllProjects && (
-              <button
-                className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
-                type="button"
-                aria-pressed={boardView === "dashboard"}
-                onClick={() => selectBoardView("dashboard")}
-              >
-                {text("仪表盘", "Dashboard")}
-              </button>
-            )}
+            <button
+              className={`view-tab${boardView === "dashboard" ? " active" : ""}`}
+              type="button"
+              aria-pressed={boardView === "dashboard"}
+              onClick={() => selectBoardView("dashboard")}
+            >
+              {text("仪表盘", "Dashboard")}
+            </button>
             <button
               className={`view-tab${boardView === "issues" ? " active" : ""}`}
               type="button"
@@ -3575,11 +3573,12 @@ export function App() {
             onOpenTask={openTaskDetail}
             onError={setActionError}
           />
-        ) : boardView === "dashboard" && selectedProject ? (
+        ) : boardView === "dashboard" && (selectedProject || isAllProjects) ? (
           <DashboardView
             key={selectedProjectId}
             projectId={selectedProjectId}
             projectCreatedAt={selectedProject?.createdAt ?? null}
+            isAllProjects={isAllProjects}
             tasks={tasks}
             presentations={taskPresentations}
             currentUser={currentUser}

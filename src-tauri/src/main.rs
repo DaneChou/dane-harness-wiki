@@ -54,9 +54,26 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use uuid::Uuid;
+#[cfg(target_os = "windows")]
+use windows::{
+    core::PWSTR,
+    Win32::{
+        Foundation::{CloseHandle, ERROR_SUCCESS, FILETIME, WAIT_OBJECT_0},
+        System::{
+            RestartManager::{
+                RmEndSession, RmRegisterResources, RmShutdown, RmStartSession, CCH_RM_SESSION_KEY,
+                RM_UNIQUE_PROCESS,
+            },
+            Threading::{
+                GetProcessTimes, OpenProcess, WaitForSingleObject,
+                PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE,
+            },
+        },
+    },
+};
 
 const STOP_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 const LAUNCHER_STOP_TIMEOUT: Duration = Duration::from_secs(36);
 const UPDATE_CHECK_INTERVAL: Duration = Duration::from_secs(30 * 60);
 // Unique whole-directory snapshots shipped from app-v0.2.0 through v1.1.2.
@@ -710,8 +727,102 @@ fn find_codex_app(_home_directory: &Path) -> Option<PathBuf> {
         return None;
     }
     let install_location = String::from_utf8_lossy(&output.stdout);
-    let candidate = PathBuf::from(install_location.trim()).join("app/ChatGPT.exe");
+    let candidate = PathBuf::from(install_location.trim())
+        .join("app")
+        .join("ChatGPT.exe");
     candidate.is_file().then_some(candidate)
+}
+
+#[cfg(target_os = "windows")]
+fn ordinary_codex_process(app_path: &Path, codex_profile: &Path) -> Result<Option<u32>, String> {
+    let output = StdCommand::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "$ErrorActionPreference = 'Stop'; $app = $env:CODEX_TASKBOARD_CODEX_APP_PATH; $profile = $env:CODEX_TASKBOARD_CODEX_PROFILE; $name = [IO.Path]::GetFileName($app); $all = @(Get-CimInstance Win32_Process -Filter \"Name = '$name'\" | Where-Object { $_.ExecutablePath -eq $app }); $pids = @{}; foreach ($item in $all) { $pids[[uint32]$item.ProcessId] = $true }; $process = $all | Where-Object { $command = [string]$_.CommandLine; $isRoot = -not $pids.ContainsKey([uint32]$_.ParentProcessId); $isManaged = $command.IndexOf('--remote-debugging-pipe', [StringComparison]::OrdinalIgnoreCase) -ge 0 -and $command.IndexOf(('--user-data-dir=' + $profile), [StringComparison]::OrdinalIgnoreCase) -ge 0; $isRoot -and -not $isManaged } | Select-Object -First 1; if ($null -ne $process) { [Console]::Out.Write($process.ProcessId) }",
+        ])
+        .env("CODEX_TASKBOARD_CODEX_APP_PATH", app_path)
+        .env("CODEX_TASKBOARD_CODEX_PROFILE", codex_profile)
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err("无法检查正在运行的 Codex".to_string());
+    }
+    let pid = String::from_utf8_lossy(&output.stdout);
+    let pid = pid.trim();
+    if pid.is_empty() {
+        return Ok(None);
+    }
+    pid.parse()
+        .map(Some)
+        .map_err(|_| "无法检查正在运行的 Codex".to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn quit_codex_normally(pid: u32) -> Result<(), String> {
+    let process = unsafe {
+        OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_SYNCHRONIZE,
+            false,
+            pid,
+        )
+    }
+    .map_err(|error| error.to_string())?;
+    let mut creation_time = FILETIME::default();
+    let mut exit_time = FILETIME::default();
+    let mut kernel_time = FILETIME::default();
+    let mut user_time = FILETIME::default();
+    if unsafe {
+        GetProcessTimes(
+            process,
+            &mut creation_time,
+            &mut exit_time,
+            &mut kernel_time,
+            &mut user_time,
+        )
+    }
+    .is_err()
+    {
+        let _ = unsafe { CloseHandle(process) };
+        return Err("无法检查正在运行的 Codex".to_string());
+    }
+
+    let mut session = 0;
+    let mut session_key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+    let started = unsafe { RmStartSession(&mut session, None, PWSTR(session_key.as_mut_ptr())) };
+    if started != ERROR_SUCCESS {
+        let _ = unsafe { CloseHandle(process) };
+        return Err("无法请求 Codex 退出".to_string());
+    }
+    let application = RM_UNIQUE_PROCESS {
+        dwProcessId: pid,
+        ProcessStartTime: creation_time,
+    };
+    let registered = unsafe { RmRegisterResources(session, None, Some(&[application]), None) };
+    let shutdown = if registered == ERROR_SUCCESS {
+        unsafe { RmShutdown(session, 0, None) }
+    } else {
+        registered
+    };
+    let _ = unsafe { RmEndSession(session) };
+    if shutdown != ERROR_SUCCESS {
+        let _ = unsafe { CloseHandle(process) };
+        return Err("Codex 没有接受退出请求".to_string());
+    }
+
+    let exited = unsafe {
+        WaitForSingleObject(
+            process,
+            LAUNCHER_STOP_TIMEOUT.as_millis().try_into().unwrap(),
+        )
+    } == WAIT_OBJECT_0;
+    let _ = unsafe { CloseHandle(process) };
+    if exited {
+        Ok(())
+    } else {
+        Err("Codex 尚未退出，任务面板没有启动".to_string())
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -1038,9 +1149,13 @@ fn start_launcher_locked(
         } else {
             "node"
         });
+    let codex_profile = state.data_directory.join("codex-profile");
     stop_recorded_child(state);
     #[cfg(target_os = "macos")]
-    if let Some(codex_pid) = ordinary_codex_process(&codex_app)? {
+    let ordinary_codex_pid = ordinary_codex_process(&codex_app)?;
+    #[cfg(target_os = "windows")]
+    let ordinary_codex_pid = ordinary_codex_process(&codex_app, &codex_profile)?;
+    if let Some(codex_pid) = ordinary_codex_pid {
         let restart = app
             .dialog()
             .message("需要重新启动 Codex 才能显示任务面板")
@@ -1096,7 +1211,6 @@ fn start_launcher_locked(
     let instance_token = Uuid::new_v4().to_string();
     let instance_secret = Uuid::new_v4().to_string();
     let version = state.snapshot.lock().unwrap().version.clone();
-    let codex_profile = state.data_directory.join("codex-profile");
     #[cfg(target_os = "macos")]
     let codex_source_profile = home_directory.join("Library/Application Support/Codex");
     #[cfg(target_os = "windows")]
@@ -1318,9 +1432,7 @@ fn restart_launcher(
         }
         stop_managed_child_locked(app, state);
         let result = start_launcher_locked(app, state);
-        if result.is_err() {
-            state.intentional_stop.store(false, Ordering::SeqCst);
-        }
+        state.intentional_stop.store(false, Ordering::SeqCst);
         let generation = state.generation.load(Ordering::SeqCst);
         (result, generation)
     };
