@@ -144,6 +144,8 @@ function parseArgs(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
 
+  if (process.platform === "linux" && options.launch) options.cdpPipe = true;
+
   if (!Number.isInteger(options.port) || options.port < 1 || options.port > 65535) {
     throw new Error("--port must be an integer between 1 and 65535");
   }
