@@ -13,13 +13,6 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  isAutomationModel,
-  isAutomationReasoningEffort,
-  isSupportedModelEffort,
-  type AutomationModel,
-  type AutomationReasoningEffort,
-} from "../../shared/taskboard-automation-options.mjs";
-import {
   ApiError,
   addTaskRelation,
   archiveTask as archiveTaskRequest,
@@ -124,6 +117,7 @@ import {
 import {
   TASK_STATUSES,
   type ActorIdentity,
+  type AiChatModel,
   type AiChatThread,
   type CodexProjectIdentity,
   type CodexThreadBinding,
@@ -237,8 +231,8 @@ interface ProjectAutomationRecord {
   quotaAware: boolean;
   quota?: AutomationQuotaStatus;
   intervalMinutes: AutomationIntervalMinutes;
-  model: AutomationModel;
-  reasoningEffort: AutomationReasoningEffort;
+  model: string;
+  reasoningEffort: string;
 }
 
 type ProjectAutomationOptions = Pick<
@@ -268,8 +262,8 @@ type ProjectAutomations = Record<string, ProjectAutomationRecord>;
 interface AutomationHostItem {
   id: string;
   status: ProjectAutomationStatus;
-  model: AutomationModel;
-  reasoningEffort: AutomationReasoningEffort;
+  model: string;
+  reasoningEffort: string;
   rrule: string;
 }
 
@@ -288,8 +282,8 @@ interface AutomationHostResponse {
     enabledByUser: boolean;
     quotaAware: boolean;
     intervalMinutes: AutomationIntervalMinutes;
-    model: AutomationModel;
-    reasoningEffort: AutomationReasoningEffort;
+    model: string;
+    reasoningEffort: string;
   };
   error?: string;
 }
@@ -317,14 +311,6 @@ const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
 const BOARD_CARD_DISPLAY_KEY = "taskboard.board-card-display.v1";
 const ISSUE_READ_KEY_PREFIX = "taskboard.issue-read.v1";
 const FIRST_USE_COMPLETE_KEY = "taskboard.first-use-complete.v1";
-const DEFAULT_AUTOMATION_OPTIONS = {
-  enabledByUser: false,
-  quotaAware: false,
-  intervalMinutes: 5,
-  model: "gpt-5.5",
-  reasoningEffort: "high",
-} as const;
-
 function readIssueActivityKeys(storageKey: string): Record<string, string> {
   try {
     const value = JSON.parse(taskboardStorage.getItem(storageKey) ?? "{}");
@@ -443,8 +429,8 @@ function readProjectAutomations(): ProjectAutomations {
     for (const [projectId, record] of Object.entries(value)) {
       if (!record || typeof record !== "object" || Array.isArray(record)) continue;
       const candidate = record as Partial<ProjectAutomationRecord>;
-      const model = candidate.model ?? "gpt-5.5";
-      const reasoningEffort = candidate.reasoningEffort ?? "high";
+      const model = candidate.model;
+      const reasoningEffort = candidate.reasoningEffort;
       const enabledByUser = candidate.enabledByUser ?? candidate.status === "ACTIVE";
       const quotaAware = candidate.quotaAware ?? false;
       if (
@@ -455,9 +441,10 @@ function readProjectAutomations(): ProjectAutomations {
         || typeof candidate.workspacePath !== "string"
         || (candidate.status !== "ACTIVE" && candidate.status !== "PAUSED")
         || !isAutomationIntervalMinutes(candidate.intervalMinutes ?? 5)
-        || !isAutomationModel(model)
-        || !isAutomationReasoningEffort(reasoningEffort)
-        || !isSupportedModelEffort(model, reasoningEffort)
+        || typeof model !== "string"
+        || !model.trim()
+        || typeof reasoningEffort !== "string"
+        || !reasoningEffort.trim()
         || (candidate.status === "ACTIVE" && !candidate.automationId)
         || typeof enabledByUser !== "boolean"
         || typeof quotaAware !== "boolean"
@@ -511,9 +498,10 @@ function isAutomationHostPolicy(
     && typeof value.enabledByUser === "boolean"
     && typeof value.quotaAware === "boolean"
     && isAutomationIntervalMinutes(value.intervalMinutes)
-    && isAutomationModel(value.model)
-    && isAutomationReasoningEffort(value.reasoningEffort)
-    && isSupportedModelEffort(value.model, value.reasoningEffort),
+    && typeof value.model === "string"
+    && Boolean(value.model.trim())
+    && typeof value.reasoningEffort === "string"
+    && Boolean(value.reasoningEffort.trim()),
   );
 }
 
@@ -532,9 +520,10 @@ function isAutomationHostItem(value: unknown): value is AutomationHostItem {
   return (
     typeof item.id === "string"
     && (item.status === "ACTIVE" || item.status === "PAUSED")
-    && isAutomationModel(item.model)
-    && isAutomationReasoningEffort(item.reasoningEffort)
-    && isSupportedModelEffort(item.model, item.reasoningEffort)
+    && typeof item.model === "string"
+    && Boolean(item.model.trim())
+    && typeof item.reasoningEffort === "string"
+    && Boolean(item.reasoningEffort.trim())
     && typeof item.rrule === "string"
     && intervalMinutesFromRrule(item.rrule) !== null
   );
@@ -800,6 +789,12 @@ export function App() {
   const [projectAutomations, setProjectAutomations] = useState(readProjectAutomations);
   const [automationPending, setAutomationPending] = useState(false);
   const [automationError, setAutomationError] = useState<string | null>(null);
+  const [automationCatalog, setAutomationCatalog] = useState<{
+    projectId: string;
+    models: AiChatModel[];
+  } | null>(null);
+  const [automationCatalogLoading, setAutomationCatalogLoading] = useState(false);
+  const [automationCatalogError, setAutomationCatalogError] = useState<string | null>(null);
   const [announcement, setAnnouncementValue] = useState("");
   const [undoNotice, setUndoNotice] = useState<UndoNotice | null>(null);
   const projectsRequestRef = useRef(0);
@@ -876,6 +871,34 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
+  const automationModels = automationCatalog && automationCatalog.projectId === selectedProject?.id
+    ? automationCatalog.models
+    : [];
+  useEffect(() => {
+    setAutomationCatalog(null);
+    setAutomationCatalogError(null);
+    if (!selectedProject || !localAiChatAvailable) {
+      setAutomationCatalogLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setAutomationCatalogLoading(true);
+    void getAiChatCatalog(selectedProject.id, controller.signal).then(
+      (catalog) => {
+        if (controller.signal.aborted) return;
+        setAutomationCatalog({ projectId: selectedProject.id, models: catalog.models });
+        setAutomationCatalogLoading(false);
+      },
+      (error) => {
+        if (controller.signal.aborted) return;
+        setAutomationCatalogError(error instanceof Error
+          ? error.message
+          : text("无法读取 Codex 模型目录", "Could not load the Codex model catalog."));
+        setAutomationCatalogLoading(false);
+      },
+    );
+    return () => controller.abort();
+  }, [localAiChatAvailable, selectedProject?.id, text]);
   const aiImportProjectId = hasLoadedTasks
     && tasks.length === 0
     && selectedProject
@@ -1306,6 +1329,10 @@ export function App() {
       setAutomationError(null);
       return;
     }
+    const models = automationCatalog?.projectId === automationRequestContext.taskboardProjectId
+      ? automationCatalog.models
+      : null;
+    if (!models) return;
     if (automationRequestInFlightRef.current) return;
     const projectId = automationRequestContext.taskboardProjectId;
     const stored = projectAutomationsRef.current[projectId];
@@ -1314,10 +1341,18 @@ export function App() {
     if (initialLoad) setAutomationPending(true);
     setAutomationError(null);
     try {
-      const options = stored ?? {
-        status: "PAUSED" as const,
-        ...DEFAULT_AUTOMATION_OPTIONS,
-      };
+      const defaultModel = models[0];
+      let options: ProjectAutomationOptions | undefined = stored;
+      if (!options) {
+        if (!defaultModel) return;
+        options = {
+          enabledByUser: false,
+          quotaAware: false,
+          intervalMinutes: 5,
+          model: defaultModel.slug,
+          reasoningEffort: defaultModel.defaultReasoningEffort,
+        };
+      }
       const response = await sendAutomationRequest(
         "list",
         options,
@@ -1406,6 +1441,7 @@ export function App() {
       void drainQueuedAutomationSaves(projectId);
     }
   }, [
+    automationCatalog,
     automationRequestContext,
     drainQueuedAutomationSaves,
     sendAutomationRequest,
@@ -3546,8 +3582,9 @@ export function App() {
             {selectedProject && (
               <ProjectAutomationMenu
                 automation={selectedProjectAutomation}
-                pending={automationPending}
-                error={automationError}
+                models={automationModels}
+                pending={automationPending || automationCatalogLoading}
+                error={automationCatalogError ?? automationError}
                 unavailableReason={automationProjectContext.unavailableReason}
                 onOpen={() => void reconcileProjectAutomation()}
                 onChange={(options) => void saveProjectAutomation(options)}
