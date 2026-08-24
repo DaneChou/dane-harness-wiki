@@ -4839,6 +4839,10 @@ kbd {
   line-height: 20px;
 }
 
+.detail-label-trigger:hover:not(:disabled) .label-trigger-chip {
+  background: var(--surface-active);
+}
+
 .detail-label-trigger .label-trigger-chip i {
   display: block;
   width: 5px;
@@ -8803,7 +8807,7 @@ kbd {
 .task-card:hover,
 .task-card.is-context-open {
   border-color: var(--border-strong);
-  background: var(--surface-raised);
+  background: var(--surface-hover);
   box-shadow: var(--card-shadow);
 }
 
@@ -9067,6 +9071,17 @@ kbd {
 .due-date-chip .taskboard-icon {
   width: 11px;
   height: 12px;
+}
+
+.priority-chip:hover:not(:disabled),
+.card-label-trigger:hover:not(:disabled) .label-chip,
+.due-date-chip:has(input:not(:disabled)):hover {
+  background: var(--surface-active);
+}
+
+.task-assignee-trigger:hover:not(:disabled) {
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--surface-active);
 }
 
 .label-more {
