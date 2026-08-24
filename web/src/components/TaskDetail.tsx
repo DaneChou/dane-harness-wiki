@@ -365,14 +365,14 @@ function ConversationLink({
       <button
         className="issue-conversation-copy"
         type="button"
-        title={text("复制 Codex 恢复命令", "Copy Codex resume command")}
+        title={text("复制终端命令", "Copy terminal command")}
         onClick={() => onCopy(
           `codex resume ${threadId}`,
           text("Codex 恢复命令已复制。", "Codex resume command copied."),
         )}
       >
         <CodexResumeIcon />
-        <span>{text("复制命令", "Copy command")}</span>
+        <span>{text("复制终端命令", "Copy terminal command")}</span>
       </button>
     </div>
   );
