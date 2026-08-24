@@ -2175,10 +2175,7 @@ export function App() {
     ) as Record<TaskStatus, Task[]>;
   }, [filteredTasks]);
 
-  const hasBlockedTasks = tasks.some((task) => task.status === "blocked");
-  const mainBoardItems = hasBlockedTasks
-    ? boardDisplaySettings.mainStatuses
-    : boardDisplaySettings.mainStatuses.filter((status) => status !== "blocked");
+  const mainBoardItems = boardDisplaySettings.mainStatuses;
   const mainColumnCount = Math.max(mainBoardItems.length, 1);
   const mainBoardMinWidth = (mainColumnCount * 300) + ((mainColumnCount - 1) * 24);
   const mainBoardMaxWidth = (mainColumnCount * 400) + ((mainColumnCount - 1) * 24);
@@ -3697,7 +3694,7 @@ export function App() {
                         currentUser={currentUser}
                         showCover={boardDisplaySettings.cover}
                         showBody={boardDisplaySettings.body}
-                        createEnabled={!isAllProjects && !isJiraProject}
+                        createEnabled={!isJiraProject}
                         onCreateLabel={persistProjectLabel}
                         onCreate={(initialStatus) => setEditor({ task: null, status: initialStatus })}
                         onEdit={openTaskDetail}
@@ -3738,7 +3735,7 @@ export function App() {
                     restoringTaskId={restoringTaskId}
                     deletingTaskId={deletingArchivedTaskId}
                     onTabChange={setOtherTasksTab}
-                    onCreate={isJiraProject || isAllProjects
+                    onCreate={isJiraProject
                       ? undefined
                       : (initialStatus) => setEditor({ task: null, status: initialStatus })}
                     onRestore={(task) => void restoreArchivedTask(task)}
