@@ -72,6 +72,17 @@ function storedThreadBinding(threadBinding, threadId) {
   ];
 }
 
+function storedThreadBindingForExisting(current, threadBinding, threadId) {
+  if (
+    threadBinding === undefined
+    && current?.threadBinding
+    && current.threadBinding.threadId === threadId
+  ) {
+    return storedThreadBinding(current.threadBinding, threadId);
+  }
+  return storedThreadBinding(threadBinding, threadId);
+}
+
 function attachTaskActivity(task, comments, activities, previewImage = null) {
   const orderedComments = [...comments].sort((left, right) => (
     left.id.localeCompare(right.id)
@@ -2019,7 +2030,7 @@ export class TaskboardDatabase {
       assignments.push("sort_order = ?");
       values.push(row.minimum === null ? 1000 : row.minimum - 1000);
     }
-    const storedBinding = storedThreadBinding(threadBinding, threadId);
+    const storedBinding = storedThreadBindingForExisting(current, threadBinding, threadId);
     if (storedBinding && !Object.hasOwn(changes, "projectId")) {
       assignments.push(
         "thread_id = ?",
@@ -2091,7 +2102,7 @@ export class TaskboardDatabase {
     }
 
     const timestamp = now();
-    const storedBinding = storedThreadBinding(threadBinding, threadId);
+    const storedBinding = storedThreadBindingForExisting(current, threadBinding, threadId);
     const threadAssignment = storedBinding
       ? `thread_id = ?, thread_codex_project_id = ?, thread_codex_project_kind = ?,
         thread_codex_host_id = ?, thread_workspace_path = ?,`
@@ -2124,7 +2135,7 @@ export class TaskboardDatabase {
     const current = this.#requireTask(id);
     this.#requireVersion(current, version);
     const timestamp = now();
-    const storedBinding = storedThreadBinding(threadBinding, threadId);
+    const storedBinding = storedThreadBindingForExisting(current, threadBinding, threadId);
     const threadAssignment = storedBinding
       ? `thread_id = ?, thread_codex_project_id = ?, thread_codex_project_kind = ?,
         thread_codex_host_id = ?, thread_workspace_path = ?,`
@@ -2160,7 +2171,7 @@ export class TaskboardDatabase {
       throw new ApiError(409, "TASK_NOT_ARCHIVED", "Only archived tasks can be restored");
     }
     const timestamp = now();
-    const storedBinding = storedThreadBinding(threadBinding, threadId);
+    const storedBinding = storedThreadBindingForExisting(current, threadBinding, threadId);
     const threadAssignment = storedBinding
       ? `thread_id = ?, thread_codex_project_id = ?, thread_codex_project_kind = ?,
         thread_codex_host_id = ?, thread_workspace_path = ?,`
@@ -2825,7 +2836,8 @@ export class TaskboardDatabase {
   }
 
   #touchTask(id, version, threadId, threadBinding, timestamp) {
-    const storedBinding = storedThreadBinding(threadBinding, threadId);
+    const current = this.#requireTask(id);
+    const storedBinding = storedThreadBindingForExisting(current, threadBinding, threadId);
     const threadAssignment = storedBinding
       ? `thread_id = ?, thread_codex_project_id = ?, thread_codex_project_kind = ?,
         thread_codex_host_id = ?, thread_workspace_path = ?,`
