@@ -53,12 +53,16 @@ import {
 } from "./actors";
 import { BoardColumn } from "./components/BoardColumn";
 import type { AiChatOpenThreadRequest } from "./components/AiChat";
-import { BoardCardDisplayMenu } from "./components/BoardCardDisplayMenu";
+import {
+  BoardCardDisplayMenu,
+  DEFAULT_BOARD_DISPLAY_SETTINGS,
+  type BoardDisplaySettings,
+} from "./components/BoardCardDisplayMenu";
 import { DashboardView } from "./components/DashboardView";
 import { ProjectReadmeView } from "./components/ProjectReadmeView";
 import { IssueListView } from "./components/IssueListView";
 import { JiraConnectionDialog } from "./components/JiraConnectionDialog";
-import { OtherTasksPanel } from "./components/OtherTasksPanel";
+import { ArchivedTasksColumn, OtherTasksPanel } from "./components/OtherTasksPanel";
 import {
   resolveInlineMediaMarkdown,
   type PendingInlineImage,
@@ -141,7 +145,6 @@ type DetailSourceScroll =
   | { projectId: string; view: "issues"; status: TaskStatus; scrollTop: number }
   | { projectId: string; view: "list"; scrollTop: number };
 type GanttZoom = "day" | "week" | "month";
-type BoardCardDisplay = { cover: boolean; body: boolean };
 type ActionError = string | readonly [string, string];
 type ProjectLoadError = {
   source: "projects";
@@ -300,7 +303,7 @@ const PROJECT_VIEW_KEY_PREFIX = "taskboard.project-view.v1.";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
 const PROJECT_CODEX_IDENTITIES_KEY = "taskboard.projectCodexIdentities.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
-const BOARD_CARD_DISPLAY_KEY = "taskboard.board-card-display.v1";
+const PROJECT_BOARD_DISPLAY_SETTINGS_KEY = "taskboard.project-board-display-settings.v3";
 const ISSUE_READ_KEY_PREFIX = "taskboard.issue-read.v1";
 const FIRST_USE_COMPLETE_KEY = "taskboard.first-use-complete.v1";
 function readIssueActivityKeys(storageKey: string): Record<string, string> {
@@ -322,15 +325,12 @@ function readProjectBoardView(projectId: string): BoardView {
     : "issues";
 }
 
-function readBoardCardDisplay(): BoardCardDisplay {
+function readProjectBoardDisplaySettings(): Record<string, BoardDisplaySettings> {
   try {
-    const value = JSON.parse(taskboardStorage.getItem(BOARD_CARD_DISPLAY_KEY) ?? "{}");
-    return {
-      cover: value.cover !== false,
-      body: value.body === true,
-    };
+    const value = JSON.parse(taskboardStorage.getItem(PROJECT_BOARD_DISPLAY_SETTINGS_KEY) ?? "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
   } catch {
-    return { cover: true, body: false };
+    return {};
   }
 }
 
@@ -729,7 +729,9 @@ export function App() {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(readTaskFilters);
   const [boardView, setBoardView] = useState<BoardView>(() => readProjectBoardView(initialProjectId));
-  const [boardCardDisplay, setBoardCardDisplay] = useState<BoardCardDisplay>(readBoardCardDisplay);
+  const [projectBoardDisplaySettings, setProjectBoardDisplaySettings] = useState(
+    readProjectBoardDisplaySettings,
+  );
   const [dashboardSummaryAnimatedProjectId, setDashboardSummaryAnimatedProjectId] = useState<string | null>(null);
   const [ganttZoom, setGanttZoom] = useState<GanttZoom>("week");
   const [ganttHideCompleted, setGanttHideCompleted] = useState(false);
@@ -864,6 +866,8 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
+  const boardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
+    ?? DEFAULT_BOARD_DISPLAY_SETTINGS;
   const automationModels = automationCatalog && automationCatalog.projectId === selectedProject?.id
     ? automationCatalog.models
     : [];
@@ -2193,14 +2197,24 @@ export function App() {
     ) as Record<TaskStatus, Task[]>;
   }, [filteredTasks]);
 
-  const hasBlockedTasks = tasks.some((task) => task.status === "blocked");
-  const mainStatuses = hasBlockedTasks
-    ? MAIN_STATUSES
-    : MAIN_STATUSES.filter((status) => status !== "blocked");
-  const mainBoardMinWidth = (mainStatuses.length * 300) + ((mainStatuses.length - 1) * 24);
-  const mainBoardMaxWidth = (mainStatuses.length * 400) + ((mainStatuses.length - 1) * 24);
-  const otherTasksColumnCount = mainStatuses.length + 1;
-  const otherTasksWidth = `clamp(300px, calc(${100 / otherTasksColumnCount}% - ${(36 + (mainStatuses.length * 24)) / otherTasksColumnCount}px), 400px)`;
+  const mainBoardItems = boardDisplaySettings.mainStatuses;
+  const mainColumnCount = Math.max(mainBoardItems.length, 1);
+  const mainBoardMinWidth = (mainColumnCount * 300) + ((mainColumnCount - 1) * 24);
+  const mainBoardMaxWidth = (mainColumnCount * 400) + ((mainColumnCount - 1) * 24);
+  const otherTasksColumnCount = mainColumnCount + 1;
+  const otherTasksWidth = `clamp(300px, calc(${100 / otherTasksColumnCount}% - ${(36 + (mainColumnCount * 24)) / otherTasksColumnCount}px), 400px)`;
+  const otherTaskTabs = boardDisplaySettings.sidebarStatuses;
+  const otherTaskTabsKey = otherTaskTabs.join(",");
+  const otherTasksAvailable = otherTaskTabs.length > 0;
+
+  useEffect(() => {
+    if (!otherTasksAvailable) {
+      setOtherTasksOpen(false);
+      return;
+    }
+    if (otherTaskTabs.includes(otherTasksTab)) return;
+    setOtherTasksTab(otherTaskTabs[0]);
+  }, [otherTaskTabsKey, otherTasksAvailable, otherTasksTab]);
 
   const taskPresentations = useMemo(() => Object.fromEntries(tasks.map((task) => {
     const unread = (task.status === "in_review" || task.status === "blocked")
@@ -2248,9 +2262,21 @@ export function App() {
     }
   }
 
-  function updateBoardCardDisplay(value: BoardCardDisplay) {
-    setBoardCardDisplay(value);
-    taskboardStorage.setItem(BOARD_CARD_DISPLAY_KEY, JSON.stringify(value));
+  function updateProjectBoardDisplaySettings(value: BoardDisplaySettings) {
+    setProjectBoardDisplaySettings((current) => {
+      const next = { ...current, [selectedProjectId]: value };
+      taskboardStorage.setItem(PROJECT_BOARD_DISPLAY_SETTINGS_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  function resetProjectBoardDisplaySettings() {
+    setProjectBoardDisplaySettings((current) => {
+      const next = { ...current };
+      delete next[selectedProjectId];
+      taskboardStorage.setItem(PROJECT_BOARD_DISPLAY_SETTINGS_KEY, JSON.stringify(next));
+      return next;
+    });
   }
 
   async function saveEditor(
@@ -3475,14 +3501,14 @@ export function App() {
               filters={filters}
               onChange={setFilters}
             />
-            {boardView === "issues" && (
+            {boardView === "issues" && (isAllProjects || selectedProject) && (
               <BoardCardDisplayMenu
-                cover={boardCardDisplay.cover}
-                body={boardCardDisplay.body}
-                onChange={updateBoardCardDisplay}
+                settings={boardDisplaySettings}
+                onChange={updateProjectBoardDisplaySettings}
+                onReset={resetProjectBoardDisplaySettings}
               />
             )}
-            {boardView === "issues" && (
+            {boardView === "issues" && otherTasksAvailable && (
               <button
                 className={`other-tasks-trigger${otherTasksOpen ? " is-open" : ""}`}
                 type="button"
@@ -3635,10 +3661,10 @@ export function App() {
           </Suspense>
         ) : (
           <div
-            className={`issue-board-layout${otherTasksVisible ? " has-other-tasks" : ""}`}
-            data-main-columns={mainStatuses.length}
+            className={`issue-board-layout${otherTasksAvailable && otherTasksVisible ? " has-other-tasks" : ""}`}
+            data-main-columns={mainBoardItems.length}
             style={{
-              "--main-column-count": mainStatuses.length,
+              "--main-column-count": mainColumnCount,
               "--main-board-min-width": `${mainBoardMinWidth}px`,
               "--main-board-max-width": `${mainBoardMaxWidth}px`,
               "--other-tasks-width": otherTasksWidth,
@@ -3646,8 +3672,8 @@ export function App() {
           >
             {tasksLoading && !hasLoadedTasks ? (
               <div className="loading-board" aria-label={text("正在加载议题", "Loading issues")} aria-busy="true">
-                {mainStatuses.map((status) => (
-                  <div className="loading-column" key={status}>
+                {mainBoardItems.map((item) => (
+                  <div className="loading-column" key={item}>
                     <span /><div /><div />
                   </div>
                 ))}
@@ -3656,20 +3682,30 @@ export function App() {
               <>
                 <div className="board-scroll" aria-label={text("议题看板", "Issue board")}>
                   <div className="board">
-                    {mainStatuses.map((status) => (
+                    {mainBoardItems.map((item) => item === "archived" ? (
+                      <ArchivedTasksColumn
+                        key={item}
+                        tasks={filteredArchivedTasks}
+                        hasActiveFilters={hasActiveTaskFilters}
+                        restoringTaskId={restoringTaskId}
+                        deletingTaskId={deletingArchivedTaskId}
+                        onRestore={(task) => void restoreArchivedTask(task)}
+                        onDelete={setPendingArchivedTaskDelete}
+                      />
+                    ) : (
                       <BoardColumn
-                        key={status}
+                        key={item}
                         scrollRef={(element) => {
-                          boardColumnScrollRefs.current[status] = element;
+                          boardColumnScrollRefs.current[item] = element;
                         }}
-                        status={status}
-                        tasks={tasksByStatus[status]}
+                        status={item}
+                        tasks={tasksByStatus[item]}
                         presentations={taskPresentations}
                         now={processingNow}
                         emptyMessage={hasActiveTaskFilters
                           ? text("当前筛选下无匹配议题", "No issues match the current filters")
                           : text("暂无议题", "No issues")}
-                        isDropTarget={dropTarget === status}
+                        isDropTarget={dropTarget === item}
                         draggedTaskId={draggedTaskId}
                         draggedTaskHeight={draggedTaskHeight}
                         movingTaskId={movingTaskId}
@@ -3678,9 +3714,9 @@ export function App() {
                         availableLabels={availableLabels}
                         projectNames={isAllProjects ? projectNames : undefined}
                         currentUser={currentUser}
-                        showCover={boardCardDisplay.cover}
-                        showBody={boardCardDisplay.body}
-                        createEnabled={!isAllProjects && !isJiraProject}
+                        showCover={boardDisplaySettings.cover}
+                        showBody={boardDisplaySettings.body}
+                        createEnabled={!isJiraProject}
                         onCreateLabel={persistProjectLabel}
                         onCreate={(initialStatus) => setEditor({ task: null, status: initialStatus })}
                         onEdit={openTaskDetail}
@@ -3696,10 +3732,11 @@ export function App() {
                     ))}
                   </div>
                 </div>
-                {otherTasksMounted && (
+                {otherTasksAvailable && otherTasksMounted && (
                   <OtherTasksPanel
                     open={otherTasksVisible}
                     activeTab={otherTasksTab}
+                    tabs={otherTaskTabs}
                     tasksByStatus={tasksByStatus}
                     archivedTasks={filteredArchivedTasks}
                     presentations={taskPresentations}
@@ -3714,13 +3751,13 @@ export function App() {
                     availableLabels={availableLabels}
                     projectNames={isAllProjects ? projectNames : undefined}
                     currentUser={currentUser}
-                    showCover={boardCardDisplay.cover}
-                    showBody={boardCardDisplay.body}
+                    showCover={boardDisplaySettings.cover}
+                    showBody={boardDisplaySettings.body}
                     onCreateLabel={persistProjectLabel}
                     restoringTaskId={restoringTaskId}
                     deletingTaskId={deletingArchivedTaskId}
                     onTabChange={setOtherTasksTab}
-                    onCreate={isJiraProject || isAllProjects
+                    onCreate={isJiraProject
                       ? undefined
                       : (initialStatus) => setEditor({ task: null, status: initialStatus })}
                     onRestore={(task) => void restoreArchivedTask(task)}
