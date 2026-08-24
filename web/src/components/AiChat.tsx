@@ -1365,6 +1365,9 @@ export function AiChat({
   const snapshotLoadingRequestRef = useRef(0);
   const observedRunStatusesRef = useRef(new Map<string, AiChatRun["status"]>());
   const dangerConfirmOpen = pendingDangerInput !== null;
+  const openThreadRequestId = openThreadRequest && "threadId" in openThreadRequest
+    ? openThreadRequest.requestId
+    : null;
 
   const selectThread = useCallback((threadId: string | null) => {
     selectedThreadRef.current = threadId;
@@ -1391,7 +1394,7 @@ export function AiChat({
 
   useEffect(() => {
     if (panelOpen && selectedThreadId) editorRef.current?.focus();
-  }, [panelOpen, selectedThreadId]);
+  }, [panelOpen, selectedThreadId, openThreadRequestId]);
 
   useEffect(() => {
     function finishPanelResize(pointerId?: number) {
