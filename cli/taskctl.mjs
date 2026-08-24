@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
+import { execFile, spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 import { normalizeCloudUrl } from "../server/cloud-config.mjs";
 import {
@@ -15,6 +17,8 @@ import {
 
 export const SCHEMA_VERSION = 2;
 export const DEFAULT_API_URL = "http://127.0.0.1:47823";
+
+const execFileAsync = promisify(execFile);
 
 const sourceRuntimeFile = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -314,11 +318,10 @@ async function execute(parsed, overrides) {
     ? processEnv
     : { ...processEnv, CODEX_TASKBOARD_RUNTIME_FILE: parsed.options["runtime-file"] };
   const usesCompanionControl = command.startsWith("cloud ") || command === "project map";
-  const api = createApiClient(overrides, {
-    baseUrl: usesCompanionControl || env.CODEX_TASKBOARD_COMPANION_URL !== undefined
+  const target = usesCompanionControl || env.CODEX_TASKBOARD_COMPANION_URL !== undefined
       ? await resolveCompanionUrl(env, overrides)
-      : await resolveTaskboardBaseUrl(env, overrides),
-  });
+      : await resolveTaskboardBaseUrl(env, overrides);
+  const api = createApiClient(overrides, target);
   switch (command) {
     case "project list":
       expectOperandCount(parsed, 0);
@@ -468,8 +471,14 @@ async function execute(parsed, overrides) {
   }
 }
 
-function createApiClient(overrides, { baseUrl: explicitBaseUrl } = {}) {
-  const fetchImplementation = overrides.fetch ?? globalThis.fetch;
+function createApiClient(overrides, {
+  url: explicitBaseUrl,
+  windowsTransport = false,
+} = {}) {
+  const fetchImplementation = overrides.fetch
+    ?? (windowsTransport
+      ? (url, init) => fetchThroughWindows(url, init, overrides)
+      : globalThis.fetch);
   if (typeof fetchImplementation !== "function") {
     throw new TaskctlError("fetch is not available", {
       code: "CLIENT_UNAVAILABLE",
@@ -1198,24 +1207,49 @@ function resolveApiUrl(baseUrl, pathname) {
 }
 
 async function resolveTaskboardBaseUrl(env, overrides) {
-  if (env.CODEX_TASKBOARD_URL !== undefined) return env.CODEX_TASKBOARD_URL;
+  if (env.CODEX_TASKBOARD_URL !== undefined) {
+    return { url: env.CODEX_TASKBOARD_URL, windowsTransport: false };
+  }
   const configuredDescriptorPath = env.CODEX_TASKBOARD_RUNTIME_FILE;
-  const descriptorCandidates = configuredDescriptorPath === undefined
-    ? [
-      { path: sourceRuntimeFile, read: readFile },
-      ...([resolveWslRuntimeFile(env)]
-        .filter(Boolean)
-        .map((descriptorPath) => ({
-          path: descriptorPath,
-          read: overrides.readFile ?? readFile,
-        }))),
-    ]
-    : [{
+  const isWsl = isWslEnvironment(env);
+  const wslRuntimeFile = env.CODEX_TASKBOARD_WSL_RUNTIME_FILE;
+  const descriptorCandidates = configuredDescriptorPath !== undefined
+    ? [{
       path: configuredDescriptorPath,
       read: overrides.readFile ?? readFile,
-    }];
+      required: true,
+      windowsTransport: false,
+    }]
+    : isWsl && wslRuntimeFile !== undefined
+      ? [{
+        path: wslRuntimeFile,
+        read: overrides.readFile ?? readFile,
+        required: true,
+        windowsTransport: true,
+      }]
+      : [
+        ...([isWsl ? await resolveWslRuntimeFile(overrides) : undefined]
+          .filter(Boolean)
+          .map((descriptorPath) => ({
+            path: descriptorPath,
+            read: overrides.readFile ?? readFile,
+            required: false,
+            windowsTransport: true,
+          }))),
+        {
+          path: sourceRuntimeFile,
+          read: readFile,
+          required: false,
+          windowsTransport: false,
+        },
+      ];
 
-  for (const { path: descriptorPath, read } of descriptorCandidates) {
+  for (const {
+    path: descriptorPath,
+    read,
+    required,
+    windowsTransport,
+  } of descriptorCandidates) {
     try {
       const descriptor = JSON.parse(await read(descriptorPath, "utf8"));
       if (descriptor?.version !== 1 || typeof descriptor.url !== "string") {
@@ -1224,9 +1258,9 @@ async function resolveTaskboardBaseUrl(env, overrides) {
           exitCode: 4,
         });
       }
-      return descriptor.url;
+      return { url: descriptor.url, windowsTransport };
     } catch (error) {
-      if (configuredDescriptorPath === undefined && error?.code === "ENOENT") continue;
+      if (!required && error?.code === "ENOENT") continue;
       if (error instanceof TaskctlError) throw error;
       throw new TaskctlError("Cannot read the active Taskboard launcher endpoint", {
         code: "SERVICE_UNAVAILABLE",
@@ -1236,32 +1270,105 @@ async function resolveTaskboardBaseUrl(env, overrides) {
     }
   }
 
-  return DEFAULT_API_URL;
+  return { url: DEFAULT_API_URL, windowsTransport: false };
 }
 
-function resolveWslRuntimeFile(env) {
-  if (process.platform !== "linux") return undefined;
-  if (env.CODEX_TASKBOARD_WSL_RUNTIME_FILE !== undefined) {
-    return env.CODEX_TASKBOARD_WSL_RUNTIME_FILE;
-  }
+function isWslEnvironment(env) {
+  return env.WSL_DISTRO_NAME !== undefined || env.WSL_INTEROP !== undefined;
+}
 
-  const appData = env.APPDATA;
-  const hasWindowsAppDataPath = /^\/mnt\/[a-z]\/Users\/[^/]+\/AppData\/Roaming$/i.test(appData ?? "");
-  const isWsl = env.WSL_DISTRO_NAME !== undefined
-    || env.WSL_INTEROP !== undefined
-    || env.WSLENV !== undefined
-    || hasWindowsAppDataPath;
-  if (!isWsl || !hasWindowsAppDataPath) return undefined;
-  return path.join(appData, "Codex Taskboard", "launcher-runtime.json");
+async function resolveWslRuntimeFile(overrides) {
+  const run = overrides.execFile ?? execFileAsync;
+  try {
+    const windowsAppData = await run(
+      "cmd.exe",
+      ["/d", "/s", "/c", "echo %APPDATA%"],
+      { encoding: "utf8" },
+    );
+    const appData = await run(
+      "wslpath",
+      ["-u", windowsAppData.stdout.trim()],
+      { encoding: "utf8" },
+    );
+    const appDataPath = appData.stdout.trim();
+    return appDataPath
+      ? path.join(appDataPath, "Codex Taskboard", "launcher-runtime.json")
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function fetchThroughWindows(url, init, overrides) {
+  const run = overrides.spawn ?? spawn;
+  const marker = "__CODEX_TASKBOARD_CURL_RESPONSE__";
+  const args = [
+    "--silent",
+    "--show-error",
+    "--request",
+    init?.method ?? "GET",
+  ];
+  for (const [name, value] of new Headers(init?.headers)) {
+    args.push("--header", `${name}: ${value}`);
+  }
+  if (init?.body !== undefined) args.push("--data-binary", "@-");
+  args.push(
+    "--write-out",
+    `%{stderr}${marker}%{http_code}\t%{content_type}\t%{size_download}`,
+    "--url",
+    url.toString(),
+  );
+
+  return new Promise((resolve, reject) => {
+    const child = run("curl.exe", args, {
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+    const stdout = [];
+    const stderr = [];
+    child.stdout.on("data", (chunk) => stdout.push(chunk));
+    child.stderr.on("data", (chunk) => stderr.push(chunk));
+    child.stdin.on("error", reject);
+    child.once("error", reject);
+    child.once("close", (code) => {
+      const errorText = Buffer.concat(stderr).toString("utf8");
+      if (code !== 0) {
+        reject(new Error(errorText.trim() || `curl.exe exited with ${code}`));
+        return;
+      }
+      const markerIndex = errorText.lastIndexOf(marker);
+      if (markerIndex === -1) {
+        reject(new Error("curl.exe did not return HTTP response metadata"));
+        return;
+      }
+      const [statusText, contentType, contentLength] = errorText
+        .slice(markerIndex + marker.length)
+        .split("\t");
+      const status = Number(statusText);
+      if (!Number.isInteger(status) || status < 100 || status > 599) {
+        reject(new Error("curl.exe returned invalid HTTP response metadata"));
+        return;
+      }
+      const body = Buffer.concat(stdout);
+      resolve(new Response(body.length === 0 ? null : body, {
+        status,
+        headers: {
+          ...(contentType ? { "content-type": contentType } : {}),
+          ...(contentLength ? { "content-length": contentLength } : {}),
+        },
+      }));
+    });
+    child.stdin.end(init?.body);
+  });
 }
 
 async function resolveCompanionUrl(env, overrides) {
-  const rawUrl = env.CODEX_TASKBOARD_COMPANION_URL !== undefined
-    ? env.CODEX_TASKBOARD_COMPANION_URL
+  const target = env.CODEX_TASKBOARD_COMPANION_URL !== undefined
+    ? { url: env.CODEX_TASKBOARD_COMPANION_URL, windowsTransport: false }
     : await resolveTaskboardBaseUrl(env, overrides);
   let url;
   try {
-    url = new URL(rawUrl);
+    url = new URL(target.url);
   } catch {
     throw usageError("Local companion URL must be a valid URL");
   }
@@ -1282,7 +1389,10 @@ async function resolveCompanionUrl(env, overrides) {
   ) {
     throw usageError("Local companion URL must be a loopback HTTP or HTTPS endpoint");
   }
-  return url.toString().replace(/\/$/, "");
+  return {
+    url: url.toString().replace(/\/$/, ""),
+    windowsTransport: target.windowsTransport,
+  };
 }
 
 async function readResponse(response) {

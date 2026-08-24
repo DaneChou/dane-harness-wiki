@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import path from "node:path";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { main, parseArgs } from "../cli/taskctl.mjs";
@@ -98,9 +100,9 @@ test("--runtime-file reads the launcher endpoint without a leading environment a
   assert.equal(requestedUrl.toString(), "http://127.0.0.1:51550/token/api/projects");
 });
 
-test("WSL taskctl discovers the Windows launcher runtime descriptor from APPDATA", async () => {
+test("WSL taskctl discovers the Windows launcher runtime descriptor from Windows APPDATA", async () => {
   let requestedUrl;
-  const runtimeFile = "/mnt/c/Users/admin/AppData/Roaming/Codex Taskboard/launcher-runtime.json";
+  const runtimeFile = "/windows/users/admin/AppData/Roaming/Codex Taskboard/launcher-runtime.json";
   const readPaths = [];
   const result = await run(
     ["project", "list"],
@@ -109,9 +111,15 @@ test("WSL taskctl discovers the Windows launcher runtime descriptor from APPDATA
       return response({ projects: [] });
     },
     {
-      env: {
-        WSL_DISTRO_NAME: "Ubuntu",
-        APPDATA: "/mnt/c/Users/admin/AppData/Roaming",
+      env: { WSL_DISTRO_NAME: "Ubuntu" },
+      execFile: async (file, args) => {
+        if (file === "cmd.exe") {
+          assert.deepEqual(args, ["/d", "/s", "/c", "echo %APPDATA%"]);
+          return { stdout: "C:\\Users\\admin\\AppData\\Roaming\r\n", stderr: "" };
+        }
+        assert.equal(file, "wslpath");
+        assert.deepEqual(args, ["-u", "C:\\Users\\admin\\AppData\\Roaming"]);
+        return { stdout: "/windows/users/admin/AppData/Roaming\n", stderr: "" };
       },
       readFile: async (filePath) => {
         readPaths.push(filePath);
@@ -128,6 +136,49 @@ test("WSL taskctl discovers the Windows launcher runtime descriptor from APPDATA
   assert.equal(result.exitCode, 0);
   assert.equal(requestedUrl.toString(), "http://127.0.0.1:51987/instance-token/api/projects");
   assert.equal(readPaths.at(-1), runtimeFile);
+});
+
+test("CODEX_TASKBOARD_WSL_RUNTIME_FILE overrides WSL automatic discovery", async () => {
+  const runtimeFile = "/runtime/taskboard.json";
+  let curlArgs;
+  const result = await run(
+    ["project", "list"],
+    undefined,
+    {
+      env: {
+        WSL_DISTRO_NAME: "Ubuntu",
+        CODEX_TASKBOARD_WSL_RUNTIME_FILE: runtimeFile,
+      },
+      execFile: async () => {
+        assert.fail("automatic discovery must not run for an explicit WSL runtime file");
+      },
+      readFile: async (filePath) => {
+        assert.equal(filePath, runtimeFile);
+        return JSON.stringify({ version: 1, url: "http://127.0.0.1:51988/override-token" });
+      },
+      spawn: (file, args) => {
+        assert.equal(file, "curl.exe");
+        curlArgs = args;
+        const child = new EventEmitter();
+        child.stdin = new PassThrough();
+        child.stdout = new PassThrough();
+        child.stderr = new PassThrough();
+        queueMicrotask(() => {
+          child.stdout.end(JSON.stringify({ projects: [] }));
+          child.stderr.end("__CODEX_TASKBOARD_CURL_RESPONSE__200\tapplication/json\t15");
+          child.emit("close", 0);
+        });
+        return child;
+      },
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(result.stdout.projects, []);
+  assert.equal(
+    curlArgs.at(-1),
+    "http://127.0.0.1:51988/override-token/api/projects",
+  );
 });
 
 test("project create sends id, name, and an absolute workspace path", async () => {
