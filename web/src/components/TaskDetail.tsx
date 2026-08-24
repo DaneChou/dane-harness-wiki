@@ -58,6 +58,7 @@ import {
   AttachmentIcon,
   BlockingRelationIcon,
   BranchIcon,
+  CodexResumeIcon,
   ConversationIcon,
   DeleteIcon,
   DueDateIcon,
@@ -370,7 +371,7 @@ function ConversationLink({
           text("Codex 恢复命令已复制。", "Codex resume command copied."),
         )}
       >
-        <LinearIcon name="copy" />
+        <CodexResumeIcon />
         <span>{text("复制命令", "Copy command")}</span>
       </button>
     </div>

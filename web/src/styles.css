@@ -2953,7 +2953,7 @@ kbd {
 .issue-conversation-link {
   display: inline-flex;
   align-items: center;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   max-width: 100%;
   min-width: 0;
   min-height: 36px;
@@ -2996,19 +2996,18 @@ kbd {
   align-items: center;
   flex: 0 0 auto;
   min-height: 36px;
-  gap: 6px;
-  padding: 0 10px;
-  border: var(--border-hairline) solid var(--border);
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
   border-radius: 6px;
-  background: var(--surface);
+  background: transparent;
   color: var(--text-secondary);
   font-size: 11px;
   font-weight: 600;
-  transition: border-color 100ms ease, background 100ms ease, color 100ms ease;
+  transition: background 100ms ease, color 100ms ease;
 }
 
 .issue-conversation-copy:hover {
-  border-color: var(--border-strong);
   background: var(--surface-hover);
   color: var(--text-primary);
 }
@@ -3019,8 +3018,8 @@ kbd {
 }
 
 .issue-conversation-copy > svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .conversation-divider {
@@ -3978,6 +3977,14 @@ kbd {
 
 .comment-conversation-link {
   padding: 2px 16px 16px;
+}
+
+.comment-card .issue-conversation-copy {
+  display: none;
+}
+
+.comment-card:hover .issue-conversation-copy {
+  display: inline-flex;
 }
 
 .comment-attachment-list li {
@@ -8036,10 +8043,6 @@ kbd {
   .issue-title-input {
     font-size: 22px;
     line-height: 32px;
-  }
-
-  .issue-conversation-link {
-    width: 100%;
   }
 
   .issue-conversation-actions {
