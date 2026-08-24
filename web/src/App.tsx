@@ -302,7 +302,7 @@ const PROJECT_VIEW_KEY_PREFIX = "taskboard.project-view.v1.";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
 const PROJECT_CODEX_IDENTITIES_KEY = "taskboard.projectCodexIdentities.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
-const PROJECT_BOARD_DISPLAY_SETTINGS_KEY = "taskboard.project-board-display-settings.v1";
+const PROJECT_BOARD_DISPLAY_SETTINGS_KEY = "taskboard.project-board-display-settings.v2";
 const ISSUE_READ_KEY_PREFIX = "taskboard.issue-read.v1";
 const FIRST_USE_COMPLETE_KEY = "taskboard.first-use-complete.v1";
 function readIssueActivityKeys(storageKey: string): Record<string, string> {
@@ -863,9 +863,8 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
-  const boardDisplaySettings = isAllProjects
-    ? DEFAULT_BOARD_DISPLAY_SETTINGS
-    : projectBoardDisplaySettings[selectedProjectId] ?? DEFAULT_BOARD_DISPLAY_SETTINGS;
+  const boardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
+    ?? DEFAULT_BOARD_DISPLAY_SETTINGS;
   const automationModels = automationCatalog && automationCatalog.projectId === selectedProject?.id
     ? automationCatalog.models
     : [];
@@ -2240,7 +2239,6 @@ export function App() {
   }
 
   function updateProjectBoardDisplaySettings(value: BoardDisplaySettings) {
-    if (isAllProjects) return;
     setProjectBoardDisplaySettings((current) => {
       const next = { ...current, [selectedProjectId]: value };
       taskboardStorage.setItem(PROJECT_BOARD_DISPLAY_SETTINGS_KEY, JSON.stringify(next));
@@ -2249,7 +2247,6 @@ export function App() {
   }
 
   function resetProjectBoardDisplaySettings() {
-    if (isAllProjects) return;
     setProjectBoardDisplaySettings((current) => {
       const next = { ...current };
       delete next[selectedProjectId];
@@ -3480,9 +3477,8 @@ export function App() {
               filters={filters}
               onChange={setFilters}
             />
-            {boardView === "issues" && selectedProject && !isAllProjects && (
+            {boardView === "issues" && (isAllProjects || selectedProject) && (
               <BoardCardDisplayMenu
-                projectName={selectedProject.name}
                 settings={boardDisplaySettings}
                 onChange={updateProjectBoardDisplaySettings}
                 onReset={resetProjectBoardDisplaySettings}

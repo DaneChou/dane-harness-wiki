@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { taskStatusLabel, useTaskboardI18n } from "../i18n";
 import {
-  BOARD_STATUS_ORDER,
   MAIN_STATUSES,
   SECONDARY_STATUSES,
 } from "../issueBoardStatuses";
@@ -17,6 +17,7 @@ export interface BoardDisplaySettings {
   body: boolean;
   mainStatuses: TaskStatus[];
   sidebarStatuses: TaskStatus[];
+  hiddenStatuses: TaskStatus[];
 }
 
 export const DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
@@ -24,67 +25,185 @@ export const DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
   body: false,
   mainStatuses: [...MAIN_STATUSES],
   sidebarStatuses: [...SECONDARY_STATUSES],
+  hiddenStatuses: [],
 };
 
 interface BoardCardDisplayMenuProps {
-  projectName: string;
   settings: BoardDisplaySettings;
   onChange: (value: BoardDisplaySettings) => void;
   onReset: () => void;
 }
 
 export function BoardCardDisplayMenu({
-  projectName,
   settings,
   onChange,
   onReset,
 }: BoardCardDisplayMenuProps) {
   const { language, text } = useTaskboardI18n();
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const [open, setOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
+  const [draggedStatus, setDraggedStatus] = useState<TaskStatus | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    placement: BoardStatusPlacement;
+    beforeStatus: TaskStatus | null;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!menuOpen || !triggerRef.current || !menuRef.current) return;
+    const trigger = triggerRef.current.getBoundingClientRect();
+    const menu = menuRef.current.getBoundingClientRect();
+    const left = Math.max(8, Math.min(trigger.right - menu.width, window.innerWidth - menu.width - 8));
+    const top = trigger.bottom + 8 + menu.height <= window.innerHeight
+      ? trigger.bottom + 8
+      : Math.max(8, trigger.top - menu.height - 8);
+    setPosition({ left, top, ready: true });
+  }, [menuOpen]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!menuOpen) return;
+    function closeFromOutside(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    function closeFromEscape(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      triggerRef.current?.focus();
+    }
+    document.addEventListener("pointerdown", closeFromOutside);
+    document.addEventListener("keydown", closeFromEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeFromOutside);
+      document.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [menuOpen]);
+
+  useEffect(() => {
+    if (!dialogOpen) return;
     closeRef.current?.focus();
     function closeFromEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
-      setOpen(false);
+      setDialogOpen(false);
       triggerRef.current?.focus();
     }
     document.addEventListener("keydown", closeFromEscape);
-    return () => {
-      document.removeEventListener("keydown", closeFromEscape);
-    };
-  }, [open]);
+    return () => document.removeEventListener("keydown", closeFromEscape);
+  }, [dialogOpen]);
 
-  function statusPlacement(status: TaskStatus): BoardStatusPlacement {
-    if (settings.mainStatuses.includes(status)) return "main";
-    if (settings.sidebarStatuses.includes(status)) return "sidebar";
-    return "hidden";
+  function statusesFor(placement: BoardStatusPlacement) {
+    if (placement === "main") return settings.mainStatuses;
+    if (placement === "sidebar") return settings.sidebarStatuses;
+    return settings.hiddenStatuses;
   }
 
-  function moveStatus(status: TaskStatus, placement: BoardStatusPlacement) {
+  function moveStatus(
+    status: TaskStatus,
+    placement: BoardStatusPlacement,
+    beforeStatus: TaskStatus | null,
+  ) {
+    const next = {
+      main: settings.mainStatuses.filter((candidate) => candidate !== status),
+      sidebar: settings.sidebarStatuses.filter((candidate) => candidate !== status),
+      hidden: settings.hiddenStatuses.filter((candidate) => candidate !== status),
+    };
+    const target = next[placement];
+    const beforeIndex = beforeStatus ? target.indexOf(beforeStatus) : -1;
+    target.splice(beforeIndex >= 0 ? beforeIndex : target.length, 0, status);
     onChange({
       ...settings,
-      mainStatuses: BOARD_STATUS_ORDER.filter((candidate) => (
-        candidate === status
-          ? placement === "main"
-          : settings.mainStatuses.includes(candidate)
-      )),
-      sidebarStatuses: BOARD_STATUS_ORDER.filter((candidate) => (
-        candidate === status
-          ? placement === "sidebar"
-          : settings.sidebarStatuses.includes(candidate)
-      )),
+      mainStatuses: next.main,
+      sidebarStatuses: next.sidebar,
+      hiddenStatuses: next.hidden,
     });
   }
 
-  const dialog = open ? createPortal(
+  function findDropBefore(container: HTMLElement, clientY: number): TaskStatus | null {
+    const items = Array.from(container.querySelectorAll<HTMLElement>("[data-display-status]"))
+      .filter((item) => item.dataset.displayStatus !== draggedStatus);
+    return (items.find((item) => (
+      clientY < item.getBoundingClientRect().top + item.offsetHeight / 2
+    ))?.dataset.displayStatus as TaskStatus | undefined) ?? null;
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>, placement: BoardStatusPlacement) {
+    event.preventDefault();
+    const status = (
+      event.dataTransfer.getData("application/x-taskboard-display-status")
+      || event.dataTransfer.getData("text/plain")
+    ) as TaskStatus;
+    if (status) moveStatus(status, placement, findDropBefore(event.currentTarget, event.clientY));
+    setDraggedStatus(null);
+    setDropTarget(null);
+  }
+
+  function closeDialog() {
+    setDialogOpen(false);
+    triggerRef.current?.focus();
+  }
+
+  const menu = menuOpen ? createPortal(
+    <div
+      ref={menuRef}
+      className="project-automation-menu board-display-menu no-drag"
+      role="dialog"
+      aria-label={text("显示设置", "Display settings")}
+      style={{ left: position.left, top: position.top, visibility: position.ready ? "visible" : "hidden" }}
+    >
+      <div className="project-automation-menu-heading">
+        <strong>{text("显示设置", "Display settings")}</strong>
+      </div>
+      <div className="project-automation-switch">
+        <span>{text("封面", "Cover")}</span>
+        <button
+          type="button"
+          className={"board-setting-switch" + (settings.cover ? " is-on" : "")}
+          role="switch"
+          aria-label={text("显示封面", "Show cover")}
+          aria-checked={settings.cover}
+          onClick={() => onChange({ ...settings, cover: !settings.cover })}
+        >
+          <span aria-hidden="true" />
+        </button>
+      </div>
+      <div className="project-automation-switch">
+        <span>{text("正文", "Body")}</span>
+        <button
+          type="button"
+          className={"board-setting-switch" + (settings.body ? " is-on" : "")}
+          role="switch"
+          aria-label={text("显示正文", "Show body")}
+          aria-checked={settings.body}
+          onClick={() => onChange({ ...settings, body: !settings.body })}
+        >
+          <span aria-hidden="true" />
+        </button>
+      </div>
+      <button
+        className="display-settings-more"
+        type="button"
+        aria-haspopup="dialog"
+        onClick={() => {
+          setMenuOpen(false);
+          setDialogOpen(true);
+        }}
+      >
+        <span>{text("更多显示设置", "More display settings")}</span>
+        <span aria-hidden="true">›</span>
+      </button>
+    </div>,
+    document.body,
+  ) : null;
+
+  const dialog = dialogOpen ? createPortal(
     <div
       className="display-settings-backdrop no-drag"
       onPointerDown={(event) => {
-        if (event.target === event.currentTarget) setOpen(false);
+        if (event.target === event.currentTarget) closeDialog();
       }}
     >
       <div
@@ -94,110 +213,84 @@ export function BoardCardDisplayMenu({
         aria-labelledby="display-settings-title"
       >
         <header className="display-settings-header">
-          <div>
-            <h2 id="display-settings-title">{text("显示设置", "Display settings")}</h2>
-            <p>{projectName}</p>
-          </div>
+          <h2 id="display-settings-title">{text("更多显示设置", "More display settings")}</h2>
           <button
             ref={closeRef}
             className="icon-button display-settings-close"
             type="button"
             aria-label={text("关闭显示设置", "Close display settings")}
-            onClick={() => setOpen(false)}
+            onClick={closeDialog}
           >
             <LinearIcon name="close" />
           </button>
         </header>
 
-        <div className="display-settings-content">
-          <section className="display-settings-section">
-            <div className="display-settings-section-heading">
-              <div>
-                <h3>{text("状态位置", "Status placement")}</h3>
-                <p>{text(
-                  "选择每个状态显示在默认面板、侧边栏或不显示。",
-                  "Choose whether each status appears on the main board, in the sidebar, or stays hidden.",
-                )}</p>
-              </div>
-            </div>
-            <div className="display-settings-status-list">
-              {BOARD_STATUS_ORDER.map((status) => {
-                const placement = statusPlacement(status);
-                const label = taskStatusLabel(language, status);
-                return (
-                  <div className="display-settings-status-row" key={status}>
-                    <span className="display-settings-status-label">
-                      <StatusIcon status={status} color="currentColor" size={15} />
-                      {label}
-                    </span>
-                    <div className="display-settings-placement" role="group" aria-label={label}>
-                      {([
-                        ["main", text("默认面板", "Main board")],
-                        ["sidebar", text("侧边栏", "Sidebar")],
-                        ["hidden", text("隐藏", "Hidden")],
-                      ] as const).map(([value, optionLabel]) => (
-                        <button
-                          className={placement === value ? "is-active" : ""}
-                          type="button"
-                          aria-pressed={placement === value}
-                          onClick={() => moveStatus(status, value)}
-                          key={value}
-                        >
-                          {optionLabel}
-                        </button>
-                      ))}
-                    </div>
+        <div className="display-settings-columns">
+          {([
+            ["main", text("正常显示", "Main board")],
+            ["sidebar", text("侧边栏显示", "Sidebar")],
+            ["hidden", text("隐藏", "Hidden")],
+          ] as const).map(([placement, label]) => (
+            <section
+              className={"display-settings-column" + (
+                dropTarget?.placement === placement ? " is-drop-target" : ""
+              )}
+              aria-label={label}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+                setDropTarget({
+                  placement,
+                  beforeStatus: findDropBefore(event.currentTarget, event.clientY),
+                });
+              }}
+              onDragLeave={(event) => {
+                if (!(event.relatedTarget instanceof Node) || !event.currentTarget.contains(event.relatedTarget)) {
+                  setDropTarget(null);
+                }
+              }}
+              onDrop={(event) => handleDrop(event, placement)}
+              key={placement}
+            >
+              <h3>{label}</h3>
+              <div className="display-settings-status-list">
+                {statusesFor(placement).map((status) => (
+                  <div
+                    className={"display-settings-status-item" + (
+                      draggedStatus === status ? " is-dragging" : ""
+                    ) + (
+                      dropTarget?.placement === placement && dropTarget.beforeStatus === status
+                        ? " is-drop-before"
+                        : ""
+                    )}
+                    draggable
+                    data-display-status={status}
+                    onDragStart={(event) => {
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", status);
+                      event.dataTransfer.setData("application/x-taskboard-display-status", status);
+                      setDraggedStatus(status);
+                    }}
+                    onDragEnd={() => {
+                      setDraggedStatus(null);
+                      setDropTarget(null);
+                    }}
+                    key={status}
+                  >
+                    <StatusIcon status={status} color="currentColor" size={15} />
+                    <span>{taskStatusLabel(language, status)}</span>
                   </div>
-                );
-              })}
-            </div>
-            <p className="display-settings-note">{text(
-              "已归档议题固定保留在侧边栏。没有议题时，阻塞列仍会自动隐藏。",
-              "Archived issues always stay in the sidebar. The Blocked column still hides automatically when empty.",
-            )}</p>
-          </section>
-
-          <section className="display-settings-section display-settings-card-section">
-            <div className="display-settings-section-heading">
-              <div>
-                <h3>{text("卡片内容", "Card content")}</h3>
-                <p>{text("控制默认面板和侧边栏中的卡片内容。", "Control card content on the main board and in the sidebar.")}</p>
+                ))}
               </div>
-            </div>
-            <div className="display-settings-switch-row">
-              <span>{text("封面", "Cover")}</span>
-              <button
-                type="button"
-                className={`board-setting-switch${settings.cover ? " is-on" : ""}`}
-                role="switch"
-                aria-label={text("显示封面", "Show cover")}
-                aria-checked={settings.cover}
-                onClick={() => onChange({ ...settings, cover: !settings.cover })}
-              >
-                <span aria-hidden="true" />
-              </button>
-            </div>
-            <div className="display-settings-switch-row">
-              <span>{text("正文", "Body")}</span>
-              <button
-                type="button"
-                className={`board-setting-switch${settings.body ? " is-on" : ""}`}
-                role="switch"
-                aria-label={text("显示正文", "Show body")}
-                aria-checked={settings.body}
-                onClick={() => onChange({ ...settings, body: !settings.body })}
-              >
-                <span aria-hidden="true" />
-              </button>
-            </div>
-          </section>
+            </section>
+          ))}
         </div>
 
         <footer className="display-settings-footer">
           <button className="button secondary" type="button" onClick={onReset}>
             {text("重置为默认", "Reset to default")}
           </button>
-          <button className="button primary" type="button" onClick={() => setOpen(false)}>
+          <button className="button primary" type="button" onClick={closeDialog}>
             {text("完成", "Done")}
           </button>
         </footer>
@@ -210,16 +303,22 @@ export function BoardCardDisplayMenu({
     <>
       <button
         ref={triggerRef}
-        className={`task-filter-trigger board-card-display-trigger${open ? " is-open" : ""}`}
+        className={"task-filter-trigger board-card-display-trigger" + (
+          menuOpen || dialogOpen ? " is-open" : ""
+        )}
         type="button"
         aria-label={text("显示设置", "Display settings")}
         aria-haspopup="dialog"
-        aria-expanded={open}
+        aria-expanded={menuOpen}
         title={text("显示设置", "Display settings")}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (!menuOpen) setPosition({ left: 0, top: 0, ready: false });
+          setMenuOpen((current) => !current);
+        }}
       >
         <LinearIcon name="displayOptions" />
       </button>
+      {menu}
       {dialog}
     </>
   );
