@@ -16,17 +16,18 @@ import type {
   CodexThreadBinding,
   DevelopmentScan,
   HostContext,
+  IssueRelationOrigin,
   IssueRelationType,
   JiraConnection,
   Project,
+  ProjectReadme,
+  ProjectReadmeAttachment,
   ProjectSummary,
   Task,
   TaskChangeActivity,
   TaskboardMetadata,
   TaskDraft,
   TaskStatus,
-  WorkflowCapabilities,
-  WorkflowWorkspaceRecord,
 } from "./types";
 
 const DEFAULT_USER_ACTOR: ActorIdentity = {
@@ -435,40 +436,49 @@ export async function listDeviceWorkspaces(signal?: AbortSignal): Promise<Record
   }
 }
 
-export async function listWorkflowCapabilities(
-  workspacePath?: string,
-  signal?: AbortSignal,
-): Promise<WorkflowCapabilities> {
-  const query = new URLSearchParams();
-  if (workspacePath) query.set("workspacePath", workspacePath);
-  const suffix = query.size > 0 ? `?${query}` : "";
-  return request<WorkflowCapabilities>(`/api/workflow-capabilities${suffix}`, { signal });
-}
-
-export async function getWorkflowWorkspace<T>(
+export async function getProjectReadme(
   projectId: string,
   signal?: AbortSignal,
-): Promise<WorkflowWorkspaceRecord<T>> {
-  const data = await request<{ workflow: WorkflowWorkspaceRecord<T> }>(
-    `/api/projects/${encodeURIComponent(projectId)}/workflow-workspace`,
+): Promise<ProjectReadme> {
+  const data = await request<{ readme: ProjectReadme }>(
+    `/api/projects/${encodeURIComponent(projectId)}/readme`,
     { signal },
   );
-  return data.workflow;
+  return data.readme;
 }
 
-export async function saveWorkflowWorkspace<T>(
+export async function saveProjectReadme(
   projectId: string,
-  workspace: T,
-  version: number,
-): Promise<WorkflowWorkspaceRecord<T>> {
-  const data = await request<{ workflow: WorkflowWorkspaceRecord<T> }>(
-    `/api/projects/${encodeURIComponent(projectId)}/workflow-workspace`,
+  content: string,
+  version?: number,
+): Promise<ProjectReadme> {
+  const data = await request<{ readme: ProjectReadme }>(
+    `/api/projects/${encodeURIComponent(projectId)}/readme`,
     {
       method: "PUT",
-      body: JSON.stringify({ version, workspace }),
+      body: JSON.stringify({ content, ...(version !== undefined ? { version } : {}) }),
     },
   );
-  return data.workflow;
+  return data.readme;
+}
+
+export async function uploadProjectReadmeAttachment(
+  projectId: string,
+  file: File,
+): Promise<ProjectReadmeAttachment> {
+  const data = await request<{ attachment: ProjectReadmeAttachment }>(
+    `/api/projects/${encodeURIComponent(projectId)}/readme/attachments`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        "X-Taskboard-Filename": encodeURIComponent(file.name),
+        "X-Taskboard-Attachment-Kind": "inline",
+      },
+      body: file,
+    },
+  );
+  return data.attachment;
 }
 
 export async function createProject(input: {
@@ -530,16 +540,17 @@ export async function listDevelopmentContexts(
 }
 
 async function listTasksByArchive(
-  projectId: string,
+  projectId: string | undefined,
   archived: "true" | "false",
   signal?: AbortSignal,
 ): Promise<Task[]> {
-  const params = new URLSearchParams({ projectId, archived });
+  const params = new URLSearchParams({ archived });
+  if (projectId) params.set("projectId", projectId);
   const data = await request<{ tasks: Task[] }>(`/api/tasks?${params}`, { signal });
   return data.tasks;
 }
 
-export function listTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {
+export function listTasks(projectId?: string, signal?: AbortSignal): Promise<Task[]> {
   return listTasksByArchive(projectId, "false", signal);
 }
 
@@ -551,7 +562,7 @@ export async function getTask(taskId: string, signal?: AbortSignal): Promise<Tas
   return data.task;
 }
 
-export function listArchivedTasks(projectId: string, signal?: AbortSignal): Promise<Task[]> {
+export function listArchivedTasks(projectId?: string, signal?: AbortSignal): Promise<Task[]> {
   return listTasksByArchive(projectId, "true", signal);
 }
 
@@ -628,12 +639,17 @@ export async function addTaskRelation(
   type: IssueRelationType,
   relatedTaskId: string,
   threadId?: string,
+  origin?: IssueRelationOrigin,
 ): Promise<{ task: Task; relatedTask: Task }> {
   return request<{ task: Task; relatedTask: Task }>(
     `/api/tasks/${encodeURIComponent(task.id)}/relations/${type}/${encodeURIComponent(relatedTaskId)}`,
     {
       method: "POST",
-      body: JSON.stringify({ version: task.version, ...(threadId ? { threadId } : {}) }),
+      body: JSON.stringify({
+        version: task.version,
+        ...(origin ? { origin } : {}),
+        ...(threadId ? { threadId } : {}),
+      }),
     },
   );
 }
@@ -643,12 +659,17 @@ export async function removeTaskRelation(
   type: IssueRelationType,
   relatedTaskId: string,
   threadId?: string,
+  origin?: IssueRelationOrigin,
 ): Promise<{ task: Task; relatedTask: Task }> {
   return request<{ task: Task; relatedTask: Task }>(
     `/api/tasks/${encodeURIComponent(task.id)}/relations/${type}/${encodeURIComponent(relatedTaskId)}`,
     {
       method: "DELETE",
-      body: JSON.stringify({ version: task.version, ...(threadId ? { threadId } : {}) }),
+      body: JSON.stringify({
+        version: task.version,
+        ...(origin ? { origin } : {}),
+        ...(threadId ? { threadId } : {}),
+      }),
     },
   );
 }
@@ -764,7 +785,7 @@ export async function deleteAttachment(attachment: Attachment): Promise<void> {
   });
 }
 
-export function attachmentContentUrl(attachment: Attachment): string {
+export function attachmentContentUrl(attachment: { id: string }): string {
   return `api/attachments/${encodeURIComponent(attachment.id)}/content`;
 }
 

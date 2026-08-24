@@ -2,7 +2,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type ClipboardEvent,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
@@ -13,6 +12,7 @@ import {
   createComment,
   deleteAttachment,
   deleteComment,
+  getTask,
   listAttachments,
   listComments,
   listTaskActivities,
@@ -35,6 +35,7 @@ import type {
   CodexThreadBinding,
   DevelopmentContext,
   DevelopmentScan,
+  IssueRelationOrigin,
   IssueRelationType,
   Recurrence,
   Task,
@@ -50,10 +51,25 @@ import {
   assigneeTargetForActor,
 } from "../actors";
 import { ActorAvatar } from "./ActorAvatar";
-import { ColumnStatusIcon, STATUS_DETAILS, StatusIcon } from "./BoardColumn";
+import { STATUS_DETAILS } from "./BoardColumn";
 import { LabelPicker } from "./LabelPicker";
-import { LinearIcon, LinearPriorityIcon } from "./LinearIcon";
-import { TaskboardIcon } from "./TaskboardIcon";
+import { LinearIcon } from "./LinearIcon";
+import {
+  AttachmentIcon,
+  BlockingRelationIcon,
+  BranchIcon,
+  ConversationIcon,
+  DeleteIcon,
+  DueDateIcon,
+  EditIcon,
+  LabelIcon,
+  MoreIcon,
+  PriorityIcon,
+  ProjectIcon,
+  RecurrenceIcon,
+  RelationIcon,
+  StatusIcon,
+} from "./SemanticIcons";
 import {
   fileKey,
   MAX_ATTACHMENT_SIZE,
@@ -61,13 +77,11 @@ import {
 } from "./PendingAttachments";
 import {
   createInlineMediaSegments,
-  createInlineMediaSegmentsFromHtml,
   InlineMediaComposer,
   inlineMediaImages,
   inlineMediaText,
   resolveInlineMediaMarkdown,
   serializeInlineMedia,
-  writeInlineMediaClipboard,
   type InlineMediaComposerHandle,
   type InlineMediaSegment,
 } from "./InlineMediaComposer";
@@ -78,11 +92,11 @@ import {
   type RelationMutationResult,
 } from "./IssueRelations";
 import { TaskPropertyPicker } from "./TaskPropertyPicker";
-import { buildIssueUrl, readIssueIdentifier } from "../issueRoute";
+import { buildIssueUrl } from "../issueRoute";
 import { postEmbeddedHostMessage } from "../embeddedHost.mjs";
 import copyIdIcon from "../assets/figma-taskboard/copy-id.svg";
 import copyLinkIcon from "../assets/figma-taskboard/copy-link.svg";
-import { MarkdownDocument } from "./MarkdownDocument";
+import { DescriptionDocument } from "./DescriptionDocument";
 
 type TaskDetailError = string | readonly [string, string];
 
@@ -104,11 +118,13 @@ interface TaskDetailProps {
     task: Task,
     type: IssueRelationType,
     relatedTaskId: string,
+    origin?: IssueRelationOrigin,
   ) => Promise<RelationMutationResult>;
   onRemoveRelation: (
     task: Task,
     type: IssueRelationType,
     relatedTaskId: string,
+    origin?: IssueRelationOrigin,
   ) => Promise<RelationMutationResult>;
   onOpenThread: (binding: CodexThreadBinding) => void;
   onOpenLegacyLocalThread: (threadId: string) => void;
@@ -214,7 +230,6 @@ const ACTIVITY_FIELD_LABELS: Record<string, readonly [string, string]> = {
   priority: ["优先级", "priority"],
   labels: ["标签", "labels"],
   assignee: ["负责人", "assignee"],
-  workflowId: ["工作流", "workflow"],
   developmentContext: ["开发上下文", "development context"],
   startDate: ["开始日期", "start date"],
   dueDate: ["截止日期", "due date"],
@@ -300,121 +315,27 @@ function ActivityChangeIcon({ field, before, after }: {
 }) {
   const value = after ?? before;
   if (field === "status" && typeof value === "string" && value in STATUS_DETAILS) {
-    return <StatusIcon status={value as TaskStatus} />;
+    return <StatusIcon status={value as TaskStatus} color="currentColor" size={14} />;
   }
   if (field === "priority" && typeof value === "string" && TASK_PRIORITIES.includes(value as TaskPriority)) {
-    return <LinearPriorityIcon priority={value as TaskPriority} />;
+    return <PriorityIcon priority={value as TaskPriority} color="currentColor" size={14} />;
   }
   if (field === "relation" && typeof value === "object") {
     const relation = value as { type?: IssueRelationType };
-    if (relation.type === "blocked_by") return <TaskboardIcon name="relationBlockedBy" />;
-    if (relation.type === "blocks") return <TaskboardIcon name="relationBlocks" />;
-    return <LinearIcon name="link" />;
+    if (relation.type === "blocked_by" || relation.type === "blocks") {
+      return <BlockingRelationIcon type={relation.type} color="currentColor" size={14} />;
+    }
+    return <RelationIcon color="currentColor" size={14} />;
   }
-  if (field === "projectId" || field === "workflowId") return <LinearIcon name="project" />;
-  if (field === "labels") return <LinearIcon name="label" />;
+  if (field === "projectId") return <ProjectIcon color="currentColor" size={14} />;
+  if (field === "labels") return <LabelIcon color="currentColor" size={14} />;
   if (field === "assignee") return <LinearIcon name="myIssues" />;
-  if (field === "developmentContext") return <LinearIcon name="branch" />;
-  if (field === "startDate" || field === "dueDate") return <LinearIcon name="calendar" />;
-  if (field === "recurrence") return <LinearIcon name="recurrence" />;
-  if (field === "archivedAt") return <LinearIcon name="trash" />;
-  return <LinearIcon name="write" />;
-}
-
-function referencedTask(
-  href: string,
-  referenceTasks: Task[],
-): { identifier: string; task: Task | null } | null {
-  try {
-    const base = new URL(document.baseURI);
-    base.search = "";
-    base.hash = "";
-    const url = new URL(href, base);
-    if (url.origin !== base.origin || url.pathname !== base.pathname) return null;
-    const identifier = readIssueIdentifier(url.search);
-    const projectId = url.searchParams.get("project");
-    if (!identifier || !projectId) return null;
-    const task = referenceTasks.find((candidate) => (
-      candidate.projectId === projectId && candidate.identifier === identifier
-    )) ?? null;
-    return { identifier: task?.externalKey ?? identifier, task };
-  } catch {
-    return null;
-  }
-}
-
-function DescriptionDocument({
-  value,
-  referenceTasks,
-  onOpenTask,
-}: {
-  value: string;
-  referenceTasks: Task[];
-  onOpenTask: (task: TaskRelationSummary) => void;
-}) {
-  return (
-    <MarkdownDocument
-      value={value}
-      onCopy={(event: ClipboardEvent<HTMLDivElement>) => {
-        const selection = event.currentTarget.ownerDocument.getSelection();
-        if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
-        const range = selection.getRangeAt(0);
-        if (
-          !event.currentTarget.contains(range.startContainer)
-          || !event.currentTarget.contains(range.endContainer)
-        ) return;
-        const selectedRange = range.cloneRange();
-        const wrapper = event.currentTarget.ownerDocument.createElement("div");
-        wrapper.append(selectedRange.cloneContents());
-        const segments = createInlineMediaSegmentsFromHtml(wrapper.innerHTML, referenceTasks);
-        if (!segments) return;
-        event.preventDefault();
-        writeInlineMediaClipboard(
-          event.clipboardData,
-          segments,
-          event.currentTarget.ownerDocument,
-        );
-      }}
-      renderLink={(href) => {
-        const reference = href ? referencedTask(href, referenceTasks) : null;
-        if (!reference) return null;
-        const { task } = reference;
-        if (!task) {
-          return (
-            <span className="issue-reference-inline">
-              <span className="issue-reference-identity">
-                <span className="issue-reference-id">{reference.identifier}</span>
-              </span>
-            </span>
-          );
-        }
-        return (
-          <span className={`issue-reference-inline issue-reference-status-${task.status}`}>
-            <span className="issue-reference-identity">
-              <span className={`status-icon issue-reference-status status-icon-${STATUS_DETAILS[task.status].tone}`}>
-                <ColumnStatusIcon status={task.status === "backlog" ? "todo" : task.status} />
-              </span>
-              <span className="issue-reference-id">{task.externalKey ?? task.identifier}</span>
-            </span>
-            <span className="issue-reference-title">{task.title}</span>
-          </span>
-        );
-      }}
-      onLinkClick={(event, href) => {
-        const reference = href ? referencedTask(href, referenceTasks) : null;
-        if (
-          !reference
-          || event.button !== 0
-          || event.metaKey
-          || event.ctrlKey
-          || event.shiftKey
-          || event.altKey
-        ) return;
-        event.preventDefault();
-        if (reference.task) onOpenTask(reference.task);
-      }}
-    />
-  );
+  if (field === "developmentContext") return <BranchIcon color="currentColor" size={14} />;
+  if (field === "startDate") return <DueDateIcon color="currentColor" size={14} />;
+  if (field === "dueDate") return <DueDateIcon color="currentColor" size={14} />;
+  if (field === "recurrence") return <RecurrenceIcon color="currentColor" size={14} />;
+  if (field === "archivedAt") return <DeleteIcon color="currentColor" size={14} />;
+  return <EditIcon color="currentColor" size={14} />;
 }
 
 function ConversationLink({
@@ -432,7 +353,7 @@ function ConversationLink({
       title={text(`查看对话 ${threadId}`, `View conversation ${threadId}`)}
       onClick={onOpen}
     >
-      <TaskboardIcon name="conversation" />
+      <ConversationIcon color="currentColor" size={16} />
       <strong>{text("查看对话", "View conversation")}</strong>
       <span className="conversation-divider" aria-hidden="true" />
       <span className="conversation-thread-id">{threadId}</span>
@@ -669,6 +590,79 @@ export function TaskDetail({
     }
   }
 
+  async function addMentionRelations(
+    anchor: Task,
+    segments: InlineMediaSegment[],
+  ): Promise<Task> {
+    let current = anchor;
+    const relatedIds = new Set(current.relations.related.map((relation) => relation.id));
+    for (const segment of segments) {
+      if (segment.type !== "issue-reference" || !segment.taskId) continue;
+      const relatedTaskId = segment.taskId;
+      if (
+        relatedTaskId === current.id
+        || segment.projectId !== current.projectId
+        || relatedIds.has(relatedTaskId)
+      ) continue;
+      const result = await applyRelationMutation(
+        () => onAddRelation(current, "related", relatedTaskId, "mention"),
+      );
+      current = result.task;
+      relatedIds.add(relatedTaskId);
+    }
+    return current;
+  }
+
+  function mentionTaskIds(segments: InlineMediaSegment[]): Set<string> {
+    return new Set(segments.flatMap((segment) => (
+      segment.type === "issue-reference" && segment.taskId ? [segment.taskId] : []
+    )));
+  }
+
+  function removedMentionTaskIds(
+    previous: InlineMediaSegment[],
+    next: InlineMediaSegment[],
+  ): Set<string> {
+    const nextIds = mentionTaskIds(next);
+    return new Set([...mentionTaskIds(previous)].filter((taskId) => !nextIds.has(taskId)));
+  }
+
+  async function removeUnreferencedMentionRelations(
+    anchor: Task,
+    candidates: Set<string>,
+  ): Promise<Task> {
+    if (candidates.size === 0) return anchor;
+    const savedComments = await listComments(anchor.id);
+    const referencedIds = mentionTaskIds(createInlineMediaSegments(anchor.description, referenceTasks));
+    for (const comment of savedComments) {
+      for (const taskId of mentionTaskIds(createInlineMediaSegments(comment.body, referenceTasks))) {
+        referencedIds.add(taskId);
+      }
+    }
+
+    let current = anchor;
+    for (const relatedTaskId of candidates) {
+      if (
+        referencedIds.has(relatedTaskId)
+        || !current.relations.related.some((relation) => relation.id === relatedTaskId)
+      ) continue;
+      const relatedTask = await getTask(relatedTaskId);
+      if (
+        mentionTaskIds(createInlineMediaSegments(relatedTask.description, referenceTasks))
+          .has(anchor.id)
+      ) continue;
+      const relatedComments = await listComments(relatedTaskId);
+      if (relatedComments.some((comment) => (
+        mentionTaskIds(createInlineMediaSegments(comment.body, referenceTasks)).has(anchor.id)
+      ))) continue;
+      const result = await applyRelationMutation(
+        () => onRemoveRelation(current, "related", relatedTaskId, "mention"),
+      );
+      current = result.task;
+    }
+    return current;
+  }
+
   function handleTitleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -702,6 +696,10 @@ export function TaskDetail({
       setEditingDescription(false);
       return;
     }
+    const removedMentionIds = removedMentionTaskIds(
+      createInlineMediaSegments(currentTask.description, referenceTasks),
+      descriptionSegments,
+    );
 
     setSavingProperty("description");
     onError(null);
@@ -719,9 +717,14 @@ export function TaskDetail({
         return null;
       });
       if (!saved) return;
-      setCurrentTask(saved);
-      setDescription(saved.description);
-      setDescriptionSegments(createInlineMediaSegments(saved.description, referenceTasks));
+      const savedWithAddedRelations = await addMentionRelations(saved, descriptionSegments);
+      const savedWithRelations = await removeUnreferencedMentionRelations(
+        savedWithAddedRelations,
+        removedMentionIds,
+      );
+      setCurrentTask(savedWithRelations);
+      setDescription(savedWithRelations.description);
+      setDescriptionSegments(createInlineMediaSegments(savedWithRelations.description, referenceTasks));
       setAttachments((current) => [
         ...current,
         ...uploaded.filter((attachment) => !current.some((item) => item.id === attachment.id)),
@@ -760,11 +763,15 @@ export function TaskDetail({
       setCommentSegments(createInlineMediaSegments());
       setPendingCommentFiles([]);
       if (commentAttachmentInputRef.current) commentAttachmentInputRef.current.value = "";
+      let relationAnchor = await getTask(currentTask.id);
       if (changeStatusToTodo) {
-        const saved = await onUpdate(currentTask, { status: "todo" });
+        const saved = await onUpdate(relationAnchor, { status: "todo" });
         setCurrentTask(saved);
+        relationAnchor = saved;
         setChangeStatusToTodo(false);
       }
+      const savedWithRelations = await addMentionRelations(relationAnchor, commentSegments);
+      setCurrentTask(savedWithRelations);
       const failed = results.length - uploaded.length;
       if (failed > 0) setCommentsError([
         `评论已发布，但有 ${failed} 个附件上传失败。`,
@@ -822,6 +829,10 @@ export function TaskDetail({
       if (body === comment.body) endCommentEdit();
       return;
     }
+    const removedMentionIds = removedMentionTaskIds(
+      createInlineMediaSegments(comment.body, referenceTasks),
+      editingSegments,
+    );
     setSavingCommentId(comment.id);
     setCommentsError(null);
     try {
@@ -839,6 +850,13 @@ export function TaskDetail({
         resolveInlineMediaMarkdown(body, editingInlineImages, uploaded).trim(),
       );
       setComments((current) => current.map((item) => item.id === updated.id ? updated : item));
+      const relationAnchor = await getTask(currentTask.id);
+      const savedWithAddedRelations = await addMentionRelations(relationAnchor, editingSegments);
+      const savedWithRelations = await removeUnreferencedMentionRelations(
+        savedWithAddedRelations,
+        removedMentionIds,
+      );
+      setCurrentTask(savedWithRelations);
       endCommentEdit();
     } catch (error) {
       setCommentsError(messageFor(error));
@@ -849,12 +867,20 @@ export function TaskDetail({
 
   async function confirmDelete() {
     if (!pendingDelete || deleting) return;
+    const removedMentionIds = mentionTaskIds(
+      createInlineMediaSegments(pendingDelete.body, referenceTasks),
+    );
     setDeleting(true);
     setCommentsError(null);
     try {
       await deleteComment(pendingDelete);
       setComments((current) => current.filter((comment) => comment.id !== pendingDelete.id));
       setPendingDelete(null);
+      const savedWithRelations = await removeUnreferencedMentionRelations(
+        currentTask,
+        removedMentionIds,
+      );
+      setCurrentTask(savedWithRelations);
     } catch (error) {
       setCommentsError(messageFor(error));
     } finally {
@@ -1106,7 +1132,7 @@ export function TaskDetail({
                   disabled={uploadingAttachments}
                   onClick={() => attachmentInputRef.current?.click()}
                 >
-                  <LinearIcon name="attachment" />
+                  <AttachmentIcon color="currentColor" />
                   {uploadingAttachments
                     ? text("上传中…", "Uploading…")
                     : text("添加附件", "Add attachment")}
@@ -1157,7 +1183,7 @@ export function TaskDetail({
                             title={text("删除附件", "Delete attachment")}
                             onClick={() => setPendingAttachmentDelete(attachment)}
                           >
-                            <LinearIcon name="trash" />
+                            <DeleteIcon color="currentColor" />
                           </button>
                         </div>
                       </li>
@@ -1318,7 +1344,7 @@ export function TaskDetail({
                               aria-expanded={activeMenuId === comment.id}
                               onClick={() => setActiveMenuId((current) => current === comment.id ? null : comment.id)}
                             >
-                              <LinearIcon name="more" />
+                              <MoreIcon color="currentColor" />
                             </button>
                             {activeMenuId === comment.id && (
                               <div className="comment-action-menu" role="menu">
@@ -1328,7 +1354,7 @@ export function TaskDetail({
                                   disabled={savingCommentId !== null}
                                   onClick={() => beginEdit(comment)}
                                 >
-                                  <LinearIcon name="write" />
+                                  <EditIcon color="currentColor" />
                                   {text("编辑评论", "Edit comment")}
                                 </button>
                                 <button
@@ -1337,7 +1363,7 @@ export function TaskDetail({
                                   className="danger"
                                   onClick={() => { setPendingDelete(comment); setActiveMenuId(null); }}
                                 >
-                                  <LinearIcon name="trash" />
+                                  <DeleteIcon color="currentColor" />
                                   {text("删除评论", "Delete comment")}
                                 </button>
                               </div>
@@ -1386,7 +1412,7 @@ export function TaskDetail({
                                 title={text("添加附件", "Add attachments")}
                                 onClick={() => editCommentAttachmentInputRef.current?.click()}
                               >
-                                <LinearIcon name="attachment" />
+                                <AttachmentIcon color="currentColor" />
                               </button>
                               <input
                                 ref={editCommentAttachmentInputRef}
@@ -1457,7 +1483,7 @@ export function TaskDetail({
                                     title={text("删除附件", "Delete attachment")}
                                     onClick={() => setPendingAttachmentDelete(attachment)}
                                   >
-                                    <LinearIcon name="trash" />
+                                    <DeleteIcon color="currentColor" />
                                   </button>
                                 )}
                               </li>
@@ -1531,7 +1557,7 @@ export function TaskDetail({
                       title={text("添加附件", "Add attachments")}
                       onClick={() => commentAttachmentInputRef.current?.click()}
                     >
-                      <LinearIcon name="attachment" />
+                      <AttachmentIcon color="currentColor" />
                     </button>
                     <input
                       ref={commentAttachmentInputRef}
@@ -1585,7 +1611,7 @@ export function TaskDetail({
                 <ActorAvatar actor={CODEX_AGENT_ACTOR} className="detail-thread-avatar" />
                 <span>{openingThread
                   ? text("正在打开…", "Opening…")
-                  : text("在对话中打开", "Open in conversation")}</span>
+                  : text("在新对话打开", "Open in new conversation")}</span>
               </button>
               {currentTask.externalUrl && (
                 <a
@@ -1640,13 +1666,22 @@ export function TaskDetail({
                 options={TASK_STATUSES.map((status) => ({
                   value: status,
                   label: taskStatusLabel(language, status),
-                  icon: <StatusIcon status={status} />,
-                  className: `status-icon-${STATUS_DETAILS[status].tone}`,
+                  icon: <StatusIcon status={status} color="currentColor" size={14} />,
                 }))}
                 open={propertyMenu === "status"}
                 disabled={savingProperty === "status"}
                 className="detail-property-picker"
                 triggerClassName="detail-property-trigger"
+                triggerContent={(
+                  <>
+                    <span className="task-property-trigger-icon">
+                      <StatusIcon status={currentTask.status} color="currentColor" size={14} />
+                    </span>
+                    <span className="task-property-trigger-label">
+                      {taskStatusLabel(language, currentTask.status)}
+                    </span>
+                  </>
+                )}
                 ariaLabel={text("状态", "Status")}
                 onOpenChange={(open) => setPropertyMenu(open ? "status" : null)}
                 onChange={(status) => void saveTask({ status }, "status")}
@@ -1659,7 +1694,7 @@ export function TaskDetail({
                 options={TASK_PRIORITIES.map((priority) => ({
                   value: priority,
                   label: taskPriorityLabel(language, priority),
-                  icon: <LinearPriorityIcon priority={priority} />,
+                  icon: <PriorityIcon priority={priority} size={14} />,
                   className: `priority-${priority}`,
                 }))}
                 open={propertyMenu === "priority"}
@@ -1699,7 +1734,7 @@ export function TaskDetail({
             </div>
             <div className="detail-property-row labels-property">
               <span className="detail-property-icon" aria-hidden="true">
-                <LinearIcon name="label" />
+                <LabelIcon color="currentColor" size={14} />
               </span>
               <span className="detail-property-label">{text("标签", "Labels")}</span>
               <LabelPicker
@@ -1727,12 +1762,14 @@ export function TaskDetail({
                     label: developmentScanLoading
                       ? text("正在扫描 Git…", "Scanning Git…")
                       : text("未绑定", "Not linked"),
-                    icon: <LinearIcon name="branch" />,
+                    icon: <BranchIcon color="currentColor" size={14} />,
                   },
                   ...developmentOptions.map((context) => ({
                     value: contextValue(context),
                     label: contextLabel(context, text),
-                    icon: <LinearIcon name={context.type === "branch" ? "branch" : "folder"} />,
+                    icon: context.type === "branch"
+                      ? <BranchIcon color="currentColor" size={14} />
+                      : <LinearIcon name="folder" />,
                   })),
                 ]}
                 open={propertyMenu === "development"}
@@ -1747,8 +1784,17 @@ export function TaskDetail({
                 }, "developmentContext")}
               />
             </div>
-            <label className="detail-property-row">
-              <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
+            <label
+              className="detail-property-row detail-date-property-row"
+              onClick={(event) => {
+                const input = event.currentTarget.querySelector("input");
+                if (input && !input.disabled) {
+                  event.preventDefault();
+                  input.showPicker();
+                }
+              }}
+            >
+              <span className="detail-property-icon" aria-hidden="true"><DueDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
               <input
                 type="date"
@@ -1759,8 +1805,17 @@ export function TaskDetail({
                 }, "startDate")}
               />
             </label>
-            <label className="detail-property-row">
-              <span className="detail-property-icon" aria-hidden="true"><LinearIcon name="calendar" /></span>
+            <label
+              className="detail-property-row detail-date-property-row"
+              onClick={(event) => {
+                const input = event.currentTarget.querySelector("input");
+                if (input && !input.disabled) {
+                  event.preventDefault();
+                  input.showPicker();
+                }
+              }}
+            >
+              <span className="detail-property-icon" aria-hidden="true"><DueDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("截止日期", "Due date")}</span>
               <input
                 type="date"
@@ -1777,11 +1832,11 @@ export function TaskDetail({
               <TaskPropertyPicker
                 value={currentTask.recurrence?.unit ?? ""}
                 options={[
-                  { value: "", label: text("不重复", "Does not repeat"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "day", label: text("每天", "Daily"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "week", label: text("每周", "Weekly"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "month", label: text("每月", "Monthly"), icon: <LinearIcon name="recurrence" /> },
-                  { value: "year", label: text("每年", "Yearly"), icon: <LinearIcon name="recurrence" /> },
+                  { value: "", label: text("不重复", "Does not repeat"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "day", label: text("每天", "Daily"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "week", label: text("每周", "Weekly"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "month", label: text("每月", "Monthly"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
+                  { value: "year", label: text("每年", "Yearly"), icon: <RecurrenceIcon color="currentColor" size={14} /> },
                 ]}
                 open={propertyMenu === "recurrence"}
                 disabled={savingProperty === "recurrence"}
