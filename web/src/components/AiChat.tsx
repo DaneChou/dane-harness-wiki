@@ -1390,6 +1390,10 @@ export function AiChat({
   }, [panelOpen]);
 
   useEffect(() => {
+    if (panelOpen && selectedThreadId) editorRef.current?.focus();
+  }, [panelOpen, selectedThreadId]);
+
+  useEffect(() => {
     function finishPanelResize(pointerId?: number) {
       const session = panelResizeSessionRef.current;
       if (!session || (pointerId !== undefined && session.pointerId !== pointerId)) return;
