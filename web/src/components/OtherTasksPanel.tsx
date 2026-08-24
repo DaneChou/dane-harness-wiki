@@ -1,12 +1,9 @@
 import { useEffect, useState } from "react";
-import type { DragEvent } from "react";
+import type { CSSProperties, DragEvent } from "react";
 import type { ActorIdentity, Task, TaskDraft, TaskStatus } from "../types";
 import type { TaskCardPresentation, TaskConversationItem } from "../taskConversations";
 import { taskStatusLabel, useTaskboardI18n } from "../i18n";
-import {
-  OTHER_TASK_TABS,
-  type OtherTaskTab,
-} from "../issueBoardStatuses";
+import type { OtherTaskTab } from "../issueBoardStatuses";
 import { LinearIcon } from "./LinearIcon";
 import { DeleteIcon, PlusIcon, RefreshIcon, StatusIcon } from "./SemanticIcons";
 import { TaskCard } from "./TaskCard";
@@ -82,6 +79,7 @@ function ArchivedTaskCard({
 interface OtherTasksPanelProps {
   open: boolean;
   activeTab: OtherTaskTab;
+  tabs: readonly OtherTaskTab[];
   tasksByStatus: Record<TaskStatus, Task[]>;
   archivedTasks: Task[];
   presentations: Record<string, TaskCardPresentation>;
@@ -118,6 +116,7 @@ interface OtherTasksPanelProps {
 export function OtherTasksPanel({
   open,
   activeTab,
+  tabs,
   tasksByStatus,
   archivedTasks,
   presentations,
@@ -206,8 +205,13 @@ export function OtherTasksPanel({
       aria-label={text("其他任务", "Other issues")}
       aria-hidden={!open}
     >
-      <div className="other-tasks-tabs" role="tablist" aria-label={text("其他任务状态", "Other issue statuses")}>
-        {OTHER_TASK_TABS.map((tab) => {
+      <div
+        className="other-tasks-tabs"
+        role="tablist"
+        aria-label={text("其他任务状态", "Other issue statuses")}
+        style={{ "--other-task-tab-count": tabs.length } as CSSProperties}
+      >
+        {tabs.map((tab) => {
           const label = tab === "archived"
             ? text("已归档", "Archived")
             : taskStatusLabel(language, tab);

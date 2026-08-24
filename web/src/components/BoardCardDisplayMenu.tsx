@@ -1,92 +1,206 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useTaskboardI18n } from "../i18n";
+import { taskStatusLabel, useTaskboardI18n } from "../i18n";
+import {
+  BOARD_STATUS_ORDER,
+  MAIN_STATUSES,
+  SECONDARY_STATUSES,
+} from "../issueBoardStatuses";
+import type { TaskStatus } from "../types";
 import { LinearIcon } from "./LinearIcon";
+import { StatusIcon } from "./SemanticIcons";
 
-interface BoardCardDisplayMenuProps {
+export type BoardStatusPlacement = "main" | "sidebar" | "hidden";
+
+export interface BoardDisplaySettings {
   cover: boolean;
   body: boolean;
-  onChange: (value: { cover: boolean; body: boolean }) => void;
+  mainStatuses: TaskStatus[];
+  sidebarStatuses: TaskStatus[];
+}
+
+export const DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
+  cover: true,
+  body: false,
+  mainStatuses: [...MAIN_STATUSES],
+  sidebarStatuses: [...SECONDARY_STATUSES],
+};
+
+interface BoardCardDisplayMenuProps {
+  projectName: string;
+  settings: BoardDisplaySettings;
+  onChange: (value: BoardDisplaySettings) => void;
+  onReset: () => void;
 }
 
 export function BoardCardDisplayMenu({
-  cover,
-  body,
+  projectName,
+  settings,
   onChange,
+  onReset,
 }: BoardCardDisplayMenuProps) {
-  const { text } = useTaskboardI18n();
+  const { language, text } = useTaskboardI18n();
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
-
-  useLayoutEffect(() => {
-    if (!open || !triggerRef.current || !menuRef.current) return;
-    const trigger = triggerRef.current.getBoundingClientRect();
-    const menu = menuRef.current.getBoundingClientRect();
-    const left = Math.max(8, Math.min(trigger.right - menu.width, window.innerWidth - menu.width - 8));
-    const top = trigger.bottom + 8 + menu.height <= window.innerHeight
-      ? trigger.bottom + 8
-      : Math.max(8, trigger.top - menu.height - 8);
-    setPosition({ left, top, ready: true });
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    function closeFromOutside(event: PointerEvent) {
-      if (!menuRef.current?.contains(event.target as Node) && !triggerRef.current?.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
+    closeRef.current?.focus();
     function closeFromEscape(event: KeyboardEvent) {
       if (event.key !== "Escape") return;
       setOpen(false);
       triggerRef.current?.focus();
     }
-    document.addEventListener("pointerdown", closeFromOutside);
     document.addEventListener("keydown", closeFromEscape);
     return () => {
-      document.removeEventListener("pointerdown", closeFromOutside);
       document.removeEventListener("keydown", closeFromEscape);
     };
   }, [open]);
 
-  const menu = open ? createPortal(
+  function statusPlacement(status: TaskStatus): BoardStatusPlacement {
+    if (settings.mainStatuses.includes(status)) return "main";
+    if (settings.sidebarStatuses.includes(status)) return "sidebar";
+    return "hidden";
+  }
+
+  function moveStatus(status: TaskStatus, placement: BoardStatusPlacement) {
+    onChange({
+      ...settings,
+      mainStatuses: BOARD_STATUS_ORDER.filter((candidate) => (
+        candidate === status
+          ? placement === "main"
+          : settings.mainStatuses.includes(candidate)
+      )),
+      sidebarStatuses: BOARD_STATUS_ORDER.filter((candidate) => (
+        candidate === status
+          ? placement === "sidebar"
+          : settings.sidebarStatuses.includes(candidate)
+      )),
+    });
+  }
+
+  const dialog = open ? createPortal(
     <div
-      ref={menuRef}
-      className="project-automation-menu no-drag"
-      role="dialog"
-      aria-label={text("卡片显示设置", "Card display settings")}
-      style={{ left: position.left, top: position.top, visibility: position.ready ? "visible" : "hidden" }}
+      className="display-settings-backdrop no-drag"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) setOpen(false);
+      }}
     >
-      <div className="project-automation-menu-heading">
-        <strong>{text("卡片显示", "Card display")}</strong>
-      </div>
-      <div className="project-automation-switch">
-        <span>{text("封面", "Cover")}</span>
-        <button
-          type="button"
-          className={`board-setting-switch${cover ? " is-on" : ""}`}
-          role="switch"
-          aria-label={text("封面", "Cover")}
-          aria-checked={cover}
-          onClick={() => onChange({ cover: !cover, body })}
-        >
-          <span aria-hidden="true" />
-        </button>
-      </div>
-      <div className="project-automation-switch">
-        <span>{text("正文", "Body")}</span>
-        <button
-          type="button"
-          className={`board-setting-switch${body ? " is-on" : ""}`}
-          role="switch"
-          aria-label={text("正文", "Body")}
-          aria-checked={body}
-          onClick={() => onChange({ cover, body: !body })}
-        >
-          <span aria-hidden="true" />
-        </button>
+      <div
+        className="display-settings-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="display-settings-title"
+      >
+        <header className="display-settings-header">
+          <div>
+            <h2 id="display-settings-title">{text("显示设置", "Display settings")}</h2>
+            <p>{projectName}</p>
+          </div>
+          <button
+            ref={closeRef}
+            className="icon-button display-settings-close"
+            type="button"
+            aria-label={text("关闭显示设置", "Close display settings")}
+            onClick={() => setOpen(false)}
+          >
+            <LinearIcon name="close" />
+          </button>
+        </header>
+
+        <div className="display-settings-content">
+          <section className="display-settings-section">
+            <div className="display-settings-section-heading">
+              <div>
+                <h3>{text("状态位置", "Status placement")}</h3>
+                <p>{text(
+                  "选择每个状态显示在默认面板、侧边栏或不显示。",
+                  "Choose whether each status appears on the main board, in the sidebar, or stays hidden.",
+                )}</p>
+              </div>
+            </div>
+            <div className="display-settings-status-list">
+              {BOARD_STATUS_ORDER.map((status) => {
+                const placement = statusPlacement(status);
+                const label = taskStatusLabel(language, status);
+                return (
+                  <div className="display-settings-status-row" key={status}>
+                    <span className="display-settings-status-label">
+                      <StatusIcon status={status} color="currentColor" size={15} />
+                      {label}
+                    </span>
+                    <div className="display-settings-placement" role="group" aria-label={label}>
+                      {([
+                        ["main", text("默认面板", "Main board")],
+                        ["sidebar", text("侧边栏", "Sidebar")],
+                        ["hidden", text("隐藏", "Hidden")],
+                      ] as const).map(([value, optionLabel]) => (
+                        <button
+                          className={placement === value ? "is-active" : ""}
+                          type="button"
+                          aria-pressed={placement === value}
+                          onClick={() => moveStatus(status, value)}
+                          key={value}
+                        >
+                          {optionLabel}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="display-settings-note">{text(
+              "已归档议题固定保留在侧边栏。没有议题时，阻塞列仍会自动隐藏。",
+              "Archived issues always stay in the sidebar. The Blocked column still hides automatically when empty.",
+            )}</p>
+          </section>
+
+          <section className="display-settings-section display-settings-card-section">
+            <div className="display-settings-section-heading">
+              <div>
+                <h3>{text("卡片内容", "Card content")}</h3>
+                <p>{text("控制默认面板和侧边栏中的卡片内容。", "Control card content on the main board and in the sidebar.")}</p>
+              </div>
+            </div>
+            <div className="display-settings-switch-row">
+              <span>{text("封面", "Cover")}</span>
+              <button
+                type="button"
+                className={`board-setting-switch${settings.cover ? " is-on" : ""}`}
+                role="switch"
+                aria-label={text("显示封面", "Show cover")}
+                aria-checked={settings.cover}
+                onClick={() => onChange({ ...settings, cover: !settings.cover })}
+              >
+                <span aria-hidden="true" />
+              </button>
+            </div>
+            <div className="display-settings-switch-row">
+              <span>{text("正文", "Body")}</span>
+              <button
+                type="button"
+                className={`board-setting-switch${settings.body ? " is-on" : ""}`}
+                role="switch"
+                aria-label={text("显示正文", "Show body")}
+                aria-checked={settings.body}
+                onClick={() => onChange({ ...settings, body: !settings.body })}
+              >
+                <span aria-hidden="true" />
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <footer className="display-settings-footer">
+          <button className="button secondary" type="button" onClick={onReset}>
+            {text("重置为默认", "Reset to default")}
+          </button>
+          <button className="button primary" type="button" onClick={() => setOpen(false)}>
+            {text("完成", "Done")}
+          </button>
+        </footer>
       </div>
     </div>,
     document.body,
@@ -98,18 +212,15 @@ export function BoardCardDisplayMenu({
         ref={triggerRef}
         className={`task-filter-trigger board-card-display-trigger${open ? " is-open" : ""}`}
         type="button"
-        aria-label={text("卡片显示设置", "Card display settings")}
+        aria-label={text("显示设置", "Display settings")}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title={text("卡片显示", "Card display")}
-        onClick={() => {
-          if (!open) setPosition({ left: 0, top: 0, ready: false });
-          setOpen((current) => !current);
-        }}
+        title={text("显示设置", "Display settings")}
+        onClick={() => setOpen((current) => !current)}
       >
         <LinearIcon name="displayOptions" />
       </button>
-      {menu}
+      {dialog}
     </>
   );
 }
