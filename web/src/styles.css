@@ -3175,10 +3175,19 @@ kbd {
   margin-top: 18px;
 }
 
+.issue-conversation-actions {
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 6px;
+}
+
 .issue-conversation-link {
   display: inline-flex;
   align-items: center;
+  flex: 0 1 auto;
   max-width: 100%;
+  min-width: 0;
   min-height: 36px;
   gap: 8px;
   padding: 0 11px;
@@ -3212,6 +3221,37 @@ kbd {
   flex: 0 0 auto;
   font-size: 11px;
   font-weight: 600;
+}
+
+.issue-conversation-copy {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 36px;
+  gap: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  transition: background 100ms ease, color 100ms ease;
+}
+
+.issue-conversation-copy:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
+
+.issue-conversation-copy:focus-visible {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.issue-conversation-copy > svg {
+  width: 16px;
+  height: 16px;
 }
 
 .conversation-divider {
@@ -4169,6 +4209,22 @@ kbd {
 
 .comment-conversation-link {
   padding: 2px 16px 16px;
+}
+
+.comment-card .issue-conversation-copy {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    background 100ms ease,
+    color 100ms ease,
+    opacity 200ms ease-out,
+    visibility 0s linear 200ms;
+}
+
+.comment-card:hover .issue-conversation-copy {
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
 }
 
 .comment-attachment-list li {
@@ -8229,7 +8285,7 @@ kbd {
     line-height: 32px;
   }
 
-  .issue-conversation-link {
+  .issue-conversation-actions {
     width: 100%;
   }
 
