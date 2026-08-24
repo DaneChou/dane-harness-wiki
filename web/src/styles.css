@@ -1290,6 +1290,7 @@ kbd {
 }
 
 .display-settings-status-item {
+  --display-status-color: var(--text-tertiary);
   position: relative;
   min-height: 40px;
   gap: 9px;
@@ -1298,12 +1299,12 @@ kbd {
   border-radius: 8px;
   background: var(--surface-raised);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  color: var(--text-secondary);
+  color: var(--display-status-color);
   cursor: grab;
   font-size: 11px;
   font-weight: 520;
   user-select: none;
-  transition: opacity 100ms ease, transform 100ms ease;
+  transition: opacity 100ms ease, transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 .display-settings-status-item:active {
@@ -1312,12 +1313,25 @@ kbd {
 
 .display-settings-status-item > svg {
   flex: 0 0 auto;
-  color: var(--text-tertiary);
+  color: var(--display-status-color);
 }
 
 .display-settings-status-item.is-dragging {
-  opacity: 0.35;
+  opacity: 0;
 }
+
+.display-settings-status-item.is-drag-shifted {
+  will-change: transform;
+}
+
+.display-settings-status-item.status-backlog { --display-status-color: var(--status-backlog); }
+.display-settings-status-item.status-todo { --display-status-color: #9747ff; }
+.display-settings-status-item.status-in_progress { --display-status-color: #00a558; }
+.display-settings-status-item.status-in_review { --display-status-color: #317cff; }
+.display-settings-status-item.status-blocked { --display-status-color: #e5484d; }
+.display-settings-status-item.status-done { --display-status-color: var(--status-done); }
+.display-settings-status-item.status-canceled { --display-status-color: var(--status-canceled); }
+.display-settings-status-item.status-archived { --display-status-color: var(--text-tertiary); }
 
 .display-settings-status-item.is-drop-before::before {
   position: absolute;
@@ -8571,6 +8585,11 @@ kbd {
   background: transparent;
 }
 
+.board-column.status-backlog {
+  --column-status-color: var(--status-backlog);
+  --column-status-background: color-mix(in srgb, var(--status-backlog) 10%, transparent);
+}
+
 .board-column.status-todo,
 .issue-reference-inline.issue-reference-status-backlog,
 .issue-reference-inline.issue-reference-status-todo {
@@ -8596,20 +8615,31 @@ kbd {
   --column-status-background: rgba(229, 72, 77, .1);
 }
 
+.board-column.status-done,
 .issue-reference-inline.issue-reference-status-done {
   --column-status-color: var(--status-done);
   --column-status-background: color-mix(in srgb, var(--status-done) 10%, transparent);
 }
 
+.board-column.status-canceled,
 .issue-reference-inline.issue-reference-status-canceled {
   --column-status-color: var(--status-canceled);
   --column-status-background: color-mix(in srgb, var(--status-canceled) 10%, transparent);
 }
 
+.board-column.status-archived {
+  --column-status-color: var(--text-tertiary);
+  --column-status-background: color-mix(in srgb, var(--text-tertiary) 10%, transparent);
+}
+
+.board-column.status-backlog .column-header,
 .board-column.status-todo .column-header,
 .board-column.status-in_progress .column-header,
 .board-column.status-in_review .column-header,
-.board-column.status-blocked .column-header {
+.board-column.status-blocked .column-header,
+.board-column.status-done .column-header,
+.board-column.status-canceled .column-header,
+.board-column.status-archived .column-header {
   background: var(--column-status-background);
   color: var(--column-status-color);
 }

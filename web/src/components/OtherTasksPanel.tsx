@@ -76,6 +76,59 @@ function ArchivedTaskCard({
   );
 }
 
+interface ArchivedTasksColumnProps {
+  tasks: Task[];
+  hasActiveFilters: boolean;
+  restoringTaskId: string | null;
+  deletingTaskId: string | null;
+  onRestore: (task: Task) => void;
+  onDelete: (task: Task) => void;
+}
+
+export function ArchivedTasksColumn({
+  tasks,
+  hasActiveFilters,
+  restoringTaskId,
+  deletingTaskId,
+  onRestore,
+  onDelete,
+}: ArchivedTasksColumnProps) {
+  const { text } = useTaskboardI18n();
+  return (
+    <section className="board-column status-archived" aria-labelledby="column-archived">
+      <header className="column-header">
+        <div className="column-heading">
+          <span className="column-status-icon">
+            <DeleteIcon color="var(--column-status-color)" size={14} />
+          </span>
+          <h2 id="column-archived">
+            {text("已归档", "Archived")}{tasks.length > 0 ? ` ${tasks.length}` : ""}
+          </h2>
+        </div>
+      </header>
+      <div className="column-list">
+        {tasks.map((task) => (
+          <ArchivedTaskCard
+            key={task.id}
+            task={task}
+            busy={restoringTaskId !== null || deletingTaskId !== null}
+            restoring={restoringTaskId === task.id}
+            onRestore={onRestore}
+            onDelete={onDelete}
+          />
+        ))}
+        {tasks.length === 0 && (
+          <div className="column-empty">
+            {hasActiveFilters
+              ? text("当前筛选下无匹配议题", "No issues match the current filters")
+              : text("没有已归档议题。", "There are no archived issues.")}
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
 interface OtherTasksPanelProps {
   open: boolean;
   activeTab: OtherTaskTab;

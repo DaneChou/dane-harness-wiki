@@ -6,25 +6,26 @@ import {
   MAIN_STATUSES,
   SECONDARY_STATUSES,
 } from "../issueBoardStatuses";
+import type { OtherTaskTab } from "../issueBoardStatuses";
 import type { TaskStatus } from "../types";
 import { LinearIcon } from "./LinearIcon";
-import { StatusIcon } from "./SemanticIcons";
+import { DeleteIcon, StatusIcon } from "./SemanticIcons";
 
 export type BoardStatusPlacement = "main" | "sidebar" | "hidden";
 
 export interface BoardDisplaySettings {
   cover: boolean;
   body: boolean;
-  mainStatuses: TaskStatus[];
-  sidebarStatuses: TaskStatus[];
-  hiddenStatuses: TaskStatus[];
+  mainStatuses: OtherTaskTab[];
+  sidebarStatuses: OtherTaskTab[];
+  hiddenStatuses: OtherTaskTab[];
 }
 
 export const DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
   cover: true,
   body: false,
   mainStatuses: [...MAIN_STATUSES],
-  sidebarStatuses: [...SECONDARY_STATUSES],
+  sidebarStatuses: [...SECONDARY_STATUSES, "archived"],
   hiddenStatuses: [],
 };
 
@@ -46,10 +47,11 @@ export function BoardCardDisplayMenu({
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false });
-  const [draggedStatus, setDraggedStatus] = useState<TaskStatus | null>(null);
+  const [draggedStatus, setDraggedStatus] = useState<OtherTaskTab | null>(null);
+  const [draggedStatusHeight, setDraggedStatusHeight] = useState(0);
   const [dropTarget, setDropTarget] = useState<{
     placement: BoardStatusPlacement;
-    beforeStatus: TaskStatus | null;
+    beforeStatus: OtherTaskTab | null;
   } | null>(null);
 
   useLayoutEffect(() => {
@@ -102,9 +104,9 @@ export function BoardCardDisplayMenu({
   }
 
   function moveStatus(
-    status: TaskStatus,
+    status: OtherTaskTab,
     placement: BoardStatusPlacement,
-    beforeStatus: TaskStatus | null,
+    beforeStatus: OtherTaskTab | null,
   ) {
     const next = {
       main: settings.mainStatuses.filter((candidate) => candidate !== status),
@@ -122,12 +124,32 @@ export function BoardCardDisplayMenu({
     });
   }
 
-  function findDropBefore(container: HTMLElement, clientY: number): TaskStatus | null {
+  function findDropBefore(container: HTMLElement, clientY: number): OtherTaskTab | null {
     const items = Array.from(container.querySelectorAll<HTMLElement>("[data-display-status]"))
       .filter((item) => item.dataset.displayStatus !== draggedStatus);
     return (items.find((item) => (
       clientY < item.getBoundingClientRect().top + item.offsetHeight / 2
-    ))?.dataset.displayStatus as TaskStatus | undefined) ?? null;
+    ))?.dataset.displayStatus as OtherTaskTab | undefined) ?? null;
+  }
+
+  function getStatusDragShift(status: OtherTaskTab, placement: BoardStatusPlacement) {
+    if (!draggedStatus || status === draggedStatus) return 0;
+    const statuses = statusesFor(placement);
+    const remainingStatuses = statuses.filter((candidate) => candidate !== draggedStatus);
+    const statusIndex = statuses.indexOf(status);
+    const remainingIndex = remainingStatuses.indexOf(status);
+    const draggedIndex = statuses.indexOf(draggedStatus);
+    const beforeIndex = dropTarget?.placement === placement
+      ? dropTarget.beforeStatus
+        ? remainingStatuses.indexOf(dropTarget.beforeStatus)
+        : remainingStatuses.length
+      : -1;
+    let shift = 0;
+    const dragDistance = draggedStatusHeight + 8;
+
+    if (draggedIndex >= 0 && statusIndex > draggedIndex) shift -= dragDistance;
+    if (beforeIndex >= 0 && remainingIndex >= beforeIndex) shift += dragDistance;
+    return shift;
   }
 
   function handleDrop(event: DragEvent<HTMLElement>, placement: BoardStatusPlacement) {
@@ -135,9 +157,10 @@ export function BoardCardDisplayMenu({
     const status = (
       event.dataTransfer.getData("application/x-taskboard-display-status")
       || event.dataTransfer.getData("text/plain")
-    ) as TaskStatus;
+    ) as OtherTaskTab;
     if (status) moveStatus(status, placement, findDropBefore(event.currentTarget, event.clientY));
     setDraggedStatus(null);
+    setDraggedStatusHeight(0);
     setDropTarget(null);
   }
 
@@ -254,33 +277,43 @@ export function BoardCardDisplayMenu({
             >
               <h3>{label}</h3>
               <div className="display-settings-status-list">
-                {statusesFor(placement).map((status) => (
-                  <div
-                    className={"display-settings-status-item" + (
-                      draggedStatus === status ? " is-dragging" : ""
-                    ) + (
-                      dropTarget?.placement === placement && dropTarget.beforeStatus === status
-                        ? " is-drop-before"
-                        : ""
-                    )}
-                    draggable
-                    data-display-status={status}
-                    onDragStart={(event) => {
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", status);
-                      event.dataTransfer.setData("application/x-taskboard-display-status", status);
-                      setDraggedStatus(status);
-                    }}
-                    onDragEnd={() => {
-                      setDraggedStatus(null);
-                      setDropTarget(null);
-                    }}
-                    key={status}
-                  >
-                    <StatusIcon status={status} color="currentColor" size={15} />
-                    <span>{taskStatusLabel(language, status)}</span>
-                  </div>
-                ))}
+                {statusesFor(placement).map((status) => {
+                  const dragShift = getStatusDragShift(status, placement);
+                  return (
+                    <div
+                      className={`display-settings-status-item status-${status}` + (
+                        draggedStatus === status ? " is-dragging" : ""
+                      ) + (dragShift ? " is-drag-shifted" : "") + (
+                        dropTarget?.placement === placement && dropTarget.beforeStatus === status
+                          ? " is-drop-before"
+                          : ""
+                      )}
+                      style={dragShift ? { transform: `translate3d(0, ${dragShift}px, 0)` } : undefined}
+                      draggable
+                      data-display-status={status}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = "move";
+                        event.dataTransfer.setData("text/plain", status);
+                        event.dataTransfer.setData("application/x-taskboard-display-status", status);
+                        setDraggedStatus(status);
+                        setDraggedStatusHeight(event.currentTarget.offsetHeight);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedStatus(null);
+                        setDraggedStatusHeight(0);
+                        setDropTarget(null);
+                      }}
+                      key={status}
+                    >
+                      {status === "archived"
+                        ? <DeleteIcon color="var(--display-status-color)" size={15} />
+                        : <StatusIcon status={status as TaskStatus} color="var(--display-status-color)" size={15} />}
+                      <span>{status === "archived"
+                        ? text("已归档", "Archived")
+                        : taskStatusLabel(language, status)}</span>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           ))}

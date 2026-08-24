@@ -61,7 +61,7 @@ import { DashboardView } from "./components/DashboardView";
 import { ProjectReadmeView } from "./components/ProjectReadmeView";
 import { IssueListView } from "./components/IssueListView";
 import { JiraConnectionDialog } from "./components/JiraConnectionDialog";
-import { OtherTasksPanel } from "./components/OtherTasksPanel";
+import { ArchivedTasksColumn, OtherTasksPanel } from "./components/OtherTasksPanel";
 import {
   resolveInlineMediaMarkdown,
   type PendingInlineImage,
@@ -302,7 +302,7 @@ const PROJECT_VIEW_KEY_PREFIX = "taskboard.project-view.v1.";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
 const PROJECT_CODEX_IDENTITIES_KEY = "taskboard.projectCodexIdentities.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
-const PROJECT_BOARD_DISPLAY_SETTINGS_KEY = "taskboard.project-board-display-settings.v2";
+const PROJECT_BOARD_DISPLAY_SETTINGS_KEY = "taskboard.project-board-display-settings.v3";
 const ISSUE_READ_KEY_PREFIX = "taskboard.issue-read.v1";
 const FIRST_USE_COMPLETE_KEY = "taskboard.first-use-complete.v1";
 function readIssueActivityKeys(storageKey: string): Record<string, string> {
@@ -2176,21 +2176,26 @@ export function App() {
   }, [filteredTasks]);
 
   const hasBlockedTasks = tasks.some((task) => task.status === "blocked");
-  const mainStatuses = hasBlockedTasks
+  const mainBoardItems = hasBlockedTasks
     ? boardDisplaySettings.mainStatuses
     : boardDisplaySettings.mainStatuses.filter((status) => status !== "blocked");
-  const mainColumnCount = Math.max(mainStatuses.length, 1);
+  const mainColumnCount = Math.max(mainBoardItems.length, 1);
   const mainBoardMinWidth = (mainColumnCount * 300) + ((mainColumnCount - 1) * 24);
   const mainBoardMaxWidth = (mainColumnCount * 400) + ((mainColumnCount - 1) * 24);
   const otherTasksColumnCount = mainColumnCount + 1;
   const otherTasksWidth = `clamp(300px, calc(${100 / otherTasksColumnCount}% - ${(36 + (mainColumnCount * 24)) / otherTasksColumnCount}px), 400px)`;
-  const otherTaskTabs: OtherTaskTab[] = [...boardDisplaySettings.sidebarStatuses, "archived"];
+  const otherTaskTabs = boardDisplaySettings.sidebarStatuses;
   const otherTaskTabsKey = otherTaskTabs.join(",");
+  const otherTasksAvailable = otherTaskTabs.length > 0;
 
   useEffect(() => {
+    if (!otherTasksAvailable) {
+      setOtherTasksOpen(false);
+      return;
+    }
     if (otherTaskTabs.includes(otherTasksTab)) return;
-    setOtherTasksTab(otherTaskTabs[0] ?? "archived");
-  }, [otherTaskTabsKey, otherTasksTab]);
+    setOtherTasksTab(otherTaskTabs[0]);
+  }, [otherTaskTabsKey, otherTasksAvailable, otherTasksTab]);
 
   const taskPresentations = useMemo(() => Object.fromEntries(tasks.map((task) => {
     const unread = (task.status === "in_review" || task.status === "blocked")
@@ -3484,7 +3489,7 @@ export function App() {
                 onReset={resetProjectBoardDisplaySettings}
               />
             )}
-            {boardView === "issues" && (
+            {boardView === "issues" && otherTasksAvailable && (
               <button
                 className={`other-tasks-trigger${otherTasksOpen ? " is-open" : ""}`}
                 type="button"
@@ -3637,8 +3642,8 @@ export function App() {
           </Suspense>
         ) : (
           <div
-            className={`issue-board-layout${otherTasksVisible ? " has-other-tasks" : ""}`}
-            data-main-columns={mainStatuses.length}
+            className={`issue-board-layout${otherTasksAvailable && otherTasksVisible ? " has-other-tasks" : ""}`}
+            data-main-columns={mainBoardItems.length}
             style={{
               "--main-column-count": mainColumnCount,
               "--main-board-min-width": `${mainBoardMinWidth}px`,
@@ -3648,8 +3653,8 @@ export function App() {
           >
             {tasksLoading && !hasLoadedTasks ? (
               <div className="loading-board" aria-label={text("正在加载议题", "Loading issues")} aria-busy="true">
-                {mainStatuses.map((status) => (
-                  <div className="loading-column" key={status}>
+                {mainBoardItems.map((item) => (
+                  <div className="loading-column" key={item}>
                     <span /><div /><div />
                   </div>
                 ))}
@@ -3658,20 +3663,30 @@ export function App() {
               <>
                 <div className="board-scroll" aria-label={text("议题看板", "Issue board")}>
                   <div className="board">
-                    {mainStatuses.map((status) => (
+                    {mainBoardItems.map((item) => item === "archived" ? (
+                      <ArchivedTasksColumn
+                        key={item}
+                        tasks={filteredArchivedTasks}
+                        hasActiveFilters={hasActiveTaskFilters}
+                        restoringTaskId={restoringTaskId}
+                        deletingTaskId={deletingArchivedTaskId}
+                        onRestore={(task) => void restoreArchivedTask(task)}
+                        onDelete={setPendingArchivedTaskDelete}
+                      />
+                    ) : (
                       <BoardColumn
-                        key={status}
+                        key={item}
                         scrollRef={(element) => {
-                          boardColumnScrollRefs.current[status] = element;
+                          boardColumnScrollRefs.current[item] = element;
                         }}
-                        status={status}
-                        tasks={tasksByStatus[status]}
+                        status={item}
+                        tasks={tasksByStatus[item]}
                         presentations={taskPresentations}
                         now={processingNow}
                         emptyMessage={hasActiveTaskFilters
                           ? text("当前筛选下无匹配议题", "No issues match the current filters")
                           : text("暂无议题", "No issues")}
-                        isDropTarget={dropTarget === status}
+                        isDropTarget={dropTarget === item}
                         draggedTaskId={draggedTaskId}
                         draggedTaskHeight={draggedTaskHeight}
                         movingTaskId={movingTaskId}
@@ -3698,7 +3713,7 @@ export function App() {
                     ))}
                   </div>
                 </div>
-                {otherTasksMounted && (
+                {otherTasksAvailable && otherTasksMounted && (
                   <OtherTasksPanel
                     open={otherTasksVisible}
                     activeTab={otherTasksTab}
