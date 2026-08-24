@@ -341,7 +341,7 @@ test("a failed reconnect revision check closes the socket so compensation retrie
   client.start();
   sockets[0].onopen();
   await flush();
-  assert.deepEqual(sockets[0].closeCalls, [{ code: 1012, reason: "Revision check failed" }]);
+  assert.deepEqual(sockets[0].closeCalls, [{ code: 4000, reason: "Revision check failed" }]);
 
   sockets[0].onclose();
   assert.equal(timeouts[0].delay, 1_000);

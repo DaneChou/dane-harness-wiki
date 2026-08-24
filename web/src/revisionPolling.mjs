@@ -115,7 +115,7 @@ export function createRevisionWebSocketClient({
       void checkRevision().then((succeeded) => {
         if (!running || socket !== currentSocket) return;
         if (!succeeded) {
-          currentSocket.close(1012, "Revision check failed");
+          currentSocket.close(4000, "Revision check failed");
           return;
         }
         reconnectAttempt = 0;
