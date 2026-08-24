@@ -9656,6 +9656,19 @@ kbd {
   height: 18px;
 }
 
+@container issue-board-workspace (max-width: 983px) {
+  .issue-board-layout[data-main-columns="2"].has-other-tasks {
+    grid-template-columns:
+      repeat(var(--main-column-count), minmax(0, 1fr))
+      minmax(0, 0fr);
+    column-gap: 0;
+  }
+
+  .issue-board-layout[data-main-columns="2"] .other-tasks-panel {
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.09);
+  }
+}
+
 @container issue-board-workspace (max-width: 1307px) {
   .issue-board-layout[data-main-columns="3"].has-other-tasks {
     grid-template-columns:
@@ -9678,6 +9691,45 @@ kbd {
   }
 
   .issue-board-layout[data-main-columns="4"] .other-tasks-panel {
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.09);
+  }
+}
+
+@container issue-board-workspace (max-width: 1955px) {
+  .issue-board-layout[data-main-columns="5"].has-other-tasks {
+    grid-template-columns:
+      repeat(var(--main-column-count), minmax(0, 1fr))
+      minmax(0, 0fr);
+    column-gap: 0;
+  }
+
+  .issue-board-layout[data-main-columns="5"] .other-tasks-panel {
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.09);
+  }
+}
+
+@container issue-board-workspace (max-width: 2279px) {
+  .issue-board-layout[data-main-columns="6"].has-other-tasks {
+    grid-template-columns:
+      repeat(var(--main-column-count), minmax(0, 1fr))
+      minmax(0, 0fr);
+    column-gap: 0;
+  }
+
+  .issue-board-layout[data-main-columns="6"] .other-tasks-panel {
+    box-shadow: -12px 0 30px rgba(0, 0, 0, 0.09);
+  }
+}
+
+@container issue-board-workspace (max-width: 2603px) {
+  .issue-board-layout[data-main-columns="7"].has-other-tasks {
+    grid-template-columns:
+      repeat(var(--main-column-count), minmax(0, 1fr))
+      minmax(0, 0fr);
+    column-gap: 0;
+  }
+
+  .issue-board-layout[data-main-columns="7"] .other-tasks-panel {
     box-shadow: -12px 0 30px rgba(0, 0, 0, 0.09);
   }
 }
