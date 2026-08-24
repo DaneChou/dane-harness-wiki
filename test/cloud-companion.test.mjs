@@ -105,7 +105,9 @@ test("cloud config persists Basic Auth credentials and device mappings in a mode
       portfolio: "/Users/alice/Documents/portfolio",
     },
   });
-  assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  if (process.platform !== "win32") {
+    assert.equal((await stat(configPath)).mode & 0o777, 0o600);
+  }
   assert.deepEqual(JSON.parse(await readFile(configPath, "utf8")), await store.read());
 });
 
@@ -197,6 +199,69 @@ test("cloud proxy replaces client identity with Basic Auth and makes exactly one
       creatorName: "Codex Agent",
     },
   });
+});
+
+test("cloud proxy forwards local thread identity without replacing explicit binding changes", async () => {
+  const { createCloudProxy } = await importCloudProxy();
+  const upstreamBodies = [];
+  const localBinding = {
+    threadId: "controller-thread",
+    codexProjectId: "project-a",
+    codexProjectKind: "remote",
+    codexHostId: "host-a",
+    workspacePath: "/srv/shared-repository",
+  };
+  const proxy = createCloudProxy({
+    configStore: memoryConfigStore(),
+    resolveThreadBinding: (threadId) => (
+      threadId === localBinding.threadId ? localBinding : null
+    ),
+    fetch: async (_url, init) => {
+      upstreamBodies.push(JSON.parse(init.body));
+      return jsonResponse({ task: { id: "REMOTE-1" } });
+    },
+  });
+
+  await proxy.forward(new Request(
+    "http://127.0.0.1:47823/api/tasks/REMOTE-1/move",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        status: "blocked",
+        threadId: localBinding.threadId,
+        version: 3,
+      }),
+    },
+  ));
+  await proxy.forward(new Request(
+    "http://127.0.0.1:47823/api/tasks/REMOTE-1/move",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        status: "todo",
+        threadId: localBinding.threadId,
+        threadBinding: null,
+        version: 4,
+      }),
+    },
+  ));
+
+  assert.deepEqual(upstreamBodies, [
+    {
+      status: "blocked",
+      threadId: localBinding.threadId,
+      threadBinding: localBinding,
+      version: 3,
+    },
+    {
+      status: "todo",
+      threadId: localBinding.threadId,
+      threadBinding: null,
+      version: 4,
+    },
+  ]);
 });
 
 test("cloud companion blocks project moves for issue-linked local AI chats", async () => {
@@ -311,7 +376,6 @@ test("cloud routing keeps machine-specific capability endpoints in the local com
     "/health",
     "/api/meta",
     "/api/device-workspaces",
-    "/api/workflow-capabilities",
     "/api/projects/portfolio/development-contexts",
     "/api/local/cloud-session",
     "/api/local/project-mappings/portfolio",
@@ -321,7 +385,6 @@ test("cloud routing keeps machine-specific capability endpoints in the local com
 
   for (const pathname of [
     "/api/projects",
-    "/api/projects/portfolio/workflow-workspace",
     "/api/tasks",
     "/api/tasks/PORTFOLIO-1",
     "/api/comments/comment-1",
@@ -450,66 +513,6 @@ test("task mutations do not send absolute worktree paths to cloud", async () => 
   });
 });
 
-test("workflow mutations remove structured git worktree paths without altering other path fields or text", async () => {
-  const { createCloudProxy } = await importCloudProxy();
-  let upstreamBody;
-  const proxy = createCloudProxy({
-    configStore: memoryConfigStore(),
-    fetch: async (_url, init) => {
-      upstreamBody = JSON.parse(init.body);
-      return jsonResponse({ workflow: { projectId: "portfolio", version: 5 } });
-    },
-  });
-
-  await proxy.forward(new Request(
-    "http://127.0.0.1:47823/api/projects/portfolio/workflow-workspace",
-    {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        version: 4,
-        workspace: {
-          version: 1,
-          tabs: [{ id: "delivery", name: "Delivery" }],
-          activeWorkflowId: "delivery",
-          snapshots: {
-            delivery: {
-              nodes: [{
-                id: "git",
-                data: {
-                  kind: "git",
-                  branch: "feature/cloud",
-                  gitWorktreePath: "/Users/alice/.codex/worktrees/cloud",
-                  description: "Keep this text: /Users/alice/.codex/worktrees/cloud",
-                  config: { path: "/third-party/runtime/path" },
-                  planItems: [{
-                    title: "Nested Git step",
-                    gitWorktreePath: "/Users/alice/.codex/worktrees/nested",
-                    path: "/third-party/nested/path",
-                  }],
-                },
-              }],
-              flow: { version: 2, root: { items: [] } },
-              selectedNodeId: "git",
-            },
-          },
-        },
-      }),
-    },
-  ));
-
-  const data = upstreamBody.workspace.snapshots.delivery.nodes[0].data;
-  assert.equal(Object.hasOwn(data, "gitWorktreePath"), false);
-  assert.equal(Object.hasOwn(data.planItems[0], "gitWorktreePath"), false);
-  assert.equal(data.branch, "feature/cloud");
-  assert.equal(
-    data.description,
-    "Keep this text: /Users/alice/.codex/worktrees/cloud",
-  );
-  assert.equal(data.config.path, "/third-party/runtime/path");
-  assert.equal(data.planItems[0].path, "/third-party/nested/path");
-});
-
 test("two companions map the same cloud project to different local paths", async () => {
   const { createCloudConfigStore } = await importCloudConfig();
   const alice = createCloudConfigStore({
@@ -617,7 +620,6 @@ test("cloud mode exposes machine capabilities only to loopback while local mode 
     for (const pathname of [
       "/api/meta",
       "/api/device-workspaces",
-      "/api/workflow-capabilities",
       "/api/projects/portfolio/development-contexts",
     ]) {
       const response = await fetch(`${lanBaseUrl}${pathname}`);
@@ -697,6 +699,8 @@ test("taskctl cloud login reads the shared key privately and sends it to the loc
 
 test("taskctl cloud status, logout, and project map use local companion endpoints", async () => {
   const calls = [];
+  const workspaceRoot = path.resolve("/work");
+  const portfolioPath = path.join(workspaceRoot, "portfolio");
   const fetchImplementation = async (url, init) => {
     calls.push({ url: url.toString(), init });
     if (url.pathname === "/api/local/cloud-session" && init.method === "GET") {
@@ -713,7 +717,7 @@ test("taskctl cloud status, logout, and project map use local companion endpoint
     if (url.pathname === "/api/local/project-mappings/portfolio" && init.method === "PUT") {
       return jsonResponse({
         projectId: "portfolio",
-        workspacePath: "/work/portfolio",
+        workspacePath: portfolioPath,
       });
     }
     return jsonResponse({ error: { code: "UNEXPECTED", message: url.toString() } }, 500);
@@ -732,7 +736,7 @@ test("taskctl cloud status, logout, and project map use local companion endpoint
   )).exitCode, 0);
   assert.equal((await runCli(
     ["project", "map", "portfolio", "--workspace-path", "./portfolio"],
-    { fetch: fetchImplementation, cwd: "/work", env: companionEnv },
+    { fetch: fetchImplementation, cwd: workspaceRoot, env: companionEnv },
   )).exitCode, 0);
 
   assert.deepEqual(calls.map(({ url, init }) => [url, init.method]), [
@@ -741,7 +745,7 @@ test("taskctl cloud status, logout, and project map use local companion endpoint
     ["http://127.0.0.1:49000/api/local/project-mappings/portfolio", "PUT"],
   ]);
   assert.deepEqual(JSON.parse(calls[2].init.body), {
-    workspacePath: "/work/portfolio",
+    workspacePath: portfolioPath,
   });
 });
 

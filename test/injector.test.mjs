@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
+import vm from "node:vm";
 
 const source = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
 const runtimeSource = await readFile(
@@ -33,19 +34,54 @@ test("the resident injector authenticates its launcher-managed Taskboard service
   assert.match(runtimeSource, /request\.frameCapability/);
 });
 
-test("the CDP bridge accepts service ensure and native instruction composer prefill actions", () => {
+test("the CDP bridge accepts service ensure and native task conversation start actions", () => {
   assert.match(source, /const hostBindingName = "__codexTaskboardHostV1"/);
   assert.match(runtimeSource, /request\.action === "ensure"/);
-  assert.match(runtimeSource, /request\.action === "prefill-task-composer"/);
+  assert.match(runtimeSource, /request\.action === "start-task-conversation"/);
   assert.match(runtimeSource, /request\.action === "open-external"/);
-  assert.match(runtimeSource, /request\.instruction\.length <= 1_024/);
-  assert.match(source, /function prefillTaskComposerViaCdp/);
-  assert.match(source, /cdp\.send\("Input\.insertText", \{ text: instruction \}\)/);
+  assert.match(runtimeSource, /request\.taskId/);
+  assert.match(runtimeSource, /request\.previousThreadId\.length <= 240/);
+  assert.match(runtimeSource, /request\.codexHostId\.length <= 240/);
+  assert.match(runtimeSource, /request\.targetRoot\.length <= 4_096/);
+  assert.match(runtimeSource, /payload\.length > 4_194_304/);
+  assert.match(runtimeSource, /request\.instruction\.length <= 4_000_000/);
+  assert.match(runtimeSource, /request\.title\.length <= 240/);
+  assert.match(source, /async function startTaskConversationViaCdp/);
+  assert.match(source, /data-composer-placement="home"/);
+  assert.match(source, /\(editor\.innerText \|\| ""\) !== \$\{JSON\.stringify\(instruction\)\}/);
+  assert.doesNotMatch(source, /cdp\.send\("Input\.insertText", \{ text: instruction \}\)/);
+  assert.match(
+    source,
+    /cdp\.send\("Input\.dispatchKeyEvent", \{\s*type: "keyDown",\s*key: "Enter"/,
+  );
+  assert.match(
+    source,
+    /cdp\.send\("Input\.dispatchKeyEvent", \{\s*type: "keyUp",\s*key: "Enter"/,
+  );
+  assert.match(source, /submitted = true/);
+  assert.match(source, /if \(!submitted\) throw new Error/);
+  assert.match(source, /const threadId = typeof started\.result\.value === "string"/);
+  assert.match(source, /threadId && threadId !== previousThreadId/);
+  assert.match(source, /discoveredThreadId = threadId/);
+  assert.match(source, /error\.threadId = discoveredThreadId/);
+  assert.match(source, /function requestCodexAppServerViaCdp/);
+  assert.match(source, /type: "mcp-request"/);
+  assert.match(source, /hostId: \$\{JSON\.stringify\(hostId\)\}/);
+  assert.match(source, /"thread\/read"/);
+  assert.match(source, /normalizeWorkspaceRoot\(result\.thread\.cwd\) === normalizedTargetRoot/);
+  assert.match(source, /"thread\/name\/set"/);
+  assert.match(source, /result\.thread\.name === title/);
+  assert.match(source, /const taskConversationOperations = new Map\(\)/);
+  assert.match(source, /taskConversationOperations\.get\(request\.taskId\)/);
+  assert.match(source, /const taskConversationAppServerTimeoutMs = 30_000/);
+  assert.doesNotMatch(source, /window\.postMessage\(\{ type: "rename-thread" \}/);
+  assert.match(source, /return \{ threadId, title \}/);
   assert.match(source, /Runtime\.bindingCalled/);
   assert.match(source, /Page\.createIsolatedWorld/);
   assert.match(source, /Runtime\.addBinding", \{\s*name: hostBindingName,\s*executionContextId:/);
   assert.match(source, /params\.executionContextId !== activeContextId/);
   assert.match(runtimeSource, /params\.executionContextId/);
+  assert.match(runtimeSource, /threadId: error\.threadId/);
   assert.match(source, /hostResponseMessage/);
   assert.match(source, /if \(keepAlive\) await hostBridge\.install\(\)/);
   assert.match(source, /hostBridge\.publishHeartbeat/);
@@ -80,6 +116,91 @@ test("passive automation policy keeps idle pauses and only resumes quota pauses"
   );
   assert.match(source, /enabledByUser: false/);
   assert.match(source, /record\.quota \? \{ quota: record\.quota \} : \{\}/);
+});
+
+test("persisted automation policies retain remote project identity", () => {
+  const storedPolicySource = source.slice(
+    source.indexOf("function storedAutomationPolicy"),
+    source.indexOf("function restoredAutomationPolicy"),
+  );
+  assert.match(storedPolicySource, /codexProjectKind: request\.codexProjectKind/);
+  assert.match(storedPolicySource, /codexHostId: request\.codexHostId/);
+  assert.match(storedPolicySource, /remoteProjects: request\.remoteProjects/);
+});
+
+test("automation list rebuilds a stored policy on the incoming project identity", async () => {
+  const reconcileSource = source.slice(
+    source.indexOf("async function reconcileStoredAutomationPolicy"),
+    source.indexOf("async function enqueueCurrentQuotaPolicy"),
+  );
+  const storedRequest = {
+    taskboardProjectId: "taskboard-project",
+    codexProjectId: "old-project",
+    codexProjectKind: "local",
+    codexHostId: "local",
+    projectName: "Old project",
+    workspacePath: "/old/project",
+    skillPath: "/old/skill/SKILL.md",
+    automationId: "automation-1",
+    enabledByUser: true,
+    quotaAware: true,
+    intervalMinutes: 15,
+    model: "gpt-5.5",
+    reasoningEffort: "high",
+  };
+  const incomingRequest = {
+    ...storedRequest,
+    codexProjectId: "remote-project",
+    codexProjectKind: "remote",
+    codexHostId: "remote-host",
+    projectName: "Remote project",
+    workspacePath: "/remote/project",
+    remoteProjects: [{
+      codexProjectId: "remote-worktree",
+      codexProjectKind: "remote",
+      codexHostId: "remote-host",
+      workspacePath: "/remote/project-worktree",
+    }],
+    skillPath: "/new/skill/SKILL.md",
+    enabledByUser: false,
+    quotaAware: false,
+    intervalMinutes: 5,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "ultra",
+  };
+  let appliedRequest;
+  const reconcileStoredAutomationPolicy = vm.runInNewContext(`(${reconcileSource})`, {
+    ensureQuotaPoliciesLoaded: async () => {},
+    quotaPolicyRecords: new Map([[
+      storedRequest.taskboardProjectId,
+      { request: storedRequest },
+    ]]),
+    updateAndApplyQuotaPolicy: async (request) => {
+      appliedRequest = request;
+      return { policy: request };
+    },
+    enqueueQuotaPolicyMutation: () => {
+      throw new Error("stored target must not continue");
+    },
+    storedAutomationPolicy: (request) => request,
+  });
+
+  const result = await reconcileStoredAutomationPolicy(incomingRequest, () => {});
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(appliedRequest)),
+    {
+      ...incomingRequest,
+      automationId: "automation-1",
+      enabledByUser: true,
+      quotaAware: true,
+      intervalMinutes: 15,
+      model: "gpt-5.5",
+      reasoningEffort: "high",
+    },
+  );
+  assert.equal(result.policy, appliedRequest);
+  assert.match(source, /reconcileStoredAutomationPolicy\(\s*request,\s*rpc/);
+  assert.match(source, /policy: storedAutomationPolicy\(current\.request\)/);
 });
 
 test("the package injection command remains resident for tab-triggered recovery", () => {
