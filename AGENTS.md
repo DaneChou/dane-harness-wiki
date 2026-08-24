@@ -142,7 +142,7 @@ Use this review classification:
 - Avoid duplicate branch `push` and `pull_request` CI for the same SHA. Workflow owners should use branch filters and concurrency cancellation so superseded or duplicate runs do not consume both macOS and Windows builders.
 - Use path-aware CI when available: Web-only, documentation, CSS, and copy changes use the fast lane; platform packaging runs only for Launcher, bundle, platform, updater, release, or final integration changes.
 - CI may run as soon as each PR reaches a stable exact head. After the working demo is confirmed by the user, run independent required Pro reviews in parallel. Do not serialize them through the coordinating conversation.
-- Present related user-visible changes together in one integrated preview after the functions and direct verification are complete, before any required Pro review. Do not request separate UI confirmation for every small issue.
+- Present each task's working demo as soon as that task completes implementation and direct verification. Do not hold completed demos until the whole batch is ready. Other tasks continue in parallel while the user checks it. Related changes may share one preview only when they become ready together or must be integrated to work; this must not delay an already usable demo.
 
 ## 8. Acceptance and issue status
 
