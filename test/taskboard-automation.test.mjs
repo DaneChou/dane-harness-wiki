@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildTaskboardAutomationName,
@@ -201,15 +202,16 @@ test("the remote automation prompt keeps taskctl local and delegates work to the
   assert.match(prompt, /移动到 in_review/);
 });
 
-test("the generated automation command uses an argv runtime file instead of an env assignment", () => {
+test("the generated automation command uses the packaged CLI and an argv runtime file", () => {
   const previous = process.env.CODEX_TASKBOARD_RUNTIME_FILE;
   process.env.CODEX_TASKBOARD_RUNTIME_FILE = "/Users/example/Library/Application Support/Codex Taskboard/launcher-runtime.json";
   try {
     const prompt = buildTaskboardAutomationPrompt(baseRequest);
-    const cliPath = path.resolve(path.dirname(baseRequest.skillPath), "../..", "cli/taskctl.mjs");
+    const cliPath = fileURLToPath(new URL("../cli/taskctl.mjs", import.meta.url));
     assert.ok(prompt.includes(
       `'${process.execPath}' '${cliPath}' --runtime-file '${process.env.CODEX_TASKBOARD_RUNTIME_FILE}'`,
     ));
+    assert.ok(!prompt.includes(path.resolve(path.dirname(baseRequest.skillPath), "../..", "cli/taskctl.mjs")));
     assert.doesNotMatch(prompt, /CODEX_TASKBOARD_RUNTIME_FILE=/);
   } finally {
     if (previous === undefined) {

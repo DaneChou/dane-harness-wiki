@@ -1,4 +1,7 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const taskctlCliPath = fileURLToPath(new URL("../cli/taskctl.mjs", import.meta.url));
 
 const AUTOMATION_OPERATIONS = new Set(["ensure-active", "pause", "list", "apply-policy"]);
 const INTERVAL_MINUTES = new Set([5, 10, 15, 30, 60]);
@@ -130,8 +133,7 @@ export function buildTaskboardAutomationPrompt(request) {
 }
 
 function buildTaskctlCommand(request) {
-  const cliPath = path.resolve(path.dirname(request.skillPath), "../..", "cli/taskctl.mjs");
-  const command = `${shellQuote(process.execPath)} ${shellQuote(cliPath)}`;
+  const command = `${shellQuote(process.execPath)} ${shellQuote(taskctlCliPath)}`;
   const runtimeFilePath = process.env.CODEX_TASKBOARD_RUNTIME_FILE;
   return runtimeFilePath
     ? `${command} --runtime-file ${shellQuote(runtimeFilePath)}`
