@@ -2,9 +2,11 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createReadStream, createWriteStream } from "node:fs";
+import { chmod, mkdir, readFile, rename, stat, unlink, utimes, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { createInterface } from "node:readline";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -2012,10 +2014,32 @@ ${runtimeSource}`,
   };
 }
 
+async function resolveRunnableCodexExecutable(appPath) {
+  const executable = resolveCodexExecutable({ appPath });
+  if (process.platform !== "win32" || !executable.toLowerCase().includes("\\windowsapps\\")) {
+    return executable;
+  }
+
+  const source = await stat(executable);
+  const cacheDirectory = path.join(taskboardDataDirectory, "codex-runtime");
+  const cachedExecutable = path.join(cacheDirectory, "codex.exe");
+  try {
+    const cached = await stat(cachedExecutable);
+    if (cached.size === source.size && cached.mtimeMs === source.mtimeMs) {
+      return cachedExecutable;
+    }
+  } catch {}
+
+  await mkdir(cacheDirectory, { recursive: true });
+  await pipeline(createReadStream(executable), createWriteStream(cachedExecutable));
+  await utimes(cachedExecutable, source.atime, source.mtime);
+  return cachedExecutable;
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   options.startupToken ??= taskboardInstanceToken;
-  process.env.CODEX_EXECUTABLE = resolveCodexExecutable({ appPath: options.appPath });
+  process.env.CODEX_EXECUTABLE = await resolveRunnableCodexExecutable(options.appPath);
   const cdpVersionUrl = `http://127.0.0.1:${options.port}/json/version`;
 
   if (options.daemon) {
