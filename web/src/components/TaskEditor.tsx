@@ -602,7 +602,11 @@ export function TaskEditor({
                 triggerClassName="property-control property-project"
                 ariaLabel={text("项目", "Project")}
                 onOpenChange={(open) => setMenu(open ? "project" : null)}
-                onChange={(value) => onProjectChange?.(value || null)}
+                onChange={(value) => {
+                  const nextProjectId = value || null;
+                  if (nextProjectId !== projectId) setDevelopmentContext(null);
+                  onProjectChange?.(nextProjectId);
+                }}
               />
             )}
             <TaskPropertyPicker
