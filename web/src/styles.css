@@ -1346,7 +1346,6 @@ kbd {
 
 .display-settings-footer {
   flex: 0 0 auto;
-  justify-content: space-between;
   gap: 8px;
   padding: 12px 18px;
   border-top: var(--border-hairline) solid var(--border);
@@ -2901,6 +2900,10 @@ kbd {
   margin: 0 0 10px;
 }
 
+.issue-description-document .markdown-blank-line {
+  height: 1lh;
+}
+
 .issue-description-document h1,
 .issue-description-document h2,
 .issue-description-document h3,
@@ -3166,6 +3169,10 @@ kbd {
   margin: 10px 0;
   border-radius: 8px;
   object-fit: contain;
+}
+
+.issue-description-document img[src*="/api/attachments/"] + br {
+  display: none;
 }
 
 .issue-conversation-list {
