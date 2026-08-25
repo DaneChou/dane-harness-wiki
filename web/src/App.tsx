@@ -767,6 +767,7 @@ export function App() {
   const [projectMenuOpen, setProjectMenuOpen] = useState(
     () => taskboardStorage.getItem(FIRST_USE_COMPLETE_KEY) === null,
   );
+  const [projectMenuSearch, setProjectMenuSearch] = useState("");
   const [projectContextMenu, setProjectContextMenu] = useState<ProjectContextMenuState | null>(null);
   const [projectCreateOpen, setProjectCreateOpen] = useState(false);
   const [projectName, setProjectName] = useState("");
@@ -1123,8 +1124,12 @@ export function App() {
   const projectMenuChoices = projectChoices.filter(
     (project) => project.id !== GLOBAL_PROJECT_ID || project.issueCount > 0,
   );
-  const firstEmptyProjectId = projectMenuChoices.find((project) => project.issueCount === 0)?.id ?? null;
-  const hasProjectsWithIssues = projectMenuChoices.some((project) => project.issueCount > 0);
+  const projectMenuNeedle = projectMenuSearch.trim().toLocaleLowerCase();
+  const visibleProjectMenuChoices = projectMenuNeedle
+    ? projectMenuChoices.filter((project) => project.name.toLocaleLowerCase().includes(projectMenuNeedle))
+    : projectMenuChoices;
+  const firstEmptyProjectId = visibleProjectMenuChoices.find((project) => project.issueCount === 0)?.id ?? null;
+  const hasProjectsWithIssues = visibleProjectMenuChoices.some((project) => project.issueCount > 0);
   const editorProjectId = editor?.task?.projectId
     ?? editor?.projectId
     ?? (newTaskDraft?.projectId === selectedProjectId ? newTaskDraft.targetProjectId : undefined)
@@ -3281,6 +3286,7 @@ export function App() {
                   aria-expanded={projectMenuOpen}
                   onClick={() => {
                     setProjectContextMenu(null);
+                    setProjectMenuSearch("");
                     setProjectMenuOpen((current) => !current);
                   }}
                 >
@@ -3290,73 +3296,95 @@ export function App() {
                 {projectMenuOpen && (
                   <div className="header-project-menu" role="menu" aria-label={text("项目", "Projects")}>
                     <span>{text("切换项目", "Switch project")}</span>
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={isAllProjects}
-                      disabled={openingProjectId !== null}
-                      onClick={() => {
-                        if (isAllProjects) setProjectMenuOpen(false);
-                        else changeProject(ALL_PROJECTS_ID);
-                      }}
-                    >
-                      <TaskboardIcon className="project-avatar" name="projectFolder" />
-                      <span>{text("所有项目", "All projects")}</span>
-                      {isAllProjects && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
-                    </button>
-                    <div className="project-menu-divider" role="separator" />
-                    {projectMenuChoices.map((project) => (
-                      <Fragment key={project.id}>
-                        {hasProjectsWithIssues && project.id === firstEmptyProjectId && (
+                    <label className="project-menu-search">
+                      <span className="sr-only">{text("按名称筛选项目", "Filter projects by name")}</span>
+                      <TaskboardIcon name="search" />
+                      <input
+                        autoFocus
+                        type="search"
+                        value={projectMenuSearch}
+                        onChange={(event) => setProjectMenuSearch(event.target.value)}
+                        placeholder={text("筛选项目…", "Filter projects…")}
+                      />
+                    </label>
+                    <div className="project-menu-list">
+                      {!projectMenuNeedle && (
+                        <>
+                          <button
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={isAllProjects}
+                            disabled={openingProjectId !== null}
+                            onClick={() => {
+                              if (isAllProjects) setProjectMenuOpen(false);
+                              else changeProject(ALL_PROJECTS_ID);
+                            }}
+                          >
+                            <TaskboardIcon className="project-avatar" name="projectFolder" />
+                            <span>{text("所有项目", "All projects")}</span>
+                            {isAllProjects && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
+                          </button>
                           <div className="project-menu-divider" role="separator" />
-                        )}
-                        <button
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={project.id === selectedProjectId}
-                          disabled={openingProjectId !== null}
-                          onContextMenu={project.id.startsWith("temp-") ? (event) => {
-                            event.preventDefault();
-                            setProjectContextMenu({
-                              project,
-                              x: event.clientX,
-                              y: event.clientY,
-                            });
-                          } : undefined}
-                          onClick={() => {
-                            if (project.id === selectedProjectId) setProjectMenuOpen(false);
-                            else void selectProject(project);
-                          }}
-                        >
-                          <TaskboardIcon className="project-avatar" name="projectFolder" />
-                          <span>{project.name}</span>
-                          {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
-                        </button>
-                      </Fragment>
-                    ))}
-                    <div className="project-menu-divider" role="separator" />
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={openingProjectId !== null}
-                      onClick={openJiraDialog}
-                    >
-                      <RelationIcon className="project-avatar" color="currentColor" size={16} />
-                      <span>
-                        {jiraConnection?.configured
-                          ? text("Jira 设置", "Jira settings")
-                          : text("连接 Jira", "Connect Jira")}
-                      </span>
-                    </button>
-                    <button
-                      type="button"
-                      role="menuitem"
-                      disabled={openingProjectId !== null}
-                      onClick={openCreateProjectDialog}
-                    >
-                      <PlusIcon className="project-avatar" color="currentColor" size={16} />
-                      <span>{text("创建项目", "Create project")}</span>
-                    </button>
+                        </>
+                      )}
+                      {visibleProjectMenuChoices.map((project) => (
+                        <Fragment key={project.id}>
+                          {hasProjectsWithIssues && project.id === firstEmptyProjectId && (
+                            <div className="project-menu-divider" role="separator" />
+                          )}
+                          <button
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={project.id === selectedProjectId}
+                            disabled={openingProjectId !== null}
+                            onContextMenu={project.id.startsWith("temp-") ? (event) => {
+                              event.preventDefault();
+                              setProjectContextMenu({
+                                project,
+                                x: event.clientX,
+                                y: event.clientY,
+                              });
+                            } : undefined}
+                            onClick={() => {
+                              if (project.id === selectedProjectId) setProjectMenuOpen(false);
+                              else void selectProject(project);
+                            }}
+                          >
+                            <TaskboardIcon className="project-avatar" name="projectFolder" />
+                            <span>{project.name}</span>
+                            {project.id === selectedProjectId && <span className="project-menu-check" aria-hidden="true"><LinearIcon name="check" /></span>}
+                          </button>
+                        </Fragment>
+                      ))}
+                      {projectMenuNeedle && visibleProjectMenuChoices.length === 0 && (
+                        <div className="project-menu-empty">{text("没有匹配项目", "No matching projects")}</div>
+                      )}
+                    </div>
+                    <div className="project-menu-actions">
+                      <div className="project-menu-divider" role="separator" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={openingProjectId !== null}
+                        onClick={openJiraDialog}
+                      >
+                        <RelationIcon className="project-avatar" color="currentColor" size={16} />
+                        <span>
+                          {jiraConnection?.configured
+                            ? text("Jira 设置", "Jira settings")
+                            : text("连接 Jira", "Connect Jira")}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        role="menuitem"
+                        disabled={openingProjectId !== null}
+                        onClick={openCreateProjectDialog}
+                      >
+                        <PlusIcon className="project-avatar" color="currentColor" size={16} />
+                        <span>{text("创建项目", "Create project")}</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
