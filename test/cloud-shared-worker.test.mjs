@@ -819,6 +819,64 @@ test("tree queries keep direct and nested ancestor/descendant traversal in cloud
   assert.equal(invalid.body.error.code, "INVALID_TREE_QUERY");
 });
 
+test("cloud tree handles a 101-node frontier at depth 2", async () => {
+  const projectId = "tree-cloud-frontier";
+  await createProject(projectId);
+  const root = await createTask(projectId, "Tree frontier root");
+  const timestamp = new Date().toISOString();
+
+  await cloud.db.prepare(`
+    WITH RECURSIVE sequence(value) AS (
+      SELECT 1
+      UNION ALL
+      SELECT value + 1 FROM sequence WHERE value < 101
+    )
+    INSERT INTO tasks (
+      id, identifier, project_id, title, description, status, priority, labels, sort_order,
+      creator_type, creator_id, creator_name,
+      assignee_type, assignee_id, assignee_name,
+      version, created_at, updated_at
+    )
+    SELECT
+      'tree-frontier-child-' || value,
+      'TREEFRONTIER-' || value,
+      ?,
+      'Tree frontier child',
+      '',
+      'backlog',
+      'none',
+      '[]',
+      value,
+      'user',
+      'tree-frontier-fixture',
+      'Tree frontier fixture',
+      'user',
+      'tree-frontier-fixture',
+      'Tree frontier fixture',
+      1,
+      ?,
+      ?
+    FROM sequence
+  `).bind(projectId, timestamp, timestamp).run();
+  await cloud.db.prepare(`
+    WITH RECURSIVE sequence(value) AS (
+      SELECT 1
+      UNION ALL
+      SELECT value + 1 FROM sequence WHERE value < 101
+    )
+    INSERT INTO task_relations (relation_type, source_task_id, target_task_id, created_at)
+    SELECT 'parent', ?, 'tree-frontier-child-' || value, ?
+    FROM sequence
+  `).bind(root.body.task.id, timestamp).run();
+
+  const result = await cloud.request(
+    `/api/tasks/${root.body.task.id}/tree?direction=descendants&depth=2`,
+    { actorName: alice },
+  );
+  assert.equal(result.response.status, 200);
+  assert.equal(result.body.tree.nodeCount, 102);
+});
+
 test("cloud tree rejects a breadth that exceeds the 1,000-node cap", async () => {
   const projectId = "tree-cloud-cap";
   await createProject(projectId);

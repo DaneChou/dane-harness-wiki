@@ -1170,17 +1170,23 @@ async function getTaskTree(env, id, direction, depth) {
     : "task_relations.target_task_id";
 
   for (let level = 1; level <= depth && frontier.length > 0; level += 1) {
-    const placeholders = frontier.map(() => "?").join(", ");
-    const rows = await all(env.DB.prepare(`
-      SELECT tasks.*, ${parentColumn} AS tree_parent_id
-      ${relationJoin.replace("%PLACEHOLDERS%", placeholders)}
-      ORDER BY tasks.sort_order, tasks.created_at, tasks.id
-    `).bind(...frontier.map((node) => node.id)));
+    const batches = [];
+    for (let offset = 0; offset < frontier.length; offset += 80) {
+      const chunk = frontier.slice(offset, offset + 80);
+      const placeholders = chunk.map(() => "?").join(", ");
+      batches.push(all(env.DB.prepare(`
+        SELECT tasks.*, ${parentColumn} AS tree_parent_id
+        ${relationJoin.replace("%PLACEHOLDERS%", placeholders)}
+        ORDER BY tasks.sort_order, tasks.created_at, tasks.id
+      `).bind(...chunk.map((node) => node.id))));
+    }
     const rowsByParent = new Map();
-    for (const row of rows) {
-      const siblings = rowsByParent.get(row.tree_parent_id) ?? [];
-      siblings.push(row);
-      rowsByParent.set(row.tree_parent_id, siblings);
+    for (const rows of await Promise.all(batches)) {
+      for (const row of rows) {
+        const siblings = rowsByParent.get(row.tree_parent_id) ?? [];
+        siblings.push(row);
+        rowsByParent.set(row.tree_parent_id, siblings);
+      }
     }
     const next = [];
     for (const parent of frontier) {
