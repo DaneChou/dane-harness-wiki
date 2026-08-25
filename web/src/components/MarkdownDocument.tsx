@@ -23,6 +23,10 @@ interface MarkdownAstNode {
   type: string;
   value?: string;
   children?: MarkdownAstNode[];
+  data?: {
+    hName?: string;
+    hProperties?: Record<string, unknown>;
+  };
   position?: {
     start: { offset?: number };
     end: { offset?: number };
@@ -332,6 +336,43 @@ export function remarkStripMarkdownComments() {
   };
 }
 
+function remarkPreserveExtraBlankLines() {
+  return (tree: MarkdownAstNode, file: { value?: unknown }) => {
+    const source = String(file.value ?? "");
+    const children = tree.children;
+    if (!children || children.length < 2) return;
+    const nextChildren: MarkdownAstNode[] = [];
+
+    children.forEach((child, index) => {
+      const previous = children[index - 1];
+      const previousEnd = previous?.position?.end.offset;
+      const childStart = child.position?.start.offset;
+      if (previousEnd !== undefined && childStart !== undefined) {
+        const gap = source.slice(previousEnd, childStart);
+        if (/^[\t \r\n]*$/.test(gap)) {
+          const extraBlankLines = Math.max(0, (gap.match(/\r\n|\r|\n/g)?.length ?? 0) - 2);
+          for (let blankLine = 0; blankLine < extraBlankLines; blankLine += 1) {
+            nextChildren.push({
+              type: "paragraph",
+              children: [],
+              data: {
+                hName: "div",
+                hProperties: {
+                  className: ["markdown-blank-line"],
+                  "aria-hidden": "true",
+                },
+              },
+            });
+          }
+        }
+      }
+      nextChildren.push(child);
+    });
+
+    tree.children = nextChildren;
+  };
+}
+
 function codeBlockLanguage(children: ReactNode): { language: string | null; source: string } {
   const code = Children.toArray(children).find(
     (child): child is ReactElement<{ className?: string; children?: ReactNode }> => (
@@ -482,7 +523,12 @@ export function MarkdownDocument({
   return (
     <div className="issue-description-document" onCopy={onCopy}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkStripMarkdownComments, remarkBreaks]}
+        remarkPlugins={[
+          remarkGfm,
+          remarkStripMarkdownComments,
+          remarkPreserveExtraBlankLines,
+          remarkBreaks,
+        ]}
         urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
         components={{
           a: ({ node, href, children, className, ...props }) => {

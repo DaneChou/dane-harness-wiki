@@ -488,11 +488,29 @@ export function inlineMediaText(segments: InlineMediaSegment[]): string {
 }
 
 export function serializeInlineMedia(segments: InlineMediaSegment[]): string {
-  return segments.map((segment) => {
-    if (segment.type === "text") return segment.text;
-    if (segment.type === "pending-image") return segment.token;
-    return segment.markdown;
-  }).join("");
+  let markdown = "";
+  segments.forEach((segment, index) => {
+    const value = segment.type === "text"
+      ? segment.text
+      : segment.type === "pending-image"
+        ? segment.token
+        : segment.markdown;
+    const isTaskboardImage = segment.type === "pending-image" || (
+      segment.type === "persisted-image"
+      && /^\/?api\/attachments\/[^/?#]+\/content$/.test(segment.url)
+    );
+    if (isTaskboardImage && markdown && !markdown.endsWith("\n")) markdown += "\n";
+    markdown += value;
+    if (!isTaskboardImage) return;
+    const next = segments[index + 1];
+    const nextValue = next?.type === "text"
+      ? next.text
+      : next?.type === "pending-image"
+        ? next.token
+        : next?.markdown ?? "";
+    if (nextValue && !nextValue.startsWith("\n")) markdown += "\n";
+  });
+  return markdown;
 }
 
 export function resolveInlineMediaMarkdown(
