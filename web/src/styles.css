@@ -3172,6 +3172,10 @@ kbd {
   object-fit: contain;
 }
 
+.issue-description-document img[src*="/api/attachments/"] + br {
+  display: none;
+}
+
 .issue-conversation-list {
   display: grid;
   justify-items: start;
