@@ -293,7 +293,9 @@ set -u
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 RESOURCE_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
 export CODEX_TASKBOARD_DATA_DIR="\${XDG_DATA_HOME:-$HOME/.local/share}/Codex Taskboard"
-export CODEX_TASKBOARD_RUNTIME_FILE="$CODEX_TASKBOARD_DATA_DIR/launcher-runtime.json"
+if [ -z "\${WSL_DISTRO_NAME-}" ] && [ -z "\${WSL_INTEROP-}" ] && [ -z "\${CODEX_TASKBOARD_RUNTIME_FILE-}" ]; then
+  export CODEX_TASKBOARD_RUNTIME_FILE="$CODEX_TASKBOARD_DATA_DIR/launcher-runtime.json"
+fi
 exec "$RESOURCE_DIR/../../bin/codex-taskboard-node" "$RESOURCE_DIR/app/cli/taskctl.mjs" "$@"
 `;
     const taskctlPath = path.join(resourcesDirectory, "bin", "taskctl");
