@@ -1282,12 +1282,18 @@ async function resolveWslRuntimeFile(overrides) {
   try {
     const windowsAppData = await run(
       "cmd.exe",
-      ["/d", "/s", "/c", "echo %APPDATA%"],
-      { encoding: "utf8" },
+      ["/d", "/u", "/s", "/c", "set APPDATA"],
+      { encoding: "buffer" },
     );
+    const appDataLine = windowsAppData.stdout
+      .toString("utf16le")
+      .split(/\r?\n/)
+      .find((line) => line.toUpperCase().startsWith("APPDATA="));
+    const windowsAppDataPath = appDataLine?.slice("APPDATA=".length);
+    if (windowsAppDataPath === undefined) return undefined;
     const appData = await run(
       "wslpath",
-      ["-u", windowsAppData.stdout.trim()],
+      ["-u", windowsAppDataPath],
       { encoding: "utf8" },
     );
     const appDataPath = appData.stdout.trim();
@@ -1303,6 +1309,9 @@ async function fetchThroughWindows(url, init, overrides) {
   const run = overrides.spawn ?? spawn;
   const marker = "__CODEX_TASKBOARD_CURL_RESPONSE__";
   const args = [
+    "--disable",
+    "--noproxy",
+    "*",
     "--silent",
     "--show-error",
     "--request",

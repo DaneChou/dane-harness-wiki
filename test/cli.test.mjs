@@ -103,7 +103,7 @@ test("--runtime-file reads the launcher endpoint without a leading environment a
 test("WSL taskctl discovers the Windows launcher runtime descriptor from Windows APPDATA", async () => {
   let requestedUrl;
   const runtimeFile = path.join(
-    "/windows/users/admin/AppData/Roaming",
+    "/windows/users/R&D Müller/AppData/Roaming",
     "Codex Taskboard",
     "launcher-runtime.json",
   );
@@ -116,14 +116,22 @@ test("WSL taskctl discovers the Windows launcher runtime descriptor from Windows
     },
     {
       env: { WSL_DISTRO_NAME: "Ubuntu" },
-      execFile: async (file, args) => {
+      execFile: async (file, args, options) => {
         if (file === "cmd.exe") {
-          assert.deepEqual(args, ["/d", "/s", "/c", "echo %APPDATA%"]);
-          return { stdout: "C:\\Users\\admin\\AppData\\Roaming\r\n", stderr: "" };
+          assert.deepEqual(args, ["/d", "/u", "/s", "/c", "set APPDATA"]);
+          assert.deepEqual(options, { encoding: "buffer" });
+          return {
+            stdout: Buffer.from(
+              "APPDATA=C:\\Users\\R&D Müller\\AppData\\Roaming\r\n",
+              "utf16le",
+            ),
+            stderr: Buffer.alloc(0),
+          };
         }
         assert.equal(file, "wslpath");
-        assert.deepEqual(args, ["-u", "C:\\Users\\admin\\AppData\\Roaming"]);
-        return { stdout: "/windows/users/admin/AppData/Roaming\n", stderr: "" };
+        assert.deepEqual(args, ["-u", "C:\\Users\\R&D Müller\\AppData\\Roaming"]);
+        assert.deepEqual(options, { encoding: "utf8" });
+        return { stdout: "/windows/users/R&D Müller/AppData/Roaming\n", stderr: "" };
       },
       readFile: async (filePath) => {
         readPaths.push(filePath);
@@ -179,6 +187,7 @@ test("CODEX_TASKBOARD_WSL_RUNTIME_FILE overrides WSL automatic discovery", async
 
   assert.equal(result.exitCode, 0);
   assert.deepEqual(result.stdout.projects, []);
+  assert.deepEqual(curlArgs.slice(0, 3), ["--disable", "--noproxy", "*"]);
   assert.equal(
     curlArgs.at(-1),
     "http://127.0.0.1:51988/override-token/api/projects",
