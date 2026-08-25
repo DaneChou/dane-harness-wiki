@@ -1121,15 +1121,15 @@ export function App() {
       ...sortedChoices.filter((project) => project.issueCount === 0),
     ];
   }, [hostContext?.projects, projectCodexIdentities, projects, recentProjectIds, text]);
-  const projectMenuChoices = projectChoices.filter(
+  const projectMenuCandidates = projectChoices.filter(
     (project) => project.id !== GLOBAL_PROJECT_ID || project.issueCount > 0,
   );
   const projectMenuNeedle = projectMenuSearch.trim().toLocaleLowerCase();
-  const visibleProjectMenuChoices = projectMenuNeedle
-    ? projectMenuChoices.filter((project) => project.name.toLocaleLowerCase().includes(projectMenuNeedle))
-    : projectMenuChoices;
-  const firstEmptyProjectId = visibleProjectMenuChoices.find((project) => project.issueCount === 0)?.id ?? null;
-  const hasProjectsWithIssues = visibleProjectMenuChoices.some((project) => project.issueCount > 0);
+  const projectMenuChoices = projectMenuNeedle
+    ? projectMenuCandidates.filter((project) => project.name.toLocaleLowerCase().includes(projectMenuNeedle))
+    : projectMenuCandidates;
+  const firstEmptyProjectId = projectMenuChoices.find((project) => project.issueCount === 0)?.id ?? null;
+  const hasProjectsWithIssues = projectMenuChoices.some((project) => project.issueCount > 0);
   const editorProjectId = editor?.task?.projectId
     ?? editor?.projectId
     ?? (newTaskDraft?.projectId === selectedProjectId ? newTaskDraft.targetProjectId : undefined)
@@ -3327,7 +3327,7 @@ export function App() {
                           <div className="project-menu-divider" role="separator" />
                         </>
                       )}
-                      {visibleProjectMenuChoices.map((project) => (
+                      {projectMenuChoices.map((project) => (
                         <Fragment key={project.id}>
                           {hasProjectsWithIssues && project.id === firstEmptyProjectId && (
                             <div className="project-menu-divider" role="separator" />
@@ -3356,7 +3356,7 @@ export function App() {
                           </button>
                         </Fragment>
                       ))}
-                      {projectMenuNeedle && visibleProjectMenuChoices.length === 0 && (
+                      {projectMenuNeedle && projectMenuChoices.length === 0 && (
                         <div className="project-menu-empty">{text("没有匹配项目", "No matching projects")}</div>
                       )}
                     </div>
