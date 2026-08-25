@@ -3612,6 +3612,10 @@ kbd {
   margin-left: auto;
 }
 
+.issue-attachment-controls {
+  margin-top: 18px;
+}
+
 .attachments-heading > div {
   display: flex;
   align-items: center;
@@ -4538,13 +4542,6 @@ kbd {
 .detail-open-thread-action svg {
   width: 16px;
   height: 16px;
-}
-
-.detail-thread-avatar {
-  width: 16px;
-  height: 16px;
-  border: 0;
-  font-size: 7px;
 }
 
 .detail-copy-action {
@@ -6066,6 +6063,14 @@ kbd {
   width: 207px;
   max-height: min(402px, calc(100vh - 16px));
   padding: 6px;
+}
+
+.development-context-popover {
+  width: min(360px, calc(100vw - 16px));
+}
+
+.development-context-popover .task-property-option {
+  min-height: 32px;
 }
 
 .task-property-options {
