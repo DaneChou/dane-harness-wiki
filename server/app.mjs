@@ -2000,7 +2000,23 @@ export function createTaskboardServer(options = {}) {
       }
       const url = new URL(request.url, "http://127.0.0.1");
       const pathname = url.pathname;
+      const configuredTrustedOrigin = resolved.trustedOrigins.has(origin);
       const isLocalAiRoute = pathname === "/api/local/ai" || pathname.startsWith("/api/local/ai/");
+      const isDevelopmentContextsRoute = /^\/api\/projects\/[^/]+\/development-contexts$/.test(pathname);
+      if (
+        configuredTrustedOrigin
+        && (
+          pathname.startsWith("/api/local/")
+          || pathname === "/api/device-workspaces"
+          || isDevelopmentContextsRoute
+        )
+      ) {
+        throw new ApiError(
+          409,
+          "LOCAL_COMPANION_REQUIRED",
+          "This capability requires a device-local Taskboard origin",
+        );
+      }
       if (isLocalAiRoute) {
         assertAiLoopbackRequest(request);
       } else if (pathname.startsWith("/api/local/")) {
@@ -2008,7 +2024,7 @@ export function createTaskboardServer(options = {}) {
       }
       const isMachineCapabilityRoute = pathname === "/api/meta"
         || pathname === "/api/device-workspaces"
-        || /^\/api\/projects\/[^/]+\/development-contexts$/.test(pathname);
+        || isDevelopmentContextsRoute;
       const capabilityCloudConfig = isMachineCapabilityRoute
         ? await cloudConfig.read()
         : null;
@@ -2251,8 +2267,11 @@ export function createTaskboardServer(options = {}) {
           throw new ApiError(400, "UNKNOWN_QUERY_PARAMETER", "GET /api/meta does not accept query parameters");
         }
         return sendJson(response, 200, {
-          manageTaskboardSkillPath: resolved.skillPath,
-          capabilities: { localAiChat: isLoopbackAddress(request.socket.remoteAddress) },
+          ...(configuredTrustedOrigin ? {} : { manageTaskboardSkillPath: resolved.skillPath }),
+          capabilities: {
+            localAiChat: !configuredTrustedOrigin
+              && isLoopbackAddress(request.socket.remoteAddress),
+          },
           ...(capabilityCloudConfig?.remoteUrl
             ? {
               mode: "cloud",
@@ -2260,7 +2279,7 @@ export function createTaskboardServer(options = {}) {
                 transport: "websocket",
                 endpoint: "/api/events",
               },
-              localCapabilities: { available: true },
+              localCapabilities: { available: !configuredTrustedOrigin },
             }
             : {}),
         });

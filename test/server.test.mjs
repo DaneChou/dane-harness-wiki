@@ -485,6 +485,77 @@ test("trusted HTTPS origins allow a loopback reverse tunnel for HTTP and SSE onl
   assert.equal(forwardedHost.body.error.code, "INVALID_HOST");
 });
 
+test("trusted HTTPS origins do not inherit device-local capabilities from tunnel loopback", async () => {
+  const trustedOrigin = "https://board.example.test";
+  let skillPath;
+  const baseUrl = await startServer(async (directory) => {
+    skillPath = path.join(directory, "skills", "manage-taskboard", "SKILL.md");
+    return {
+      skillPath,
+      processEnv: { ...process.env, CODEX_TASKBOARD_TRUSTED_ORIGINS: trustedOrigin },
+      cloudConfigStore: {
+        async read() {
+          return {
+            remoteUrl: "https://tasks.example.test",
+            actorName: "Test actor",
+            sharedKey: "test-shared-key",
+            projectMappings: {},
+          };
+        },
+      },
+      remoteFetch: async () => new Response(JSON.stringify({ projects: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    };
+  });
+  const trustedRequest = { headers: { origin: trustedOrigin } };
+
+  const projects = await request(baseUrl, "/api/projects", trustedRequest);
+  assert.equal(projects.response.status, 200);
+  assert.deepEqual(projects.body, { projects: [] });
+
+  const metadata = await request(baseUrl, "/api/meta", trustedRequest);
+  assert.equal(metadata.response.status, 200);
+  assert.deepEqual(metadata.body, {
+    capabilities: { localAiChat: false },
+    mode: "cloud",
+    realtime: {
+      transport: "websocket",
+      endpoint: "/api/events",
+    },
+    localCapabilities: { available: false },
+  });
+  assert.equal(Object.hasOwn(metadata.body, "manageTaskboardSkillPath"), false);
+
+  for (const pathname of [
+    "/api/local/host-runtime",
+    "/api/local/jira-connection",
+    "/api/local/ai/catalog?projectId=local",
+    "/api/device-workspaces",
+    "/api/projects/local/development-contexts",
+  ]) {
+    const result = await request(baseUrl, pathname, trustedRequest);
+    assert.equal(result.response.status, 409, pathname);
+    assert.equal(result.body.error.code, "LOCAL_COMPANION_REQUIRED", pathname);
+  }
+
+  const localMetadata = await request(baseUrl, "/api/meta");
+  assert.equal(localMetadata.response.status, 200);
+  assert.deepEqual(localMetadata.body, {
+    manageTaskboardSkillPath: skillPath,
+    capabilities: { localAiChat: true },
+    mode: "cloud",
+    realtime: {
+      transport: "websocket",
+      endpoint: "/api/events",
+    },
+    localCapabilities: { available: true },
+  });
+  assert.equal((await request(baseUrl, "/api/local/host-runtime")).response.status, 200);
+  assert.equal((await request(baseUrl, "/api/device-workspaces")).response.status, 200);
+});
+
 test("trusted HTTPS origins apply to cloud WebSocket upgrades without widening loopback routes", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "codex-taskboard-trusted-origins-"));
   const trustedOrigin = "https://board.example.test";
