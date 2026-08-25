@@ -102,7 +102,11 @@ test("--runtime-file reads the launcher endpoint without a leading environment a
 
 test("WSL taskctl discovers the Windows launcher runtime descriptor from Windows APPDATA", async () => {
   let requestedUrl;
-  const runtimeFile = "/windows/users/admin/AppData/Roaming/Codex Taskboard/launcher-runtime.json";
+  const runtimeFile = path.join(
+    "/windows/users/admin/AppData/Roaming",
+    "Codex Taskboard",
+    "launcher-runtime.json",
+  );
   const readPaths = [];
   const result = await run(
     ["project", "list"],
