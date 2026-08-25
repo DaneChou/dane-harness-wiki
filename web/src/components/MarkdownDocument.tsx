@@ -333,12 +333,6 @@ export function remarkStripMarkdownComments() {
       return true;
     };
     visit(tree, true);
-  };
-}
-
-function remarkPreserveExtraBlankLines() {
-  return (tree: MarkdownAstNode, file: { value?: unknown }) => {
-    const source = String(file.value ?? "");
     const children = tree.children;
     if (!children || children.length < 2) return;
     const nextChildren: MarkdownAstNode[] = [];
@@ -368,7 +362,6 @@ function remarkPreserveExtraBlankLines() {
       }
       nextChildren.push(child);
     });
-
     tree.children = nextChildren;
   };
 }
@@ -523,12 +516,7 @@ export function MarkdownDocument({
   return (
     <div className="issue-description-document" onCopy={onCopy}>
       <ReactMarkdown
-        remarkPlugins={[
-          remarkGfm,
-          remarkStripMarkdownComments,
-          remarkPreserveExtraBlankLines,
-          remarkBreaks,
-        ]}
+        remarkPlugins={[remarkGfm, remarkStripMarkdownComments, remarkBreaks]}
         urlTransform={(url) => defaultUrlTransform(resolvePersistedAttachmentUrl(url))}
         components={{
           a: ({ node, href, children, className, ...props }) => {
