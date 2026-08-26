@@ -31,6 +31,7 @@
   const PLUGIN_LABELS = ["插件", "plugins"];
   const NATIVE_PAGE_LABELS = [
     "新建任务",
+    "新聊天",
     "新对话",
     "new task",
     "new chat",
