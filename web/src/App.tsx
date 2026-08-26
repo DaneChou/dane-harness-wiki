@@ -3296,17 +3296,30 @@ export function App() {
                 {projectMenuOpen && (
                   <div className="header-project-menu" role="menu" aria-label={text("项目", "Projects")}>
                     <span>{text("切换项目", "Switch project")}</span>
-                    <label className="project-menu-search">
-                      <span className="sr-only">{text("按名称筛选项目", "Filter projects by name")}</span>
+                    <div className="project-menu-search">
+                      <label className="sr-only" htmlFor="project-menu-search-input">
+                        {text("按名称筛选项目", "Filter projects by name")}
+                      </label>
                       <TaskboardIcon name="search" />
                       <input
+                        id="project-menu-search-input"
                         autoFocus
                         type="search"
                         value={projectMenuSearch}
                         onChange={(event) => setProjectMenuSearch(event.target.value)}
                         placeholder={text("筛选项目…", "Filter projects…")}
                       />
-                    </label>
+                      {projectMenuSearch && (
+                        <button
+                          className="search-clear"
+                          type="button"
+                          aria-label={text("清除项目筛选", "Clear project filter")}
+                          onClick={() => setProjectMenuSearch("")}
+                        >
+                          <LinearIcon name="close" />
+                        </button>
+                      )}
+                    </div>
                     <div className="project-menu-list">
                       {!projectMenuNeedle && (
                         <>

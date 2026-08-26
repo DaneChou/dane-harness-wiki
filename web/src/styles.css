@@ -823,7 +823,7 @@ kbd {
 .project-menu-search input {
   width: 100%;
   height: 100%;
-  padding: 0 8px 0 27px;
+  padding: 0 27px;
   border: var(--border-hairline) solid var(--border);
   border-radius: 6px;
   outline: 0;
@@ -858,7 +858,7 @@ kbd {
   font-size: 11px;
 }
 
-.header-project-menu button {
+.header-project-menu button:not(.search-clear) {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto auto;
   align-items: center;
@@ -874,13 +874,13 @@ kbd {
   text-align: left;
 }
 
-.header-project-menu button:hover:not(:disabled),
-.header-project-menu button:focus-visible {
+.header-project-menu button:not(.search-clear):hover:not(:disabled),
+.header-project-menu button:not(.search-clear):focus-visible {
   background: var(--surface-hover);
   outline: none;
 }
 
-.header-project-menu button > span:nth-child(2) {
+.header-project-menu button:not(.search-clear) > span:nth-child(2) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1132,7 +1132,8 @@ kbd {
   color: var(--text-tertiary);
 }
 
-.search-field input::-webkit-search-cancel-button {
+.search-field input::-webkit-search-cancel-button,
+.project-menu-search input::-webkit-search-cancel-button {
   appearance: none;
 }
 
