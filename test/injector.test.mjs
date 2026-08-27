@@ -4,6 +4,10 @@ import { test } from "node:test";
 import vm from "node:vm";
 
 const source = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
+const injectedSource = await readFile(
+  new URL("../inject/codex-taskboard.user.js", import.meta.url),
+  "utf8",
+);
 const runtimeSource = await readFile(
   new URL("../scripts/codex-injector-runtime.mjs", import.meta.url),
   "utf8",
@@ -106,26 +110,55 @@ test("the CDP bridge exposes only the fixed Taskboard automation operations", ()
   assert.doesNotMatch(source, /automations\.toml/);
 });
 
-test("passive automation policy keeps idle pauses and only resumes quota pauses", () => {
+test("passive automation policy keeps the user opt-in while the queue is idle", () => {
   assert.match(source, /taskboardAutomationPolicyOperation/);
+  assert.match(source, /status=in_progress&archived=false/);
+  assert.match(source, /taskboardAutomationHasPendingWork/);
   assert.match(source, /previousQuotaState: current\.quota\?\.state/);
   assert.match(source, /enqueueQuotaPolicyMutation\(record, rpc, \{ explicit: true \}\)/);
-  assert.match(
-    source,
-    /!explicit && result\.operation === "list" && result\.item\?\.status === "PAUSED"/,
-  );
-  assert.match(source, /enabledByUser: false/);
+  assert.doesNotMatch(source, /current\.request = \{ \.\.\.current\.request, enabledByUser: false \}/);
+  assert.match(source, /scheduleQuotaPolicyCheck\(current, result\)/);
   assert.match(source, /record\.quota \? \{ quota: record\.quota \} : \{\}/);
 });
 
-test("persisted automation policies retain remote project identity", () => {
+test("persisted automation policies retain project identity without inventing a legacy catalog", () => {
   const storedPolicySource = source.slice(
     source.indexOf("function storedAutomationPolicy"),
     source.indexOf("function restoredAutomationPolicy"),
   );
+  const storedAutomationPolicy = vm.runInNewContext(`(${storedPolicySource})`);
+  const legacyRequest = {
+    taskboardProjectId: "taskboard-project",
+    codexProjectId: "controller-project",
+    codexProjectKind: "local",
+    codexHostId: "local",
+    projectName: "Controller",
+    workspacePath: "/controller",
+    skillPath: "/skill/SKILL.md",
+    enabledByUser: true,
+    quotaAware: true,
+    intervalMinutes: 5,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "max",
+  };
+  const legacyPolicy = storedAutomationPolicy(legacyRequest);
+  const catalogPolicy = storedAutomationPolicy({ ...legacyRequest, codexProjects: [] });
+
+  assert.equal(Object.hasOwn(legacyPolicy, "codexProjects"), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(catalogPolicy.codexProjects)), []);
   assert.match(storedPolicySource, /codexProjectKind: request\.codexProjectKind/);
   assert.match(storedPolicySource, /codexHostId: request\.codexHostId/);
   assert.match(storedPolicySource, /remoteProjects: request\.remoteProjects/);
+  assert.match(storedPolicySource, /codexProjects: request\.codexProjects/);
+});
+
+test("the injected automation bridge forwards the complete Codex project catalog", () => {
+  const hostPayloadSource = injectedSource.slice(
+    injectedSource.indexOf("function buildAutomationHostPayload"),
+    injectedSource.indexOf("async function handleAutomationRequest"),
+  );
+  assert.notEqual(hostPayloadSource.length, 0);
+  assert.match(hostPayloadSource, /codexProjects: payload\.codexProjects/);
 });
 
 test("automation list rebuilds a stored policy on the incoming project identity", async () => {
@@ -160,6 +193,12 @@ test("automation list rebuilds a stored policy on the incoming project identity"
       codexProjectKind: "remote",
       codexHostId: "remote-host",
       workspacePath: "/remote/project-worktree",
+    }],
+    codexProjects: [{
+      codexProjectId: "remote-project",
+      codexProjectKind: "remote",
+      codexHostId: "remote-host",
+      workspacePath: "/remote/project",
     }],
     skillPath: "/new/skill/SKILL.md",
     enabledByUser: false,
@@ -201,6 +240,98 @@ test("automation list rebuilds a stored policy on the incoming project identity"
   assert.equal(result.policy, appliedRequest);
   assert.match(source, /reconcileStoredAutomationPolicy\(\s*request,\s*rpc/);
   assert.match(source, /policy: storedAutomationPolicy\(current\.request\)/);
+});
+
+test("automation list migrates a legacy policy when the project catalog first arrives", async () => {
+  const reconcileSource = source.slice(
+    source.indexOf("async function reconcileStoredAutomationPolicy"),
+    source.indexOf("async function enqueueCurrentQuotaPolicy"),
+  );
+  const storedRequest = {
+    taskboardProjectId: "taskboard-project",
+    codexProjectId: "controller-project",
+    codexProjectKind: "local",
+    codexHostId: "local",
+    projectName: "Controller",
+    workspacePath: "/controller",
+    remoteProjects: [],
+    skillPath: "/skill/SKILL.md",
+    automationId: "automation-1",
+    enabledByUser: true,
+    quotaAware: true,
+    intervalMinutes: 5,
+    model: "gpt-5.6-sol",
+    reasoningEffort: "max",
+  };
+  const incomingRequest = { ...storedRequest, codexProjects: [] };
+  let appliedRequest;
+  const reconcileStoredAutomationPolicy = vm.runInNewContext(`(${reconcileSource})`, {
+    ensureQuotaPoliciesLoaded: async () => {},
+    quotaPolicyRecords: new Map([[
+      storedRequest.taskboardProjectId,
+      { request: storedRequest },
+    ]]),
+    updateAndApplyQuotaPolicy: async (request) => {
+      appliedRequest = request;
+      return { policy: request };
+    },
+    enqueueQuotaPolicyMutation: () => {
+      throw new Error("legacy policy must be migrated");
+    },
+    storedAutomationPolicy: (request) => request,
+  });
+
+  await reconcileStoredAutomationPolicy(incomingRequest, () => {});
+  assert.deepEqual(
+    JSON.parse(JSON.stringify(appliedRequest)),
+    incomingRequest,
+  );
+});
+
+test("injector restore pauses enabled legacy policies until a project catalog arrives", async () => {
+  const restoreSource = source.slice(
+    source.indexOf("async function restoreQuotaPolicies"),
+    source.indexOf("async function startTaskConversationViaCdp"),
+  );
+  const cdp = {};
+  const legacyRequest = {
+    taskboardProjectId: "legacy-project",
+    enabledByUser: true,
+  };
+  const currentRequest = {
+    taskboardProjectId: "current-project",
+    enabledByUser: true,
+    codexProjects: [],
+  };
+  const paused = [];
+  const enqueued = [];
+  const restoreQuotaPolicies = vm.runInNewContext(`(${restoreSource})`, {
+    registerQuotaPolicyCdp: () => {},
+    restoredQuotaPolicyCdps: new Set(),
+    quotaPolicyRestorePromises: new Map(),
+    ensureQuotaPoliciesLoaded: async () => {},
+    quotaPolicyRecords: new Map([
+      [legacyRequest.taskboardProjectId, { request: legacyRequest }],
+      [currentRequest.taskboardProjectId, { request: currentRequest }],
+    ]),
+    requestCodexAutomationViaCdp: () => {},
+    reconcileTaskboardAutomation: async (request) => {
+      paused.push(request);
+      return { error: "not-found" };
+    },
+    enqueueCurrentQuotaPolicy: async (projectId) => {
+      enqueued.push(projectId);
+    },
+  });
+
+  await restoreQuotaPolicies(cdp);
+  assert.deepEqual(JSON.parse(JSON.stringify(paused)), [{
+    ...legacyRequest,
+    operation: "pause",
+  }]);
+  assert.deepEqual(enqueued, ["current-project"]);
+  assert.equal(legacyRequest.enabledByUser, true);
+  assert.equal(Object.hasOwn(legacyRequest, "codexProjects"), false);
 });
 
 test("the package injection command remains resident for tab-triggered recovery", () => {

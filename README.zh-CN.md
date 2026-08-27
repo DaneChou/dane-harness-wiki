@@ -45,8 +45,14 @@ npm run taskctl -- issue create \
   --title "Implement the next slice" \
   --status todo \
   --priority high \
-  --labels product,mvp
+  --labels product,mvp \
+  --execution-codex-project-id SAVED_CODEX_PROJECT_ID \
+  --execution-codex-project-kind local \
+  --execution-codex-host-id local \
+  --execution-workspace-path /absolute/path/to/repository
 ```
+
+Todo 任务必须填写来自同一个已保存 Codex 项目 identity 的四个执行目标字段。
 
 请运行 `npm link`，以便在 shell 路径中使用 `taskctl`。设置 `CODEX_TASKBOARD_URL`，可让 CLI 指向另一个本地或局域网服务。云端部署通过**回环 companion**（本机 loopback 配套服务，不是「伴侣」）使用 `taskctl cloud login` 配置。
 
