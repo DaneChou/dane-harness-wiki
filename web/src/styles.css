@@ -3025,9 +3025,11 @@ kbd {
 }
 
 .issue-description-document a.issue-reference-link:has(> .document-attachment-card) {
-  display: block;
+  display: inline-block;
+  max-width: 100%;
   margin: 0;
   color: inherit;
+  vertical-align: middle;
 }
 
 .issue-reference-inline {
@@ -3748,9 +3750,7 @@ kbd {
   list-style: none;
 }
 
-.attachment-list li,
-.document-attachment-card,
-.inline-media-attachment {
+.attachment-list li {
   position: relative;
   display: flex;
   align-items: center;
@@ -3763,8 +3763,31 @@ kbd {
 }
 
 .attachment-list li:hover,
-.attachment-list li:focus-within,
+.attachment-list li:focus-within {
+  border-color: color-mix(in srgb, var(--border) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-active) 64%, var(--surface-muted));
+}
+
+.document-attachment-card,
+.inline-media-attachment {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  gap: 8px;
+  padding: 5px 6px 5px 8px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-muted);
+  vertical-align: middle;
+  transition: border-color 100ms ease, background 100ms ease;
+}
+
 .document-attachment-card:hover,
+.issue-description-document a.issue-reference-link:focus-visible > .document-attachment-card,
+.inline-media-attachment:hover,
 .inline-media-attachment:focus-within {
   border-color: color-mix(in srgb, var(--border) 70%, transparent);
   background: color-mix(in srgb, var(--surface-active) 64%, var(--surface-muted));
@@ -5805,6 +5828,7 @@ kbd {
   min-width: 0;
   flex-direction: column;
   gap: 1px;
+  line-height: normal;
 }
 
 .composer-attachment-copy strong {
@@ -5901,23 +5925,23 @@ kbd {
   display: grid;
   flex: 0 0 auto;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
-  border-radius: 50%;
+  border-radius: 5px;
   background: transparent;
   color: var(--text-tertiary);
 }
 
 .inline-media-attachment > button:hover:not(:disabled) {
-  background: var(--surface-active);
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
 .inline-media-attachment > button svg {
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
 }
 
 .inline-media-issue-reference {

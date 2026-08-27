@@ -969,10 +969,10 @@ function AttachmentBlock({
       contentEditable={false}
       data-inline-media-segment={segment.id}
     >
-      <span className="attachment-file-icon" aria-hidden="true">
+      <span className="attachment-file-icon composer-attachment-file-icon" aria-hidden="true">
         <LinearIcon name="file" />
       </span>
-      <span className="attachment-copy">
+      <span className="attachment-copy composer-attachment-copy">
         <strong>{filename}</strong>
         {size !== null && <span>{fileSize(size)}</span>}
       </span>
