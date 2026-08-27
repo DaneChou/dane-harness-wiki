@@ -1653,20 +1653,22 @@ export function AiChat({
     ?? draftOrigin?.projectId
     ?? projectId;
   const catalogThreadOrigin = snapshot?.thread.origin ?? selectedThreadSummary?.origin;
-  const catalogCodexProjectIdentity = catalogThreadOrigin?.codexProjectKind === "remote"
-    && catalogThreadOrigin.codexProjectId
-    && catalogThreadOrigin.codexHostId
-      ? {
-          codexProjectId: catalogThreadOrigin.codexProjectId,
-          codexProjectKind: "remote" as const,
-          codexHostId: catalogThreadOrigin.codexHostId,
-          workspacePath: catalogThreadOrigin.workspacePath,
-        }
-      : draftOrigin?.projectId === catalogProjectId
-        ? draftOrigin.codexProjectIdentity
-        : projectId === catalogProjectId
-          ? codexProjectIdentity
-          : null;
+  const catalogCodexProjectIdentity = catalogThreadOrigin
+    ? catalogThreadOrigin.codexProjectKind === "remote"
+      && catalogThreadOrigin.codexProjectId
+      && catalogThreadOrigin.codexHostId
+        ? {
+            codexProjectId: catalogThreadOrigin.codexProjectId,
+            codexProjectKind: "remote" as const,
+            codexHostId: catalogThreadOrigin.codexHostId,
+            workspacePath: catalogThreadOrigin.workspacePath,
+          }
+        : null
+    : draftOrigin?.projectId === catalogProjectId
+      ? draftOrigin.codexProjectIdentity
+      : projectId === catalogProjectId
+        ? codexProjectIdentity
+        : null;
   const activeCatalog = catalogLoadedProjectId === catalogProjectId ? catalog : null;
   useEffect(() => {
     if (!available || !catalogProjectId) {

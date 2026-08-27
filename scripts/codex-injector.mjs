@@ -1208,10 +1208,11 @@ function remoteAutomationTarget(request, task) {
 }
 
 function eligibleRemoteAutomationTask(task) {
+  const remoteBinding = task?.threadBinding?.codexProjectKind === "remote"
+    && task.threadId === task.threadBinding.threadId;
   return task?.status === "todo"
     && task.archivedAt === null
-    && !task.threadId
-    && !task.threadBinding
+    && ((!task.threadId && !task.threadBinding) || remoteBinding)
     && (task.relations?.blockedBy ?? []).every((dependency) => dependency.status === "done");
 }
 
@@ -1308,7 +1309,10 @@ async function runRemoteTaskboardAutomation(record) {
     taskboardRequest(attachmentsPath),
   ]);
   if (!eligibleRemoteAutomationTask(task) || task.projectId !== request.taskboardProjectId) return;
-  const target = remoteAutomationTarget(request, task);
+  const existingBinding = task.threadBinding?.codexProjectKind === "remote"
+    ? task.threadBinding
+    : null;
+  const target = existingBinding ?? remoteAutomationTarget(request, task);
   if (!target) {
     await taskboardRequest(commentsPath, {
       method: "POST",
@@ -1322,8 +1326,9 @@ async function runRemoteTaskboardAutomation(record) {
     cdp,
     undefined,
     target.codexHostId,
-    "thread/start",
+    existingBinding ? "thread/resume" : "thread/start",
     {
+      ...(existingBinding ? { threadId: existingBinding.threadId } : {}),
       model: request.model,
       cwd: target.workspacePath,
       runtimeWorkspaceRoots: [target.workspacePath],
@@ -1337,7 +1342,7 @@ async function runRemoteTaskboardAutomation(record) {
     || !threadId
     || normalizeRemoteWorkspace(started.thread.cwd) !== normalizeRemoteWorkspace(target.workspacePath)
   ) {
-    throw new Error("Codex did not create the automation thread in the selected SSH workspace");
+    throw new Error(`Codex did not ${existingBinding ? "resume" : "create"} the automation thread in the selected SSH workspace`);
   }
 
   const refreshed = await Promise.all([
@@ -1348,7 +1353,9 @@ async function runRemoteTaskboardAutomation(record) {
   const refreshedTask = refreshed[0].task;
   const refreshedComments = refreshed[1].comments;
   const refreshedAttachments = refreshed[2].attachments;
-  const refreshedTarget = remoteAutomationTarget(request, refreshedTask);
+  const refreshedTarget = refreshedTask.threadBinding?.codexProjectKind === "remote"
+    ? refreshedTask.threadBinding
+    : remoteAutomationTarget(request, refreshedTask);
   if (
     !eligibleRemoteAutomationTask(refreshedTask)
     || remoteAutomationSnapshot(refreshedTask, refreshedComments, refreshedAttachments) !== snapshot
@@ -1356,9 +1363,10 @@ async function runRemoteTaskboardAutomation(record) {
     || refreshedTarget?.codexProjectKind !== target.codexProjectKind
     || refreshedTarget?.codexHostId !== target.codexHostId
     || refreshedTarget?.workspacePath !== target.workspacePath
+    || refreshedTarget?.threadId !== target.threadId
   ) return;
 
-  const threadBinding = {
+  const threadBinding = existingBinding ?? {
     threadId,
     codexProjectId: target.codexProjectId,
     codexProjectKind: "remote",
