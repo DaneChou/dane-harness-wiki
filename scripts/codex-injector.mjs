@@ -101,6 +101,7 @@ const quotaPolicyQueues = new Map();
 const quotaPolicyCdps = new Set();
 const restoredQuotaPolicyCdps = new WeakSet();
 const quotaPolicyRestorePromises = new WeakMap();
+const remoteAutomationDecisionWaiters = new Map();
 let quotaPoliciesLoadPromise = null;
 let quotaPoliciesWritePromise = Promise.resolve();
 const taskConversationAppServerTimeoutMs = 30_000;
@@ -1286,6 +1287,127 @@ function remoteAutomationPrompt(task, comments, attachments, target) {
   ].join("\n");
 }
 
+function waitForRemoteAutomationDecision(hostId, threadId) {
+  const key = `${hostId}\0${threadId}`;
+  let cancel;
+  const promise = new Promise((resolve, reject) => {
+    const finish = (error, answer) => {
+      clearTimeout(timer);
+      remoteAutomationDecisionWaiters.delete(key);
+      if (error) reject(error);
+      else resolve(answer);
+    };
+    const timer = setTimeout(
+      () => finish(new Error("Codex 自动认领判断超时")),
+      remoteAutomationTurnTimeoutMs,
+    );
+    timer.unref();
+    remoteAutomationDecisionWaiters.set(key, { finish });
+    cancel = () => {
+      clearTimeout(timer);
+      remoteAutomationDecisionWaiters.delete(key);
+    };
+  });
+  return { promise, cancel };
+}
+
+function handleRemoteAutomationDecisionNotification(notification) {
+  const params = notification.params;
+  const waiter = remoteAutomationDecisionWaiters.get(
+    `${notification.hostId}\0${params?.threadId}`,
+  );
+  if (!waiter) return;
+  if (notification.method !== "turn/completed") return;
+  if (params.turn?.status !== "completed") {
+    waiter.finish(new Error(params.turn?.error?.message || "Codex 自动认领判断失败"));
+    return;
+  }
+  const answer = [...params.turn.items].reverse()
+    .find((item) => item.type === "agentMessage")?.text?.trim() || "";
+  waiter.finish(null, answer);
+}
+
+async function remoteAutomationCanStart(cdp, request, task, comments) {
+  const latestComment = comments.at(-1);
+  const started = await requestCodexAppServerViaCdp(
+    cdp,
+    undefined,
+    request.codexHostId,
+    "thread/start",
+    {
+      ephemeral: true,
+      model: request.model,
+      cwd: request.workspacePath,
+      runtimeWorkspaceRoots: [request.workspacePath],
+      approvalPolicy: "never",
+      sandbox: "read-only",
+    },
+  );
+  const threadId = started?.thread?.id;
+  if (typeof threadId !== "string" || !threadId || started.thread.ephemeral !== true) {
+    throw new Error("Codex 未创建临时自动认领判断线程");
+  }
+
+  const completion = waitForRemoteAutomationDecision(request.codexHostId, threadId);
+  let turnStarted;
+  try {
+    turnStarted = await requestCodexAppServerViaCdp(
+      cdp,
+      undefined,
+      request.codexHostId,
+      "turn/start",
+      {
+        threadId,
+        input: [{
+          type: "text",
+          text: [
+            "你是 Codex Taskboard 自动认领 Agent。只判断下面的议题当前是否允许开始。",
+            "根据完整描述和最新评论做语义判断：若任一处明确要求等待、暂不执行或当前不应开始，decision 为 wait；否则 decision 为 start。不要调用工具，不要解释。",
+            JSON.stringify({
+              identifier: task.identifier,
+              title: task.title,
+              description: task.description,
+              latestComment: latestComment
+                ? {
+                    authorName: latestComment.authorName,
+                    createdAt: latestComment.createdAt,
+                    body: latestComment.body,
+                  }
+                : null,
+            }),
+          ].join("\n\n"),
+        }],
+        effort: request.reasoningEffort,
+        outputSchema: {
+          type: "object",
+          properties: {
+            decision: { type: "string", enum: ["start", "wait"] },
+          },
+          required: ["decision"],
+          additionalProperties: false,
+        },
+      },
+    );
+  } catch (error) {
+    completion.cancel();
+    throw error;
+  }
+  const turnId = turnStarted?.turn?.id;
+  if (typeof turnId !== "string" || !turnId) {
+    completion.cancel();
+    throw new Error("Codex 未返回自动认领判断 turn");
+  }
+  const answer = await completion.promise;
+  let decision;
+  try {
+    decision = JSON.parse(answer).decision;
+  } catch {}
+  if (decision !== "start" && decision !== "wait") {
+    throw new Error("Codex 未返回有效的自动认领判断");
+  }
+  return decision === "start";
+}
+
 async function runRemoteTaskboardAutomation(record) {
   const { request, version } = record;
   if (
@@ -1309,6 +1431,8 @@ async function runRemoteTaskboardAutomation(record) {
     taskboardRequest(attachmentsPath),
   ]);
   if (!eligibleRemoteAutomationTask(task) || task.projectId !== request.taskboardProjectId) return;
+  const cdp = currentQuotaPolicyCdp();
+  if (!(await remoteAutomationCanStart(cdp, request, task, comments))) return;
   const existingBinding = task.threadBinding?.codexProjectKind === "remote"
     ? task.threadBinding
     : null;
@@ -1321,7 +1445,6 @@ async function runRemoteTaskboardAutomation(record) {
     return;
   }
   const snapshot = remoteAutomationSnapshot(task, comments, attachments);
-  const cdp = currentQuotaPolicyCdp();
   const started = await requestCodexAppServerViaCdp(
     cdp,
     undefined,
@@ -2726,6 +2849,7 @@ async function main() {
     );
   };
   const forwardCodexAppServerNotification = (cdp, notification) => {
+    handleRemoteAutomationDecisionNotification(notification);
     if (remoteCodexConnections.get(notification.hostId) !== cdp) return;
     if (!taskboardChild?.connected) return;
     taskboardChild.send({
