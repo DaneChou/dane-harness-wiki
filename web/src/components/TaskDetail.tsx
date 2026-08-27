@@ -778,13 +778,18 @@ export function TaskDetail({
       );
       setCurrentTask(savedWithRelations);
       setDescription(savedWithRelations.description);
-      setDescriptionSegments(createInlineMediaSegments(savedWithRelations.description, referenceTasks));
-      setAttachments((current) => [
-        ...current,
+      const nextAttachments = [
+        ...attachments,
         ...[...uploadedImages, ...uploadedFiles].filter((attachment) => (
-          !current.some((item) => item.id === attachment.id)
+          !attachments.some((item) => item.id === attachment.id)
         )),
-      ]);
+      ];
+      setDescriptionSegments(createInlineMediaSegments(
+        savedWithRelations.description,
+        referenceTasks,
+        nextAttachments,
+      ));
+      setAttachments(nextAttachments);
       setEditingDescription(false);
     } catch (error) {
       onError(messageFor(error));
@@ -849,7 +854,7 @@ export function TaskDetail({
     if (savingCommentId !== null) return;
     editingUploadedAttachmentsRef.current.clear();
     setEditingId(comment.id);
-    setEditingSegments(createInlineMediaSegments(comment.body, referenceTasks));
+    setEditingSegments(createInlineMediaSegments(comment.body, referenceTasks, comment.attachments));
     setActiveMenuId(null);
   }
 
@@ -1037,6 +1042,7 @@ export function TaskDetail({
                           setDescriptionSegments(createInlineMediaSegments(
                             currentTask.description,
                             referenceTasks,
+                            attachments,
                           ));
                           setEditingDescription(false);
                         }
@@ -1073,13 +1079,21 @@ export function TaskDetail({
                     aria-label={text("编辑议题描述", "Edit issue description")}
                     onClick={() => {
                       if (window.getSelection()?.isCollapsed === false) return;
-                      setDescriptionSegments(createInlineMediaSegments(description, referenceTasks));
+                      setDescriptionSegments(createInlineMediaSegments(
+                        description,
+                        referenceTasks,
+                        attachments,
+                      ));
                       setEditingDescription(true);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
-                        setDescriptionSegments(createInlineMediaSegments(description, referenceTasks));
+                        setDescriptionSegments(createInlineMediaSegments(
+                          description,
+                          referenceTasks,
+                          attachments,
+                        ));
                         setEditingDescription(true);
                       }
                     }}

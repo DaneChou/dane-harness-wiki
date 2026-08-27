@@ -530,6 +530,9 @@ export function MarkdownDocument({
             const isComposerReference = Boolean(
               markdown && /^\[[\s\S]*\]\(taskboard:\/\/composer-reference\/[^)]+\)$/.test(markdown),
             );
+            if (isValidElement(renderedLink) && renderedLink.type === "video") {
+              return renderedLink;
+            }
             return (
               <a
                 {...props}

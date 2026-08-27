@@ -3232,7 +3232,8 @@ kbd {
   border-top: var(--border-hairline) solid var(--border);
 }
 
-.issue-description-document img {
+.issue-description-document img,
+.issue-description-document video {
   display: block;
   max-width: 100%;
   max-height: 600px;
@@ -4287,7 +4288,8 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-.comment-body .issue-description-document {
+.comment-body .issue-description-document,
+.comment-inline-media .issue-description-document {
   display: block;
 }
 
@@ -4297,18 +4299,27 @@ kbd {
 .comment-body .issue-description-document h3,
 .comment-body .issue-description-document h4,
 .comment-body .issue-description-document h5,
-.comment-body .issue-description-document h6 {
+.comment-body .issue-description-document h6,
+.comment-inline-media .issue-description-document p,
+.comment-inline-media .issue-description-document h1,
+.comment-inline-media .issue-description-document h2,
+.comment-inline-media .issue-description-document h3,
+.comment-inline-media .issue-description-document h4,
+.comment-inline-media .issue-description-document h5,
+.comment-inline-media .issue-description-document h6 {
   margin-bottom: 6px;
 }
 
-.comment-body .issue-description-document h1 {
+.comment-body .issue-description-document h1,
+.comment-inline-media .issue-description-document h1 {
   margin-top: 12px;
   font-size: 17px;
   font-weight: 620;
   line-height: 25px;
 }
 
-.comment-body .issue-description-document h2 {
+.comment-body .issue-description-document h2,
+.comment-inline-media .issue-description-document h2 {
   margin-top: 10px;
   font-size: 16px;
   font-weight: 600;
@@ -4318,18 +4329,24 @@ kbd {
 .comment-body .issue-description-document h3,
 .comment-body .issue-description-document h4,
 .comment-body .issue-description-document h5,
-.comment-body .issue-description-document h6 {
+.comment-body .issue-description-document h6,
+.comment-inline-media .issue-description-document h3,
+.comment-inline-media .issue-description-document h4,
+.comment-inline-media .issue-description-document h5,
+.comment-inline-media .issue-description-document h6 {
   margin-top: 8px;
   font-size: 15px;
   font-weight: 600;
   line-height: 24px;
 }
 
-.comment-body .issue-description-document > :first-child {
+.comment-body .issue-description-document > :first-child,
+.comment-inline-media .issue-description-document > :first-child {
   margin-top: 0;
 }
 
-.comment-body .issue-description-document p {
+.comment-body .issue-description-document p,
+.comment-inline-media .issue-description-document p {
   margin-bottom: 6px;
 }
 
@@ -5902,6 +5919,26 @@ kbd {
   white-space: pre-wrap;
 }
 
+.inline-markdown-editor {
+  white-space: normal;
+}
+
+.inline-markdown-marker {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  font-size: 0;
+  font-style: normal;
+  font-weight: 400;
+  line-height: 0;
+  text-decoration: none;
+}
+
+.inline-markdown-link {
+  color: var(--accent);
+}
+
 .inline-media-atom {
   display: inline;
   -webkit-user-select: none;
@@ -5954,6 +5991,13 @@ kbd {
   border-radius: 5px;
   background: transparent;
   color: var(--text-tertiary);
+  opacity: 0;
+  visibility: hidden;
+}
+
+.inline-media-attachment:hover > button {
+  opacity: 1;
+  visibility: visible;
 }
 
 .inline-media-attachment > button:hover:not(:disabled) {
@@ -6008,7 +6052,8 @@ kbd {
   margin: 6px 0;
 }
 
-.inline-media-image img {
+.inline-media-image img,
+.inline-media-image video {
   display: block;
   max-width: 100%;
   max-height: 600px;
@@ -6031,6 +6076,13 @@ kbd {
   border-radius: 50%;
   background: color-mix(in srgb, var(--text-primary) 82%, transparent);
   color: var(--surface);
+  opacity: 0;
+  visibility: hidden;
+}
+
+.inline-media-image:hover > button {
+  opacity: 1;
+  visibility: visible;
 }
 
 .inline-media-image button svg {

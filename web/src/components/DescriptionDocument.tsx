@@ -1,4 +1,5 @@
 import type { ClipboardEvent, MouseEvent } from "react";
+import { attachmentContentUrl } from "../api";
 import { readIssueIdentifier } from "../issueRoute";
 import type { Attachment, Task, TaskRelationSummary } from "../types";
 import { STATUS_DETAILS } from "./BoardColumn";
@@ -83,6 +84,16 @@ export function DescriptionDocument({
       renderLink={(href) => {
         const attachment = href ? referencedAttachment(href, attachments) : null;
         if (attachment) {
+          if (attachment.contentType.startsWith("video/")) {
+            return (
+              <video
+                className="document-inline-video"
+                src={attachmentContentUrl(attachment)}
+                aria-label={attachment.filename}
+                controls
+              />
+            );
+          }
           return (
             <span className="document-attachment-card">
               <span className="attachment-file-icon composer-attachment-file-icon" aria-hidden="true">
