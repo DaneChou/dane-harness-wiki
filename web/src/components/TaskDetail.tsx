@@ -1104,6 +1104,7 @@ export function TaskDetail({
                           referenceTasks={referenceTasks}
                           onOpenTask={onOpenTask}
                           attachments={attachments}
+                          enableImagePreview
                           onOpenAttachment={handleAttachmentDownload}
                         />
                       : text("添加描述…", "Add description…")}
@@ -1390,6 +1391,7 @@ export function TaskDetail({
                               referenceTasks={referenceTasks}
                               onOpenTask={onOpenTask}
                               attachments={comment.attachments}
+                              enableImagePreview
                               onOpenAttachment={handleAttachmentDownload}
                             />
                           </div>

@@ -3243,6 +3243,36 @@ kbd {
   object-fit: contain;
 }
 
+.issue-description-document img.is-previewable {
+  cursor: zoom-in;
+}
+
+.image-preview-dialog {
+  position: relative;
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.image-preview-dialog > img {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 48px);
+  border-radius: 8px;
+  object-fit: contain;
+  box-shadow: var(--dialog-shadow);
+}
+
+.image-preview-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: var(--border-hairline) solid var(--border);
+  background: var(--surface-raised);
+  box-shadow: var(--menu-shadow);
+}
+
 .issue-description-document img[src*="/api/attachments/"] + br {
   display: none;
 }
@@ -4288,8 +4318,7 @@ kbd {
   overflow-wrap: anywhere;
 }
 
-.comment-body .issue-description-document,
-.comment-inline-media .issue-description-document {
+.comment-body .issue-description-document {
   display: block;
 }
 
@@ -4299,27 +4328,18 @@ kbd {
 .comment-body .issue-description-document h3,
 .comment-body .issue-description-document h4,
 .comment-body .issue-description-document h5,
-.comment-body .issue-description-document h6,
-.comment-inline-media .issue-description-document p,
-.comment-inline-media .issue-description-document h1,
-.comment-inline-media .issue-description-document h2,
-.comment-inline-media .issue-description-document h3,
-.comment-inline-media .issue-description-document h4,
-.comment-inline-media .issue-description-document h5,
-.comment-inline-media .issue-description-document h6 {
+.comment-body .issue-description-document h6 {
   margin-bottom: 6px;
 }
 
-.comment-body .issue-description-document h1,
-.comment-inline-media .issue-description-document h1 {
+.comment-body .issue-description-document h1 {
   margin-top: 12px;
   font-size: 17px;
   font-weight: 620;
   line-height: 25px;
 }
 
-.comment-body .issue-description-document h2,
-.comment-inline-media .issue-description-document h2 {
+.comment-body .issue-description-document h2 {
   margin-top: 10px;
   font-size: 16px;
   font-weight: 600;
@@ -4329,24 +4349,18 @@ kbd {
 .comment-body .issue-description-document h3,
 .comment-body .issue-description-document h4,
 .comment-body .issue-description-document h5,
-.comment-body .issue-description-document h6,
-.comment-inline-media .issue-description-document h3,
-.comment-inline-media .issue-description-document h4,
-.comment-inline-media .issue-description-document h5,
-.comment-inline-media .issue-description-document h6 {
+.comment-body .issue-description-document h6 {
   margin-top: 8px;
   font-size: 15px;
   font-weight: 600;
   line-height: 24px;
 }
 
-.comment-body .issue-description-document > :first-child,
-.comment-inline-media .issue-description-document > :first-child {
+.comment-body .issue-description-document > :first-child {
   margin-top: 0;
 }
 
-.comment-body .issue-description-document p,
-.comment-inline-media .issue-description-document p {
+.comment-body .issue-description-document p {
   margin-bottom: 6px;
 }
 
@@ -5917,26 +5931,6 @@ kbd {
 
 .inline-media-text {
   white-space: pre-wrap;
-}
-
-.inline-markdown-editor {
-  white-space: normal;
-}
-
-.inline-markdown-marker {
-  display: inline-block;
-  width: 0;
-  height: 0;
-  overflow: hidden;
-  font-size: 0;
-  font-style: normal;
-  font-weight: 400;
-  line-height: 0;
-  text-decoration: none;
-}
-
-.inline-markdown-link {
-  color: var(--accent);
 }
 
 .inline-media-atom {

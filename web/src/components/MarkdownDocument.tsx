@@ -505,11 +505,13 @@ function MarkdownPre({ children, ...props }: ComponentPropsWithoutRef<"pre">) {
 export function MarkdownDocument({
   value,
   onCopy,
+  onImageClick,
   onLinkClick,
   renderLink,
 }: {
   value: string;
   onCopy?: ClipboardEventHandler<HTMLDivElement>;
+  onImageClick?: (event: MouseEvent<HTMLImageElement>) => void;
   onLinkClick?: (event: MouseEvent<HTMLAnchorElement>, href?: string) => void;
   renderLink?: (href: string | undefined, children: ReactNode) => ReactNode | null;
 }) {
@@ -560,7 +562,9 @@ export function MarkdownDocument({
             return (
               <img
                 {...props}
+                className={[props.className, onImageClick ? "is-previewable" : ""].filter(Boolean).join(" ") || undefined}
                 data-taskboard-inline-media-markdown={selfContainedMarkdown}
+                onClick={onImageClick}
               />
             );
           },

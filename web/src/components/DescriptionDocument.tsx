@@ -1,4 +1,5 @@
-import type { ClipboardEvent, MouseEvent } from "react";
+import { useState, type ClipboardEvent, type MouseEvent } from "react";
+import { createPortal } from "react-dom";
 import { attachmentContentUrl } from "../api";
 import { readIssueIdentifier } from "../issueRoute";
 import type { Attachment, Task, TaskRelationSummary } from "../types";
@@ -51,17 +52,26 @@ export function DescriptionDocument({
   referenceTasks,
   onOpenTask,
   attachments = [],
+  enableImagePreview = false,
   onOpenAttachment,
 }: {
   value: string;
   referenceTasks: Task[];
   onOpenTask: (task: TaskRelationSummary) => void;
   attachments?: Attachment[];
+  enableImagePreview?: boolean;
   onOpenAttachment?: (event: MouseEvent<HTMLAnchorElement>, attachment: Attachment) => void;
 }) {
-  return (
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
+
+  return (<>
     <MarkdownDocument
       value={value}
+      onImageClick={enableImagePreview ? (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setPreviewImage({ src: event.currentTarget.currentSrc, alt: event.currentTarget.alt });
+      } : undefined}
       onCopy={(event: ClipboardEvent<HTMLDivElement>) => {
         const selection = event.currentTarget.ownerDocument.getSelection();
         if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return;
@@ -155,5 +165,33 @@ export function DescriptionDocument({
         if (reference.task) onOpenTask(reference.task);
       }}
     />
-  );
+    {previewImage && createPortal(
+      <div
+        className="display-settings-backdrop image-preview-backdrop"
+        role="presentation"
+        onClick={(event) => {
+          event.stopPropagation();
+          if (event.target === event.currentTarget) setPreviewImage(null);
+        }}
+      >
+        <div
+          className="image-preview-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewImage.alt || "Image preview"}
+        >
+          <img src={previewImage.src} alt={previewImage.alt} />
+          <button
+            className="icon-button display-settings-close image-preview-close"
+            type="button"
+            aria-label="Close image preview"
+            onClick={() => setPreviewImage(null)}
+          >
+            <LinearIcon name="close" />
+          </button>
+        </div>
+      </div>,
+      document.body,
+    )}
+  </>);
 }

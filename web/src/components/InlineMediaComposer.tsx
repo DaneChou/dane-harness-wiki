@@ -119,9 +119,7 @@ interface MarkdownAstNode {
   children?: MarkdownAstNode[];
   value?: string;
   alt?: string | null;
-  depth?: number;
   identifier?: string;
-  ordered?: boolean;
   url?: string;
 }
 
@@ -309,130 +307,6 @@ function markdownNodeText(node: MarkdownAstNode): string | null {
     result += text;
   }
   return result;
-}
-
-const EDITABLE_MARKDOWN_TYPES = new Set([
-  "blockquote",
-  "delete",
-  "emphasis",
-  "heading",
-  "inlineCode",
-  "link",
-  "list",
-  "strong",
-]);
-
-function hasEditableMarkdownPresentation(node: MarkdownAstNode): boolean {
-  if (EDITABLE_MARKDOWN_TYPES.has(node.type)) return true;
-  return node.children?.some(hasEditableMarkdownPresentation) ?? false;
-}
-
-function appendMarkdownMarker(parent: Node, value: string) {
-  if (!value) return;
-  const marker = document.createElement("span");
-  marker.className = "inline-markdown-marker";
-  marker.textContent = value;
-  parent.appendChild(marker);
-}
-
-function appendEditableMarkdownChildren(
-  parent: Node,
-  node: MarkdownAstNode,
-  source: string,
-) {
-  let offset = node.position.start.offset;
-  for (const child of node.children ?? []) {
-    appendMarkdownMarker(parent, source.slice(offset, child.position.start.offset));
-    appendEditableMarkdownNode(parent, child, source);
-    offset = child.position.end.offset;
-  }
-  appendMarkdownMarker(parent, source.slice(offset, node.position.end.offset));
-}
-
-function appendEditableMarkdownNode(parent: Node, node: MarkdownAstNode, source: string) {
-  if (node.type === "text") {
-    parent.appendChild(document.createTextNode(
-      source.slice(node.position.start.offset, node.position.end.offset),
-    ));
-    return;
-  }
-  if (node.type === "inlineCode") {
-    const raw = source.slice(node.position.start.offset, node.position.end.offset);
-    const value = node.value ?? "";
-    const valueOffset = raw.indexOf(value);
-    if (valueOffset < 0) {
-      parent.appendChild(document.createTextNode(raw));
-      return;
-    }
-    const code = document.createElement("code");
-    appendMarkdownMarker(parent, raw.slice(0, valueOffset));
-    code.append(document.createTextNode(value));
-    parent.appendChild(code);
-    appendMarkdownMarker(parent, raw.slice(valueOffset + value.length));
-    return;
-  }
-
-  const tag = node.type === "paragraph"
-    ? "p"
-    : node.type === "heading"
-      ? `h${node.depth ?? 1}`
-      : node.type === "strong"
-        ? "strong"
-        : node.type === "emphasis"
-          ? "em"
-          : node.type === "delete"
-            ? "del"
-            : node.type === "blockquote"
-              ? "blockquote"
-              : node.type === "list"
-                ? node.ordered ? "ol" : "ul"
-                : node.type === "listItem"
-                  ? "li"
-                  : node.type === "link"
-                    ? "span"
-                    : null;
-  if (!tag) {
-    parent.appendChild(document.createTextNode(
-      source.slice(node.position.start.offset, node.position.end.offset),
-    ));
-    return;
-  }
-  const element = document.createElement(tag);
-  if (node.type === "link") element.className = "inline-markdown-link";
-  if (["strong", "emphasis", "delete", "link"].includes(node.type) && node.children?.length) {
-    const firstChild = node.children[0];
-    const lastChild = node.children[node.children.length - 1];
-    appendMarkdownMarker(parent, source.slice(node.position.start.offset, firstChild.position.start.offset));
-    appendEditableMarkdownChildren(element, {
-      ...node,
-      position: {
-        start: { offset: firstChild.position.start.offset },
-        end: { offset: lastChild.position.end.offset },
-      },
-    }, source);
-    parent.appendChild(element);
-    appendMarkdownMarker(parent, source.slice(lastChild.position.end.offset, node.position.end.offset));
-    return;
-  }
-  appendEditableMarkdownChildren(element, node, source);
-  parent.appendChild(element);
-}
-
-function editableMarkdownFragment(source: string): DocumentFragment | null {
-  const root = inlineMediaMarkdownParser.parse(source) as MarkdownAstNode;
-  if (
-    !hasEditableMarkdownPresentation(root)
-    && (root.children?.length ?? 0) < 2
-  ) return null;
-  const fragment = document.createDocumentFragment();
-  appendEditableMarkdownChildren(fragment, {
-    ...root,
-    position: {
-      start: { offset: 0 },
-      end: { offset: source.length },
-    },
-  }, source);
-  return fragment;
 }
 
 function composerReferenceFromNode(
@@ -1425,23 +1299,13 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
 
       for (const segment of segments) {
         nativeSegments.current.set(segment.id, segment);
-        const markdown = segment.type === "text" && segment.text
-          ? editableMarkdownFragment(segment.text)
-          : null;
-        const element = document.createElement(markdown ? "div" : "span");
+        const element = document.createElement("span");
         element.dataset.inlineMediaSegment = segment.id;
         if (segment.type === "text") {
-          element.className = markdown
-            ? "inline-media-text issue-description-document inline-markdown-editor"
-            : "inline-media-text";
+          element.className = "inline-media-text";
           if (segment.text) {
-            if (markdown) {
-              element.dataset.inlineMediaMarkdown = "true";
-              element.append(markdown);
-            } else {
-              element.textContent = segment.text;
-              if (segment.text.endsWith("\n")) element.append(document.createElement("br"));
-            }
+            element.textContent = segment.text;
+            if (segment.text.endsWith("\n")) element.append(document.createElement("br"));
           } else {
             element.dataset.inlineMediaEmptyText = "true";
             element.append(document.createTextNode(EMPTY_TEXT_CARET), document.createElement("br"));
@@ -1738,26 +1602,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         if (!element) continue;
         const length = segmentLength(segment);
         if (segment.type === "text" && offset <= current + length) {
-          const targetOffset = Math.max(0, Math.min(offset - current, length));
-          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-          let textOffset = 0;
-          let textNode = walker.nextNode();
-          while (textNode instanceof Text) {
-            const nextOffset = textOffset + textNode.length;
-            if (targetOffset <= nextOffset) {
-              const marker = textNode.parentElement?.closest<HTMLElement>(".inline-markdown-marker");
-              if (marker && element.contains(marker) && marker.parentNode) {
-                const markerParent = marker.parentNode;
-                const markerIndex = Array.from(markerParent.childNodes).indexOf(marker);
-                return {
-                  node: markerParent,
-                  offset: markerIndex + (targetOffset > textOffset ? 1 : 0),
-                };
-              }
-              return { node: textNode, offset: targetOffset - textOffset };
-            }
-            textOffset = nextOffset;
-            textNode = walker.nextNode();
+          const textNode = element.firstChild;
+          if (textNode instanceof Text) {
+            return { node: textNode, offset: Math.max(0, Math.min(offset - current, textNode.length)) };
           }
           return { node: element, offset: 0 };
         }
@@ -2300,17 +2147,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     function syncSegmentsFromDom() {
       const root = rootRef.current;
       if (!root) return;
-      const selectionOffset = currentLogicalRange()?.end ?? null;
       const existing = nativeSegments.current;
       for (const segment of segments) existing.set(segment.id, segment);
       const directText = directRootTextSegment();
       const next: InlineMediaSegment[] = [];
       const nextAtomHosts = new Map<string, HTMLElement>();
-      let refreshMarkdown = false;
       for (const child of root.childNodes) {
         if (child instanceof Text) {
           if (child.data) {
-            refreshMarkdown = refreshMarkdown || editableMarkdownFragment(child.data) !== null;
             next.push(directText ? { ...directText, text: child.data } : textSegment(child.data));
           }
           continue;
@@ -2333,9 +2177,6 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
               delete child.dataset.inlineMediaEmptyText;
             }
           }
-          refreshMarkdown = refreshMarkdown
-            || child.dataset.inlineMediaMarkdown === "true"
-            || editableMarkdownFragment(text) !== null;
           next.push({ ...segment, text });
         } else if (segment) {
           next.push(segment);
@@ -2353,8 +2194,8 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const normalized = normalizeSegments(next);
       for (const segment of normalized) existing.set(segment.id, segment);
       atomHosts.current = nextAtomHosts;
-      nativeInputPending.current = !refreshMarkdown;
-      pendingSelection.current = refreshMarkdown ? selectionOffset : null;
+      nativeInputPending.current = true;
+      pendingSelection.current = null;
       pendingMentionUpdate.current = true;
       onChange(normalized);
     }
