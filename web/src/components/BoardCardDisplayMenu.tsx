@@ -16,7 +16,6 @@ export type BoardStatusPlacement = "main" | "sidebar" | "hidden";
 export interface BoardDisplaySettings {
   cover: boolean;
   body: boolean;
-  hideBlockedWhenEmpty: boolean;
   mainStatuses: OtherTaskTab[];
   sidebarStatuses: OtherTaskTab[];
   hiddenStatuses: OtherTaskTab[];
@@ -25,7 +24,6 @@ export interface BoardDisplaySettings {
 export const DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
   cover: true,
   body: false,
-  hideBlockedWhenEmpty: true,
   mainStatuses: [...MAIN_STATUSES],
   sidebarStatuses: [...SECONDARY_STATUSES, "archived"],
   hiddenStatuses: [],
@@ -312,6 +310,8 @@ export function BoardCardDisplayMenu({
                         : <StatusIcon status={status as TaskStatus} color="var(--display-status-color)" size={15} />}
                       <span>{status === "archived"
                         ? text("已归档", "Archived")
+                        : status === "blocked"
+                          ? text("遇到阻碍（默认隐藏）", "Blocked (hidden by default)")
                         : taskStatusLabel(language, status)}</span>
                     </div>
                   );
@@ -319,29 +319,6 @@ export function BoardCardDisplayMenu({
               </div>
             </section>
           ))}
-        </div>
-
-        <div className="project-automation-switch display-settings-option">
-          <span>{text(
-            "无阻塞时隐藏「遇到阻碍」栏",
-            "Hide the “Blocked” column when empty",
-          )}</span>
-          <button
-            type="button"
-            className={"board-setting-switch" + (settings.hideBlockedWhenEmpty ? " is-on" : "")}
-            role="switch"
-            aria-label={text(
-              "无阻塞时隐藏「遇到阻碍」栏",
-              "Hide the “Blocked” column when empty",
-            )}
-            aria-checked={settings.hideBlockedWhenEmpty}
-            onClick={() => onChange({
-              ...settings,
-              hideBlockedWhenEmpty: !settings.hideBlockedWhenEmpty,
-            })}
-          >
-            <span aria-hidden="true" />
-          </button>
         </div>
 
         <footer className="display-settings-footer">

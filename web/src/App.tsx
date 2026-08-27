@@ -867,10 +867,8 @@ export function App() {
   const selectedProject = projects.find((project) => project.id === selectedProjectId) ?? null;
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
-  const boardDisplaySettings = {
-    ...DEFAULT_BOARD_DISPLAY_SETTINGS,
-    ...projectBoardDisplaySettings[selectedProjectId],
-  };
+  const boardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
+    ?? DEFAULT_BOARD_DISPLAY_SETTINGS;
   const automationModels = automationCatalog && automationCatalog.projectId === selectedProject?.id
     ? automationCatalog.models
     : [];
@@ -2211,11 +2209,10 @@ export function App() {
     ) as Record<TaskStatus, Task[]>;
   }, [filteredTasks]);
 
-  const showBlockedColumn = !boardDisplaySettings.hideBlockedWhenEmpty
-    || !hasLoadedTasks
-    || tasks.some((task) => task.status === "blocked");
   const mainBoardItems = boardDisplaySettings.mainStatuses.filter(
-    (status) => status !== "blocked" || showBlockedColumn,
+    (status) => status !== "blocked"
+      || !hasLoadedTasks
+      || tasks.some((task) => task.status === "blocked"),
   );
   const mainColumnCount = Math.max(mainBoardItems.length, 1);
   const mainBoardMinWidth = (mainColumnCount * 300) + ((mainColumnCount - 1) * 24);
