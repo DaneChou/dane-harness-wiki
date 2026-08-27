@@ -284,7 +284,7 @@ export async function getAiChatCatalog(
   signal?: AbortSignal,
   codexProjectIdentity?: CodexProjectIdentity | null,
 ): Promise<AiChatCatalog> {
-  const query = new URLSearchParams({ projectId });
+  const query = new URLSearchParams();
   if (codexProjectIdentity) {
     query.set("codexProjectId", codexProjectIdentity.codexProjectId);
     query.set("codexProjectKind", codexProjectIdentity.codexProjectKind);
@@ -292,7 +292,7 @@ export async function getAiChatCatalog(
     query.set("workspacePath", codexProjectIdentity.workspacePath);
   }
   return request<AiChatCatalog>(
-    `/api/local/ai/catalog?${query}`,
+    `/api/local/ai/catalog?projectId=${encodeURIComponent(projectId)}${query.size ? `&${query}` : ""}`,
     { signal },
   );
 }
