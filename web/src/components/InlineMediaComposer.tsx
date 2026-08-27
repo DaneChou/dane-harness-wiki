@@ -969,12 +969,12 @@ function AttachmentBlock({
       contentEditable={false}
       data-inline-media-segment={segment.id}
     >
-      <span className="inline-media-attachment-icon" aria-hidden="true">
+      <span className="attachment-file-icon" aria-hidden="true">
         <LinearIcon name="file" />
       </span>
-      <span className="inline-media-attachment-copy">
+      <span className="attachment-copy">
         <strong>{filename}</strong>
-        {size !== null && <small>{fileSize(size)}</small>}
+        {size !== null && <span>{fileSize(size)}</span>}
       </span>
       <button
         type="button"
@@ -1771,6 +1771,41 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         onKeyDown?.(event);
         return;
       }
+      if (event.key === "Backspace" || event.key === "Delete") {
+        const selectedRange = currentLogicalRange();
+        if (selectedRange && selectedRange.start === selectedRange.end) {
+          let offset = 0;
+          for (const segment of segments) {
+            const nextOffset = offset + segmentLength(segment);
+            const media = segment.type === "pending-image"
+              || segment.type === "persisted-image"
+              || segment.type === "pending-attachment"
+              || segment.type === "persisted-attachment";
+            if (
+              media
+              && (
+                (event.key === "Backspace" && nextOffset === selectedRange.start)
+                || (event.key === "Delete" && offset === selectedRange.start)
+              )
+            ) {
+              const startPoint = domPointAtOffset(offset);
+              const endPoint = domPointAtOffset(nextOffset);
+              const selection = window.getSelection();
+              if (!startPoint || !endPoint || !selection) return;
+              event.preventDefault();
+              const range = document.createRange();
+              range.setStart(startPoint.node, startPoint.offset);
+              range.setEnd(endPoint.node, endPoint.offset);
+              selection.removeAllRanges();
+              selection.addRange(range);
+              syncAtomSelection();
+              setCompletionQuery(null);
+              return;
+            }
+            offset = nextOffset;
+          }
+        }
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "a") {
         event.preventDefault();
         const root = rootRef.current;
@@ -1844,9 +1879,29 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const startElement = segmentElement(targetRange.startContainer);
       const endElement = segmentElement(targetRange.endContainer);
       let backwardImageDelete = false;
-      const caretRange = input.inputType === "deleteContentBackward"
-        ? currentLogicalRange()
-        : null;
+      const selectedRange = input.inputType.startsWith("delete") ? currentLogicalRange() : null;
+      let nativeAtomDelete = false;
+      if (selectedRange && selectedRange.start < selectedRange.end) {
+        let offset = 0;
+        for (const segment of segments) {
+          const nextOffset = offset + segmentLength(segment);
+          if (
+            selectedRange.start === offset
+            && selectedRange.end === nextOffset
+            && (
+              segment.type === "pending-image"
+              || segment.type === "persisted-image"
+              || segment.type === "pending-attachment"
+              || segment.type === "persisted-attachment"
+            )
+          ) {
+            nativeAtomDelete = true;
+            break;
+          }
+          offset = nextOffset;
+        }
+      }
+      const caretRange = input.inputType === "deleteContentBackward" ? selectedRange : null;
       if (
         input.inputType === "deleteContentBackward"
         && caretRange
@@ -1886,7 +1941,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       const sameTextSegment = targetSegment?.type === "text"
         && (directTextTarget || startElement === endElement);
       const fullDelete = start === 0 && end > start && end === segmentsLength(segments);
-      const nativeTextEdit = !backwardImageDelete && (
+      const nativeTextEdit = nativeAtomDelete || (!backwardImageDelete && (
         (
           sameTextSegment
           && (
@@ -1897,7 +1952,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           input.inputType.startsWith("delete")
           && fullDelete
         )
-      );
+      ));
       if (nativeTextEdit) return;
       let insertion: InlineMediaSegment[] | null = null;
       if (["insertText", "insertReplacementText"].includes(input.inputType)) {
@@ -1979,14 +2034,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     }
 
     function dragContent(event: DragEvent<HTMLDivElement>) {
-      if (Array.from(event.dataTransfer.items).some((item) => (
-        item.kind === "file" && item.type.startsWith("image/")
-      ))) event.preventDefault();
+      if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) {
+        event.preventDefault();
+      }
     }
 
     function dropContent(event: DragEvent<HTMLDivElement>) {
-      const images = insertableImages(event.dataTransfer.files);
-      if (!images || images.length === 0) return;
+      const files = insertableFiles(event.dataTransfer.files);
+      if (!files || files.length === 0) return;
       event.preventDefault();
       const caretRange = (document as Document & {
         caretRangeFromPoint?: (x: number, y: number) => Range | null;
@@ -1998,7 +2053,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       applyRangeReplacement(
         insertionOffset,
         insertionOffset,
-        images.map((file) => imageSegment(file)),
+        files.map((file) => (
+          file.type.startsWith("image/") ? imageSegment(file) : attachmentSegment(file)
+        )),
         false,
       );
     }

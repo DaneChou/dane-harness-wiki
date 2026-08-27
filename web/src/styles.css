@@ -3026,69 +3026,8 @@ kbd {
 
 .issue-description-document a.issue-reference-link:has(> .document-attachment-card) {
   display: block;
-  margin: 6px 0;
+  margin: 0;
   color: inherit;
-}
-
-.document-attachment-card,
-.inline-media-attachment {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  min-width: 0;
-  gap: 10px;
-  padding: 10px 12px;
-  border: var(--border-hairline) solid var(--border);
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
-  color: var(--text-primary);
-}
-
-.document-attachment-card:hover {
-  border-color: var(--border-strong);
-  background: var(--surface-hover);
-}
-
-.document-attachment-icon,
-.inline-media-attachment-icon {
-  display: grid;
-  flex: 0 0 auto;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: var(--surface-active);
-  color: var(--text-secondary);
-}
-
-.document-attachment-icon svg,
-.inline-media-attachment-icon svg {
-  width: 16px;
-  height: 16px;
-}
-
-.document-attachment-copy,
-.inline-media-attachment-copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-  line-height: 18px;
-}
-
-.document-attachment-copy strong,
-.inline-media-attachment-copy strong {
-  overflow: hidden;
-  font-size: 13px;
-  font-weight: 560;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.document-attachment-copy small,
-.inline-media-attachment-copy small {
-  color: var(--text-tertiary);
-  font-size: 11px;
 }
 
 .issue-reference-inline {
@@ -3303,6 +3242,10 @@ kbd {
 }
 
 .issue-description-document img[src*="/api/attachments/"] + br {
+  display: none;
+}
+
+.issue-description-document a.issue-reference-link:has(> .document-attachment-card) + br {
   display: none;
 }
 
@@ -3805,7 +3748,9 @@ kbd {
   list-style: none;
 }
 
-.attachment-list li {
+.attachment-list li,
+.document-attachment-card,
+.inline-media-attachment {
   position: relative;
   display: flex;
   align-items: center;
@@ -3818,7 +3763,9 @@ kbd {
 }
 
 .attachment-list li:hover,
-.attachment-list li:focus-within {
+.attachment-list li:focus-within,
+.document-attachment-card:hover,
+.inline-media-attachment:focus-within {
   border-color: color-mix(in srgb, var(--border) 70%, transparent);
   background: color-mix(in srgb, var(--surface-active) 64%, var(--surface-muted));
 }
@@ -5947,7 +5894,7 @@ kbd {
 }
 
 .inline-media-attachment {
-  margin: 6px 0;
+  margin: 0;
 }
 
 .inline-media-attachment > button {

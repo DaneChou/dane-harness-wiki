@@ -85,12 +85,12 @@ export function DescriptionDocument({
         if (attachment) {
           return (
             <span className="document-attachment-card">
-              <span className="document-attachment-icon" aria-hidden="true">
+              <span className="attachment-file-icon" aria-hidden="true">
                 <LinearIcon name="file" />
               </span>
-              <span className="document-attachment-copy">
+              <span className="attachment-copy">
                 <strong>{attachment.filename}</strong>
-                <small>{fileSize(attachment.size)}</small>
+                <span>{fileSize(attachment.size)}</span>
               </span>
             </span>
           );

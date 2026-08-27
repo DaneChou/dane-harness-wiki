@@ -334,12 +334,10 @@ function ConversationLink({
   threadId,
   onOpen,
   onCopy,
-  showThreadId = true,
 }: {
   threadId: string;
   onOpen: () => void;
   onCopy: (text: string, announcement: string) => void;
-  showThreadId?: boolean;
 }) {
   const { text } = useTaskboardI18n();
   return (
@@ -347,17 +345,11 @@ function ConversationLink({
       <button
         className="issue-conversation-link"
         type="button"
-        title={text(`查看对话 ${threadId}`, `View conversation ${threadId}`)}
+        title={text("查看对话", "View conversation")}
         onClick={onOpen}
       >
         <ConversationIcon color="currentColor" size={16} />
         <strong>{text("查看对话", "View conversation")}</strong>
-        {showThreadId && (
-          <>
-            <span className="conversation-divider" aria-hidden="true" />
-            <span className="conversation-thread-id">{threadId}</span>
-          </>
-        )}
       </button>
       <button
         className="issue-conversation-copy"
@@ -581,6 +573,44 @@ export function TaskDetail({
     } finally {
       setSavingProperty(null);
     }
+  }
+
+  function openDatePicker(
+    field: "startDate" | "dueDate",
+    event: MouseEvent<HTMLLabelElement>,
+  ) {
+    const input = event.currentTarget.querySelector("input");
+    if (!input || input.disabled) return;
+    event.preventDefault();
+    if (new URL(document.baseURI).searchParams.get("host") !== "codex" || window.parent === window) {
+      input.showPicker();
+      return;
+    }
+
+    const requestId = crypto.randomUUID();
+    const rect = input.getBoundingClientRect();
+    function receiveDate(event: MessageEvent) {
+      if (event.source !== window.parent || event.data?.type !== "taskboard:date-picker-response") return;
+      const payload = event.data.payload;
+      if (payload?.requestId !== requestId || typeof payload.value !== "string") return;
+      window.removeEventListener("message", receiveDate);
+      const value = payload.value || null;
+      void saveTask(
+        field === "startDate"
+          ? { startDate: value }
+          : { dueDate: value, ...(value ? {} : { recurrence: null }) },
+        field,
+      );
+    }
+    window.addEventListener("message", receiveDate);
+    postEmbeddedHostMessage({
+      type: "taskboard:date-picker-request",
+      payload: {
+        requestId,
+        value: input.value,
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+      },
+    });
   }
 
   async function applyRelationMutation(
@@ -1076,7 +1106,6 @@ export function TaskDetail({
                         ? onOpenThread(currentTask.threadBinding)
                         : onOpenLegacyLocalThread(currentTask.legacyLocalThreadId!)}
                       onCopy={onCopy}
-                      showThreadId={false}
                     />
                   </div>
                 )}
@@ -1643,7 +1672,10 @@ export function TaskDetail({
                 }, "developmentContext")}
               />
             </div>
-            <label className="detail-property-row detail-date-property-row">
+            <label
+              className="detail-property-row detail-date-property-row"
+              onClick={(event) => openDatePicker("startDate", event)}
+            >
               <span className="detail-property-icon" aria-hidden="true"><DueDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("开始日期", "Start date")}</span>
               <input
@@ -1655,7 +1687,10 @@ export function TaskDetail({
                 }, "startDate")}
               />
             </label>
-            <label className="detail-property-row detail-date-property-row">
+            <label
+              className="detail-property-row detail-date-property-row"
+              onClick={(event) => openDatePicker("dueDate", event)}
+            >
               <span className="detail-property-icon" aria-hidden="true"><DueDateIcon color="currentColor" size={14} /></span>
               <span className="detail-property-label">{text("截止日期", "Due date")}</span>
               <input
