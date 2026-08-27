@@ -1,12 +1,13 @@
-import type { ClipboardEvent } from "react";
+import type { ClipboardEvent, MouseEvent } from "react";
 import { readIssueIdentifier } from "../issueRoute";
-import type { Task, TaskRelationSummary } from "../types";
+import type { Attachment, Task, TaskRelationSummary } from "../types";
 import { STATUS_DETAILS } from "./BoardColumn";
 import {
   createInlineMediaSegmentsFromHtml,
   writeInlineMediaClipboard,
 } from "./InlineMediaComposer";
 import { MarkdownDocument } from "./MarkdownDocument";
+import { LinearIcon } from "./LinearIcon";
 import { StatusIcon } from "./SemanticIcons";
 
 function referencedTask(
@@ -31,14 +32,31 @@ function referencedTask(
   }
 }
 
+function referencedAttachment(href: string, attachments: Attachment[]): Attachment | null {
+  const match = new URL(href, document.baseURI).pathname.match(/\/api\/attachments\/([^/]+)\/download$/);
+  if (!match) return null;
+  const id = decodeURIComponent(match[1]);
+  return attachments.find((attachment) => attachment.id === id) ?? null;
+}
+
+function fileSize(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
 export function DescriptionDocument({
   value,
   referenceTasks,
   onOpenTask,
+  attachments = [],
+  onOpenAttachment,
 }: {
   value: string;
   referenceTasks: Task[];
   onOpenTask: (task: TaskRelationSummary) => void;
+  attachments?: Attachment[];
+  onOpenAttachment?: (event: MouseEvent<HTMLAnchorElement>, attachment: Attachment) => void;
 }) {
   return (
     <MarkdownDocument
@@ -63,6 +81,20 @@ export function DescriptionDocument({
         );
       }}
       renderLink={(href) => {
+        const attachment = href ? referencedAttachment(href, attachments) : null;
+        if (attachment) {
+          return (
+            <span className="document-attachment-card">
+              <span className="document-attachment-icon" aria-hidden="true">
+                <LinearIcon name="file" />
+              </span>
+              <span className="document-attachment-copy">
+                <strong>{attachment.filename}</strong>
+                <small>{fileSize(attachment.size)}</small>
+              </span>
+            </span>
+          );
+        }
         const reference = href ? referencedTask(href, referenceTasks) : null;
         if (!reference) return null;
         const { task } = reference;
@@ -88,6 +120,17 @@ export function DescriptionDocument({
         );
       }}
       onLinkClick={(event, href) => {
+        const attachment = href ? referencedAttachment(href, attachments) : null;
+        if (attachment && onOpenAttachment) {
+          if (
+            event.button === 0
+            && !event.metaKey
+            && !event.ctrlKey
+            && !event.shiftKey
+            && !event.altKey
+          ) onOpenAttachment(event, attachment);
+          return;
+        }
         const reference = href ? referencedTask(href, referenceTasks) : null;
         if (
           !reference

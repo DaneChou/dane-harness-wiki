@@ -2932,6 +2932,10 @@ kbd {
   min-height: 42px;
 }
 
+.issue-description-attach-button {
+  margin-top: 4px;
+}
+
 .issue-description-read {
   border: var(--border-hairline) solid transparent;
   border-radius: 7px;
@@ -3018,6 +3022,73 @@ kbd {
 
 .issue-description-document a.issue-reference-link:hover {
   text-decoration: none;
+}
+
+.issue-description-document a.issue-reference-link:has(> .document-attachment-card) {
+  display: block;
+  margin: 6px 0;
+  color: inherit;
+}
+
+.document-attachment-card,
+.inline-media-attachment {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  gap: 10px;
+  padding: 10px 12px;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-raised) 88%, transparent);
+  color: var(--text-primary);
+}
+
+.document-attachment-card:hover {
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+}
+
+.document-attachment-icon,
+.inline-media-attachment-icon {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  background: var(--surface-active);
+  color: var(--text-secondary);
+}
+
+.document-attachment-icon svg,
+.inline-media-attachment-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.document-attachment-copy,
+.inline-media-attachment-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  line-height: 18px;
+}
+
+.document-attachment-copy strong,
+.inline-media-attachment-copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 560;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.document-attachment-copy small,
+.inline-media-attachment-copy small {
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .issue-reference-inline {
@@ -5848,6 +5919,10 @@ kbd {
   display: block;
 }
 
+.inline-media-attachment-atom {
+  display: block;
+}
+
 .inline-media-atom.is-range-selected > .inline-media-issue-reference {
   background: color-mix(in srgb, var(--accent) 14%, var(--surface));
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 58%, transparent);
@@ -5863,6 +5938,39 @@ kbd {
   outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
   outline-offset: 2px;
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.inline-media-attachment-atom.is-range-selected > .inline-media-attachment {
+  outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.inline-media-attachment {
+  margin: 6px 0;
+}
+
+.inline-media-attachment > button {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.inline-media-attachment > button:hover:not(:disabled) {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.inline-media-attachment > button svg {
+  width: 11px;
+  height: 11px;
 }
 
 .inline-media-issue-reference {

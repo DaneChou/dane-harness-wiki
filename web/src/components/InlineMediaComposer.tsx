@@ -17,6 +17,7 @@ import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
 import type {
+  Attachment,
   ComposerCandidate,
   ComposerCandidatesResponse,
   ComposerSurface,
@@ -25,6 +26,7 @@ import type {
 } from "../types";
 import {
   attachmentContentUrl,
+  attachmentDownloadUrl,
   getAiChatComposerCandidates,
   resolvePersistedAttachmentUrl,
 } from "../api";
@@ -63,6 +65,21 @@ interface PersistedImageSegment {
   type: "persisted-image";
   markdown: string;
   alt: string;
+  url: string;
+}
+
+interface PendingAttachmentSegment {
+  id: string;
+  type: "pending-attachment";
+  token: string;
+  file: File;
+}
+
+interface PersistedAttachmentSegment {
+  id: string;
+  type: "persisted-attachment";
+  markdown: string;
+  filename: string;
   url: string;
 }
 
@@ -108,15 +125,18 @@ export type InlineMediaSegment =
   | InlineTextSegment
   | InlineImageSegment
   | PersistedImageSegment
+  | PendingAttachmentSegment
+  | PersistedAttachmentSegment
   | IssueReferenceSegment
   | InlineComposerReferenceSegment
   | InlineUnsupportedComposerReferenceSegment;
 export type PendingInlineImage = InlineImageSegment;
+export type PendingInlineAttachment = PendingAttachmentSegment;
 type InlineMediaError = string | readonly [string, string];
 
 export interface InlineMediaComposerHandle {
   focus: () => void;
-  addImages: (files: FileList | File[]) => void;
+  addFiles: (files: FileList | File[]) => void;
 }
 
 export interface InlineMediaCompletionContext {
@@ -211,6 +231,16 @@ function imageSegment(file: File, dataUrl: string | null = null): InlineImageSeg
     reader.readAsDataURL(file);
   }
   return segment;
+}
+
+function attachmentSegment(file: File): PendingAttachmentSegment {
+  const id = segmentId("attachment");
+  return {
+    id,
+    type: "pending-attachment",
+    token: `<!--taskboard-inline-attachment:${id}-->`,
+    file,
+  };
 }
 
 const COMPOSER_REFERENCE_URL = /^taskboard:\/\/composer-reference\/v1\/(skill|agent)\/([A-Za-z0-9_-]+)$/;
@@ -332,6 +362,13 @@ export function createInlineMediaSegments(
         markdown?: string;
       }
     | {
+        type: "persisted-attachment";
+        start: number;
+        end: number;
+        filename: string;
+        url: string;
+      }
+    | {
         type: "issue-reference";
         start: number;
         end: number;
@@ -387,8 +424,22 @@ export function createInlineMediaSegments(
         });
       }
     }
+    let handledAttachment = false;
     let handledIssueReference = false;
     if (node.type === "link" && node.url) {
+      if (/^\/?api\/attachments\/[^/?#]+\/download$/.test(node.url)) {
+        const filename = markdownNodeText(node);
+        if (filename) {
+          items.push({
+            type: "persisted-attachment",
+            start: node.position.start.offset,
+            end: node.position.end.offset,
+            filename,
+            url: node.url,
+          });
+          handledAttachment = true;
+        }
+      }
       const projectId = node.url.startsWith("?")
         ? new URLSearchParams(node.url).get("project")
         : null;
@@ -410,7 +461,9 @@ export function createInlineMediaSegments(
         handledIssueReference = true;
       }
     }
-    const composerReference = handledIssueReference ? null : composerReferenceFromNode(node, text);
+    const composerReference = handledAttachment || handledIssueReference
+      ? null
+      : composerReferenceFromNode(node, text);
     if (composerReference) items.push(composerReference);
     if (node.children) nodes.push(...node.children);
   }
@@ -428,6 +481,14 @@ export function createInlineMediaSegments(
         type: "persisted-image",
         markdown: item.markdown ?? text.slice(item.start, item.end),
         alt: item.alt,
+        url: item.url,
+      });
+    } else if (item.type === "persisted-attachment") {
+      segments.push({
+        id: segmentId("attachment"),
+        type: "persisted-attachment",
+        markdown: text.slice(item.start, item.end),
+        filename: item.filename,
         url: item.url,
       });
     } else if (item.type === "issue-reference") {
@@ -463,14 +524,14 @@ export function createInlineMediaSegments(
   const normalized = normalizeSegments(segments);
   return normalized.map((segment, index) => {
     if (segment.type !== "text") return segment;
-    const previousIsImage = isTaskboardAttachmentImage(normalized[index - 1]);
-    const nextIsImage = isTaskboardAttachmentImage(normalized[index + 1]);
+    const previousIsMedia = isTaskboardAttachmentMedia(normalized[index - 1]);
+    const nextIsMedia = isTaskboardAttachmentMedia(normalized[index + 1]);
     let value = segment.text;
-    if (previousIsImage && nextIsImage && /^\n+$/.test(value)) {
+    if (previousIsMedia && nextIsMedia && /^\n+$/.test(value)) {
       value = value.slice(1);
     } else {
-      if (previousIsImage && value.startsWith("\n")) value = value.slice(1);
-      if (nextIsImage && value.endsWith("\n")) value = value.slice(0, -1);
+      if (previousIsMedia && value.startsWith("\n")) value = value.slice(1);
+      if (nextIsMedia && value.endsWith("\n")) value = value.slice(0, -1);
     }
     return value === segment.text ? segment : { ...segment, text: value };
   });
@@ -478,6 +539,12 @@ export function createInlineMediaSegments(
 
 export function inlineMediaImages(segments: InlineMediaSegment[]): PendingInlineImage[] {
   return segments.filter((segment): segment is PendingInlineImage => segment.type === "pending-image");
+}
+
+export function inlineMediaFiles(segments: InlineMediaSegment[]): PendingInlineAttachment[] {
+  return segments.filter((segment): segment is PendingInlineAttachment => (
+    segment.type === "pending-attachment"
+  ));
 }
 
 export function inlineMediaComposerReferences(
@@ -495,13 +562,16 @@ export function inlineMediaComposerReferences(
 export function inlineMediaText(segments: InlineMediaSegment[]): string {
   return segments.map((segment) => {
     if (segment.type === "text") return segment.text;
-    if (segment.type === "pending-image") return "";
+    if (segment.type === "pending-image" || segment.type === "pending-attachment") return "";
     return segment.markdown;
   }).join("");
 }
 
-function isTaskboardAttachmentImage(segment: InlineMediaSegment | undefined): boolean {
-  return segment?.type === "pending-image" || (
+function isTaskboardAttachmentMedia(segment: InlineMediaSegment | undefined): boolean {
+  return segment?.type === "pending-image"
+    || segment?.type === "pending-attachment"
+    || segment?.type === "persisted-attachment"
+    || (
     segment?.type === "persisted-image"
     && /^\/?api\/attachments\/[^/?#]+\/content$/.test(segment.url)
   );
@@ -512,34 +582,34 @@ function serializeInlineMediaSegments(
   segmentValue: (segment: InlineMediaSegment) => string,
 ): string {
   let markdown = "";
-  let previousWasImage = false;
-  let sharedImageBoundary = false;
+  let previousWasMedia = false;
+  let sharedMediaBoundary = false;
   segments.forEach((segment, index) => {
     const value = segmentValue(segment);
     if (
       segment.type === "text"
-      && isTaskboardAttachmentImage(segments[index - 1])
-      && isTaskboardAttachmentImage(segments[index + 1])
+      && isTaskboardAttachmentMedia(segments[index - 1])
+      && isTaskboardAttachmentMedia(segments[index + 1])
       && /^\n*$/.test(value)
     ) {
       markdown += `\n${value}`;
-      previousWasImage = false;
-      sharedImageBoundary = true;
+      previousWasMedia = false;
+      sharedMediaBoundary = true;
       return;
     }
     if (!value) return;
-    const isImage = isTaskboardAttachmentImage(segment);
-    if (isImage) {
-      if (markdown && !sharedImageBoundary) markdown += "\n";
+    const isMedia = isTaskboardAttachmentMedia(segment);
+    if (isMedia) {
+      if (markdown && !sharedMediaBoundary) markdown += "\n";
       markdown += value;
-      previousWasImage = true;
-      sharedImageBoundary = false;
+      previousWasMedia = true;
+      sharedMediaBoundary = false;
       return;
     }
-    if (previousWasImage) markdown += "\n";
+    if (previousWasMedia) markdown += "\n";
     markdown += value;
-    previousWasImage = false;
-    sharedImageBoundary = false;
+    previousWasMedia = false;
+    sharedMediaBoundary = false;
   });
   return markdown;
 }
@@ -550,6 +620,8 @@ export function serializeInlineMedia(segments: InlineMediaSegment[]): string {
       ? segment.text
       : segment.type === "pending-image"
         ? segment.token
+        : segment.type === "pending-attachment"
+          ? segment.token
         : segment.markdown
   ));
 }
@@ -566,6 +638,22 @@ export function resolveInlineMediaMarkdown(
     return markdown.replace(
       image.token,
       `![${alt}](${attachmentContentUrl(attachment)})`,
+    );
+  }, value);
+}
+
+export function resolveInlineAttachmentMarkdown(
+  value: string,
+  files: PendingInlineAttachment[],
+  attachments: Attachment[],
+): string {
+  return files.reduce((markdown, file, index) => {
+    const attachment = attachments[index];
+    if (!attachment) return markdown;
+    const filename = file.file.name.replace(/[\\[\]]/g, "\\$&");
+    return markdown.replace(
+      file.token,
+      `[${filename}](${attachmentDownloadUrl(attachment)})`,
     );
   }, value);
 }
@@ -642,6 +730,7 @@ function inlineMediaClipboardText(segments: InlineMediaSegment[]): string {
     if (segment.type === "pending-image") {
       return pendingImageClipboardMarkdown(segment) ?? segment.file.name;
     }
+    if (segment.type === "pending-attachment") return segment.file.name;
     return segment.markdown;
   });
 }
@@ -859,6 +948,50 @@ function PersistedImageBlock({
       </button>
     </figure>
   );
+}
+
+function AttachmentBlock({
+  segment,
+  disabled,
+  onRemove,
+}: {
+  segment: PendingAttachmentSegment | PersistedAttachmentSegment;
+  disabled: boolean;
+  onRemove: () => void;
+}) {
+  const { text } = useTaskboardI18n();
+  const filename = segment.type === "pending-attachment" ? segment.file.name : segment.filename;
+  const size = segment.type === "pending-attachment" ? segment.file.size : null;
+
+  return (
+    <span
+      className="inline-media-attachment"
+      contentEditable={false}
+      data-inline-media-segment={segment.id}
+    >
+      <span className="inline-media-attachment-icon" aria-hidden="true">
+        <LinearIcon name="file" />
+      </span>
+      <span className="inline-media-attachment-copy">
+        <strong>{filename}</strong>
+        {size !== null && <small>{fileSize(size)}</small>}
+      </span>
+      <button
+        type="button"
+        disabled={disabled}
+        aria-label={text(`移除 ${filename}`, `Remove ${filename}`)}
+        onClick={onRemove}
+      >
+        <LinearIcon name="close" />
+      </button>
+    </span>
+  );
+}
+
+function fileSize(value: number): string {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(value < 10 * 1024 ? 1 : 0)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
 function IssueReferenceChip({
@@ -1096,9 +1229,14 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         } else {
           element.className = isInlineReference(segment)
             ? "inline-media-atom"
-            : "inline-media-atom inline-media-image-atom";
-          if (segment.type === "pending-image") element.contentEditable = "false";
-          else element.dataset.taskboardInlineMediaMarkdown = segment.markdown;
+            : segment.type === "pending-attachment" || segment.type === "persisted-attachment"
+              ? "inline-media-atom inline-media-attachment-atom"
+              : "inline-media-atom inline-media-image-atom";
+          if (segment.type === "pending-image" || segment.type === "pending-attachment") {
+            element.contentEditable = "false";
+          } else {
+            element.dataset.taskboardInlineMediaMarkdown = segment.markdown;
+          }
           nextAtomHosts.set(segment.id, element);
         }
         fragment.append(element);
@@ -1218,15 +1356,45 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       return images;
     }
 
+    function insertableFiles(files: FileList | File[]): File[] | null {
+      const selected = Array.from(files);
+      if (selected.length === 0) return [];
+      const oversized = selected.find((file) => file.size > MAX_ATTACHMENT_SIZE);
+      if (oversized) {
+        onError([
+          `“${oversized.name}” 超过 25 MB，无法上传。`,
+          `“${oversized.name}” is larger than 25 MB and cannot be uploaded.`,
+        ]);
+        return null;
+      }
+      const existing = new Set([
+        ...inlineMediaImages(segments).map((image) => fileKey(image.file)),
+        ...inlineMediaFiles(segments).map((attachment) => fileKey(attachment.file)),
+      ]);
+      const selectedFiles = selected.filter((file) => {
+        const key = fileKey(file);
+        if (existing.has(key)) return false;
+        existing.add(key);
+        return true;
+      });
+      if (selectedFiles.length > 0) onError(null);
+      return selectedFiles;
+    }
+
     useImperativeHandle(ref, () => ({
       focus() {
         rootRef.current?.focus();
         setCollapsedSelection(segmentsLength(segments));
       },
-      addImages(files) {
-        const images = insertableImages(files);
-        if (!images || images.length === 0) return;
-        onChange(normalizeSegments([...segments, ...images.map((file) => imageSegment(file))]));
+      addFiles(files) {
+        const selected = insertableFiles(files);
+        if (!selected || selected.length === 0) return;
+        const insertion = selected.map((file) => (
+          file.type.startsWith("image/") ? imageSegment(file) : attachmentSegment(file)
+        ));
+        const range = currentLogicalRange();
+        if (range) applyRangeReplacement(range.start, range.end, insertion, false);
+        else onChange(normalizeSegments([...segments, ...insertion]));
       },
     }), [onChange, onError, segments]);
 
@@ -1689,7 +1857,12 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
           const nextOffset = offset + segmentLength(segment);
           if (
             nextOffset === caretRange.start
-            && (segment.type === "pending-image" || segment.type === "persisted-image")
+            && (
+              segment.type === "pending-image"
+              || segment.type === "persisted-image"
+              || segment.type === "pending-attachment"
+              || segment.type === "persisted-attachment"
+            )
           ) {
             start = offset;
             end = nextOffset;
@@ -1901,6 +2074,12 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         />
       ) : segment.type === "persisted-image" ? (
         <PersistedImageBlock
+          segment={segment}
+          disabled={disabled}
+          onRemove={() => removeSegment(segment.id)}
+        />
+      ) : segment.type === "pending-attachment" || segment.type === "persisted-attachment" ? (
+        <AttachmentBlock
           segment={segment}
           disabled={disabled}
           onRemove={() => removeSegment(segment.id)}
