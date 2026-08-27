@@ -3025,11 +3025,10 @@ kbd {
 }
 
 .issue-description-document a.issue-reference-link:has(> .document-attachment-card) {
-  display: inline-block;
-  max-width: 100%;
+  display: block;
+  width: 100%;
   margin: 0;
   color: inherit;
-  vertical-align: middle;
 }
 
 .issue-reference-inline {
@@ -3771,17 +3770,16 @@ kbd {
 .document-attachment-card,
 .inline-media-attachment {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  max-width: 100%;
+  width: 100%;
   min-width: 0;
-  min-height: 38px;
+  min-height: 44px;
   gap: 8px;
-  padding: 5px 6px 5px 8px;
-  border: var(--border-hairline) solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-muted);
-  vertical-align: middle;
+  padding: 6px 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 7px;
+  background: var(--surface);
   transition: border-color 100ms ease, background 100ms ease;
 }
 
@@ -3789,8 +3787,32 @@ kbd {
 .issue-description-document a.issue-reference-link:focus-visible > .document-attachment-card,
 .inline-media-attachment:hover,
 .inline-media-attachment:focus-within {
-  border-color: color-mix(in srgb, var(--border) 70%, transparent);
-  background: color-mix(in srgb, var(--surface-active) 64%, var(--surface-muted));
+  border-color: var(--border);
+  background: var(--surface-hover);
+}
+
+.document-attachment-card .composer-attachment-file-icon,
+.inline-media-attachment .composer-attachment-file-icon {
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.document-attachment-card .composer-attachment-file-icon svg,
+.inline-media-attachment .composer-attachment-file-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.document-attachment-card .composer-attachment-copy,
+.inline-media-attachment .composer-attachment-copy {
+  gap: 2px;
+}
+
+.document-attachment-card .composer-attachment-copy strong,
+.inline-media-attachment .composer-attachment-copy strong {
+  font-size: 11px;
 }
 
 .attachment-link {
@@ -5912,9 +5934,9 @@ kbd {
 }
 
 .inline-media-attachment-atom.is-range-selected > .inline-media-attachment {
-  outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--accent) 64%, transparent);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .inline-media-attachment {
