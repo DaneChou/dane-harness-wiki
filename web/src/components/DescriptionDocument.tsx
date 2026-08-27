@@ -1,4 +1,4 @@
-import { useState, type ClipboardEvent, type MouseEvent } from "react";
+import { useEffect, useState, type ClipboardEvent, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
 import { attachmentContentUrl } from "../api";
 import { readIssueIdentifier } from "../issueRoute";
@@ -63,6 +63,18 @@ export function DescriptionDocument({
   onOpenAttachment?: (event: MouseEvent<HTMLAnchorElement>, attachment: Attachment) => void;
 }) {
   const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
+
+  useEffect(() => {
+    if (!previewImage) return;
+    function closePreview(event: globalThis.KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setPreviewImage(null);
+    }
+    window.addEventListener("keydown", closePreview, true);
+    return () => window.removeEventListener("keydown", closePreview, true);
+  }, [previewImage]);
 
   return (<>
     <MarkdownDocument

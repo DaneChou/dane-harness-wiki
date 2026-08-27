@@ -943,6 +943,7 @@ export function TaskDetail({
 
   function handleAttachmentDownload(event: MouseEvent<HTMLAnchorElement>, attachment: Attachment) {
     event.preventDefault();
+    event.stopPropagation();
     setAttachmentsError(null);
     void downloadAttachmentFile(attachment).catch((error) => {
       setAttachmentsError(messageFor(error));
@@ -1255,7 +1256,6 @@ export function TaskDetail({
                           }}
                         />
                         <strong>{comment.authorName}</strong>
-                        <span className="actor-id">@{comment.authorId}</span>
                         <time title={exactTime(comment.createdAt, locale)}>{relativeTime(comment.createdAt, locale)}</time>
                         {comment.version > 1 && (
                           <span
