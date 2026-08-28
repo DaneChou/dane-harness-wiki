@@ -118,7 +118,7 @@ export function DescriptionDocument({
           }
           return (
             <span className="document-attachment-card">
-              <span className="attachment-file-icon composer-attachment-file-icon" aria-hidden="true">
+              <span className="attachment-file-icon" aria-hidden="true">
                 <LinearIcon name="file" />
               </span>
               <span className="attachment-copy composer-attachment-copy">

@@ -56,6 +56,7 @@ import { readIssueIdentifier } from "../issueRoute";
 import { STATUS_DETAILS } from "./BoardColumn";
 import { fileKey, MAX_ATTACHMENT_SIZE } from "./PendingAttachments";
 import { LinearIcon } from "./LinearIcon";
+import { MermaidDiagram } from "./MarkdownDocument";
 import {
   ConversationIcon,
   ProjectIcon,
@@ -103,6 +104,7 @@ interface PersistedAttachmentSegment {
   markdown: string;
   attachmentId: string;
   contentType: string | null;
+  size: number | null;
   filename: string;
   url: string;
 }
@@ -390,6 +392,7 @@ export function createInlineMediaSegments(
         end: number;
         attachmentId: string;
         contentType: string | null;
+        size: number | null;
         filename: string;
         url: string;
       }
@@ -465,6 +468,7 @@ export function createInlineMediaSegments(
             end: node.position.end.offset,
             attachmentId: attachmentMatch[1],
             contentType: attachment?.contentType ?? null,
+            size: attachment?.size ?? null,
             filename,
             url: node.url,
           });
@@ -521,6 +525,7 @@ export function createInlineMediaSegments(
         markdown: text.slice(item.start, item.end),
         attachmentId: item.attachmentId,
         contentType: item.contentType,
+        size: item.size,
         filename: item.filename,
         url: item.url,
       });
@@ -998,7 +1003,7 @@ function AttachmentBlock({
 }) {
   const { text } = useTaskboardI18n();
   const filename = segment.type === "pending-attachment" ? segment.file.name : segment.filename;
-  const size = segment.type === "pending-attachment" ? segment.file.size : null;
+  const size = segment.type === "pending-attachment" ? segment.file.size : segment.size;
 
   return (
     <span
@@ -1006,7 +1011,7 @@ function AttachmentBlock({
       contentEditable={false}
       data-inline-media-segment={segment.id}
     >
-      <span className="attachment-file-icon composer-attachment-file-icon" aria-hidden="true">
+      <span className="attachment-file-icon" aria-hidden="true">
         <LinearIcon name="file" />
       </span>
       <span className="attachment-copy composer-attachment-copy">
@@ -1464,7 +1469,7 @@ function inlineMediaStateSignature(segments: readonly InlineMediaSegment[]): str
       case "persisted-image":
         return [`${segment.type}:${segment.id}:${segment.url}:${segment.alt}`];
       case "persisted-attachment":
-        return [`${segment.type}:${segment.id}:${segment.attachmentId}:${segment.contentType ?? ""}:${segment.filename}:${segment.url}`];
+        return [`${segment.type}:${segment.id}:${segment.attachmentId}:${segment.contentType ?? ""}:${segment.size ?? ""}:${segment.filename}:${segment.url}`];
       case "issue-reference":
         return [`${segment.type}:${segment.id}:${segment.taskId ?? ""}:${segment.markdown}`];
       case "skill-reference":
@@ -1586,6 +1591,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const viewRef = useRef<EditorView | null>(null);
     const atomSegments = useRef(new Map<string, InlineMediaSegment>());
     const atomHosts = useRef(new Map<string, HTMLElement>());
+    const mermaidHosts = useRef(new Map<string, { host: HTMLElement; source: string }>());
     const editorSegments = useRef<InlineMediaSegment[]>(segments);
     const armedMediaAtom = useRef<string | null>(null);
     const requestSequence = useRef(0);
@@ -1597,6 +1603,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const onErrorRef = useRef(onError);
     const onKeyDownRef = useRef(onKeyDown);
     const [atomHostRevision, refreshAtomHosts] = useState(0);
+    const [mermaidHostRevision, refreshMermaidHosts] = useState(0);
     const [completionQuery, setCompletionQuery] = useState<ComposerQuery | null>(null);
     const completionQueryRef = useRef<ComposerQuery | null>(completionQuery);
     const completionSelectionsRef = useRef<CompletionSelection[]>([]);
@@ -1778,6 +1785,62 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             atomHosts.current.delete(segmentIdValue);
             if (viewRef.current) refreshAtomHosts((revision) => revision + 1);
           }
+        },
+      };
+    }
+
+    function createCodeBlockNodeView(node: ProseMirrorNode): NodeView {
+      const params = String(node.attrs.params ?? "");
+      if (params.trim().split(/\s+/)[0]?.toLowerCase() !== "mermaid") {
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        if (params) pre.dataset.params = params;
+        pre.append(code);
+        return { dom: pre, contentDOM: code };
+      }
+
+      const id = segmentId("mermaid");
+      const wrapper = document.createElement("div");
+      const preview = document.createElement("div");
+      const pre = document.createElement("pre");
+      const code = document.createElement("code");
+      wrapper.className = "inline-media-mermaid-editor";
+      preview.className = "inline-media-mermaid-preview";
+      preview.contentEditable = "false";
+      pre.className = "inline-media-mermaid-source";
+      pre.dataset.params = params;
+      pre.append(code);
+      wrapper.append(preview, pre);
+      mermaidHosts.current.set(id, { host: preview, source: node.textContent });
+      refreshMermaidHosts((revision) => revision + 1);
+
+      return {
+        dom: wrapper,
+        contentDOM: code,
+        update(nextNode) {
+          const nextParams = String(nextNode.attrs.params ?? "");
+          if (
+            nextNode.type !== node.type
+            || nextParams.trim().split(/\s+/)[0]?.toLowerCase() !== "mermaid"
+          ) return false;
+          const current = mermaidHosts.current.get(id);
+          if (current && current.source !== nextNode.textContent) {
+            mermaidHosts.current.set(id, { ...current, source: nextNode.textContent });
+            refreshMermaidHosts((revision) => revision + 1);
+          }
+          return true;
+        },
+        stopEvent(event) {
+          return event.target instanceof Node && preview.contains(event.target);
+        },
+        ignoreMutation(mutation) {
+          return mutation.type !== "selection"
+            && mutation.target instanceof Node
+            && preview.contains(mutation.target);
+        },
+        destroy() {
+          mermaidHosts.current.delete(id);
+          if (viewRef.current) refreshMermaidHosts((revision) => revision + 1);
         },
       };
     }
@@ -2000,6 +2063,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         attributes: editorAttributes(),
         editable: () => !disabledRef.current,
         nodeViews: {
+          code_block: createCodeBlockNodeView,
           [INLINE_MEDIA_NODE]: createAtomNodeView,
           [INLINE_REFERENCE_NODE]: createAtomNodeView,
         },
@@ -2093,6 +2157,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
       return () => {
         viewRef.current = null;
         atomHosts.current.clear();
+        mermaidHosts.current.clear();
         view.destroy();
       };
     }, []);
@@ -2194,6 +2259,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     }));
 
     void atomHostRevision;
+    void mermaidHostRevision;
     const atomEntries: Array<[string, HTMLElement]> = Array.from(atomHosts.current.entries());
     const atomPortals = atomEntries.flatMap(([segmentIdValue, host]) => {
       const segment = atomSegments.current.get(segmentIdValue);
@@ -2221,11 +2287,16 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
                   : <ComposerReferenceChip segment={segment} disabled={disabled} onRemove={remove} />;
       return [createPortal(content, host, segment.id)];
     });
+    const mermaidPortals = Array.from(mermaidHosts.current.entries()).map(([
+      id,
+      { host, source },
+    ]) => createPortal(<MermaidDiagram source={source} />, host, id));
 
     return (
       <>
         <div ref={editorElement} />
         {atomPortals}
+        {mermaidPortals}
         {completionQuery
           && (completionLoading || completionError !== null || completionSelections.length > 0)
           && (

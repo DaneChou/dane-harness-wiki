@@ -3152,7 +3152,8 @@ kbd {
   font-size: inherit;
 }
 
-.issue-description-document .markdown-mermaid {
+.issue-description-document .markdown-mermaid,
+.inline-media-mermaid-preview .markdown-mermaid {
   display: grid;
   place-items: center;
   width: 100%;
@@ -3165,32 +3166,38 @@ kbd {
   background: var(--surface-muted);
 }
 
-.issue-description-document .markdown-mermaid svg {
+.issue-description-document .markdown-mermaid svg,
+.inline-media-mermaid-preview .markdown-mermaid svg {
   display: block;
   max-width: 100%;
   height: auto;
 }
 
-.issue-description-document .markdown-mermaid-fallback {
+.issue-description-document .markdown-mermaid-fallback,
+.inline-media-mermaid-preview .markdown-mermaid-fallback {
   width: 100%;
   color: var(--text-secondary);
 }
 
-.issue-description-document .markdown-mermaid-fallback p {
+.issue-description-document .markdown-mermaid-fallback p,
+.inline-media-mermaid-preview .markdown-mermaid-fallback p {
   margin: 0 0 8px;
   color: var(--danger);
 }
 
-.issue-description-document .markdown-mermaid-fallback summary {
+.issue-description-document .markdown-mermaid-fallback summary,
+.inline-media-mermaid-preview .markdown-mermaid-fallback summary {
   cursor: pointer;
   color: var(--text-secondary);
 }
 
-.issue-description-document .markdown-mermaid-fallback pre {
+.issue-description-document .markdown-mermaid-fallback pre,
+.inline-media-mermaid-preview .markdown-mermaid-fallback pre {
   margin-bottom: 0;
 }
 
-:root[data-theme="dark"] .issue-description-document .markdown-mermaid {
+:root[data-theme="dark"] .issue-description-document .markdown-mermaid,
+:root[data-theme="dark"] .inline-media-mermaid-preview .markdown-mermaid {
   background: var(--surface-active);
 }
 
@@ -4372,6 +4379,10 @@ kbd {
 
 .comment-body .issue-description-document p {
   margin-bottom: 6px;
+}
+
+.comment-body .issue-description-document blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 .comment-attachment-list {

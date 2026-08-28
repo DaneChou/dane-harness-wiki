@@ -102,6 +102,17 @@
   color: var(--text-secondary);
 }
 
+.inline-media-composer.ProseMirror blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.inline-media-composer.ProseMirror hr {
+  height: 0;
+  margin: 18px 0;
+  border: 0;
+  border-top: var(--border-hairline) solid var(--border);
+}
+
 .inline-media-composer.ProseMirror code {
   padding: 1px 5px;
   border-radius: 4px;
@@ -127,6 +138,18 @@
   padding: 0;
   background: transparent;
   font-size: inherit;
+}
+
+.inline-media-composer.ProseMirror .inline-media-mermaid-editor {
+  margin: 12px 0;
+}
+
+.inline-media-composer.ProseMirror .inline-media-mermaid-preview .markdown-mermaid {
+  margin: 0;
+}
+
+.inline-media-composer.ProseMirror .inline-media-mermaid-source {
+  margin: 6px 0 0;
 }
 
 .inline-media-composer.ProseMirror .inline-media-atom {
