@@ -10,7 +10,7 @@ import {
   type KeyboardEventHandler,
 } from "react";
 import { createPortal } from "react-dom";
-import MarkdownIt from "markdown-it";
+import MarkdownIt, { type StateInline } from "markdown-it";
 import { exampleSetup } from "prosemirror-example-setup";
 import { Fragment, Schema, Slice, type MarkType, type Node as ProseMirrorNode } from "prosemirror-model";
 import {
@@ -1383,6 +1383,30 @@ function editorNodesWithAtoms(
 const composerMarkdownTokenizer = new MarkdownIt("commonmark", { html: false })
   .enable(["table", "strikethrough"]);
 
+composerMarkdownTokenizer.inline.ruler.before(
+  "strikethrough",
+  "single_tilde_strikethrough",
+  (state: StateInline, silent: boolean) => {
+    const scanned = state.src.charCodeAt(state.pos) === 0x7e
+      ? state.scanDelims(state.pos, true)
+      : null;
+    if (!scanned || scanned.length !== 1 || silent) return false;
+
+    const token = state.push("text", "", 0);
+    token.content = "~";
+    state.delimiters.push({
+      marker: 0x7e,
+      length: 0,
+      token: state.tokens.length - 1,
+      end: -1,
+      open: scanned.can_open,
+      close: scanned.can_close,
+    });
+    state.pos += 1;
+    return true;
+  },
+);
+
 const composerMarkdownParser = new MarkdownParser(
   composerSchema,
   composerMarkdownTokenizer,
@@ -1457,6 +1481,7 @@ function composerPlugins(): Plugin[] {
     markInputRule(/(?<!\*)\*([^*\n]+)\*$/, composerSchema.marks.em),
     markInputRule(/(?<!_)_([^_\n]+)_$/, composerSchema.marks.em),
     markInputRule(/~~([^~\n]+)~~$/, composerSchema.marks.strike),
+    markInputRule(/(?<!~)~([^~\n]+)~$/, composerSchema.marks.strike),
     markInputRule(/\[([^\]\n]+)\]\(([^)\s]+)\)$/, composerSchema.marks.link, (match) => ({
       href: match[2],
       title: null,
@@ -1505,11 +1530,15 @@ const editorMarkdownSerializer = new MarkdownSerializer({
     state.closeBlock(node);
   },
   table(state, node) {
+    const outputState = state as typeof state & { out: string };
     node.forEach((row, _offset, rowIndex) => {
       state.write("|");
       row.forEach((cell) => {
         state.write(" ");
+        const cellStart = outputState.out.length;
         state.renderInline(cell, false);
+        outputState.out = outputState.out.slice(0, cellStart)
+          + outputState.out.slice(cellStart).replace(/\|/g, "\\|");
         state.write(" |");
       });
       state.ensureNewLine();
