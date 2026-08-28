@@ -3820,8 +3820,7 @@ kbd {
   position: relative;
   display: flex;
   align-items: center;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   min-width: 0;
   min-height: 44px;
   gap: 8px;
@@ -3881,7 +3880,7 @@ kbd {
   width: 30px;
   height: 30px;
   border-radius: 5px;
-  background: #b489f6;
+  background: #cacaca;
   color: #fff;
 }
 
