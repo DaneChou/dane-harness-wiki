@@ -1429,7 +1429,6 @@ export function TaskDetail({
                     actor={currentUser}
                   />
                   <strong>{currentUser.name}</strong>
-                  <span className="actor-id">@{currentUser.id}</span>
                 </div>
                 <InlineMediaComposer
                   ref={composerRef}

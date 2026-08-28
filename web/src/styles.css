@@ -5957,7 +5957,8 @@ kbd {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 62%, transparent);
 }
 
-.inline-media-image-atom.is-range-selected > .inline-media-image {
+.inline-media-image-atom.is-range-selected > .inline-media-image,
+.inline-media-attachment-atom.is-range-selected > .inline-media-video {
   border-radius: 8px;
   outline: 1px solid color-mix(in srgb, var(--accent) 72%, transparent);
   outline-offset: 2px;
