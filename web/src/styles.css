@@ -3820,7 +3820,8 @@ kbd {
   position: relative;
   display: flex;
   align-items: center;
-  width: 100%;
+  width: fit-content;
+  max-width: 100%;
   min-width: 0;
   min-height: 44px;
   gap: 8px;
@@ -8886,13 +8887,13 @@ kbd {
   background: transparent;
 }
 
-.board-column.status-backlog {
+.board-column.status-backlog,
+.issue-reference-inline.issue-reference-status-backlog {
   --column-status-color: var(--status-backlog);
   --column-status-background: color-mix(in srgb, var(--status-backlog) 10%, transparent);
 }
 
 .board-column.status-todo,
-.issue-reference-inline.issue-reference-status-backlog,
 .issue-reference-inline.issue-reference-status-todo {
   --column-status-color: #9747ff;
   --column-status-background: rgba(151, 71, 255, .1);
