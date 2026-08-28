@@ -521,8 +521,14 @@
   }
 
   async function activeNativeWorkspaceRoots() {
-    const roots = (await requestNativeFetch("active-workspace-roots", {}))?.roots;
-    return Array.isArray(roots) ? roots.filter((root) => typeof root === "string") : [];
+    const response = await requestNativeFetch("active-workspace-roots", {});
+    const roots = response?.roots;
+    // Keep an unavailable endpoint distinct from a successful response with no
+    // workspace roots. The latter must not be treated as a confirmed switch.
+    return {
+      available: Array.isArray(roots),
+      roots: Array.isArray(roots) ? roots.filter((root) => typeof root === "string") : [],
+    };
   }
 
   function normalizeNativeRootPath(value) {
@@ -1021,17 +1027,24 @@
     }
   }
 
-  async function waitForNativeProject(targetRoot) {
+  async function waitForNativeProject(targetRoot, expectedProjectId) {
     const deadline = Date.now() + 8_000;
     const normalizedTargetRoot = normalizeNativeRootPath(targetRoot);
     while (Date.now() < deadline) {
-      const [projectId, activeRoots] = await Promise.all([
+      const [projectId, activeWorkspace] = await Promise.all([
         selectedNativeProjectId(),
         activeNativeWorkspaceRoots(),
       ]);
+      const targetRootIsActive = activeWorkspace.roots.some((root) => (
+        normalizeNativeRootPath(root) === normalizedTargetRoot
+      ));
       if (
         projectId
-        && normalizeNativeRootPath(activeRoots[0]) === normalizedTargetRoot
+        && projectId === expectedProjectId
+        // Some Codex desktop builds no longer expose active-workspace-roots.
+        // A confirmed selected project is still safe when that endpoint is unavailable;
+        // keep rejecting an explicitly reported, mismatched workspace root.
+        && (!activeWorkspace.available || targetRootIsActive)
       ) return projectId;
       await new Promise((resolve) => window.setTimeout(resolve, 80));
     }
@@ -1087,12 +1100,12 @@
             "The target project or worktree is not mapped in Codex",
           ));
         }
-        const { targetRoot } = target;
+        const { projectId, targetRoot } = target;
         bridge.sendMessageFromView({
           type: "electron-add-new-workspace-root-option",
           root: targetRoot,
         });
-        lastNativeProjectId = await waitForNativeProject(targetRoot);
+        lastNativeProjectId = await waitForNativeProject(targetRoot, projectId);
       }
 
       closeTaskboard(false);
