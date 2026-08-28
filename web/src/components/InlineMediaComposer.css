@@ -223,6 +223,15 @@
   animation: inline-media-cursor-blink 1.1s steps(2, start) infinite;
 }
 
+.inline-media-composer.ProseMirror .ProseMirror-gapcursor:has(+ .inline-media-video-atom)::after,
+.inline-media-composer.ProseMirror .inline-media-video-atom + .ProseMirror-gapcursor::after {
+  top: -9px;
+  width: 0;
+  height: 18px;
+  border-top: 0;
+  border-left: 1px solid currentColor;
+}
+
 .inline-media-composer.ProseMirror.ProseMirror-focused .ProseMirror-gapcursor {
   display: block;
 }
