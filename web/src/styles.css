@@ -3071,13 +3071,13 @@ kbd {
 
 .issue-reference-id {
   margin-right: 5px;
-  color: var(--text-primary);
+  color: var(--column-status-color, var(--text-secondary));
   font-weight: 550;
   font-variant-numeric: tabular-nums;
 }
 
 .issue-reference-title {
-  color: var(--text-primary);
+  color: var(--column-status-color, var(--text-secondary));
   overflow-wrap: anywhere;
   white-space: normal;
 }
