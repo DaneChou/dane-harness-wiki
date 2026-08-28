@@ -3821,6 +3821,7 @@ kbd {
   display: flex;
   align-items: center;
   width: 100%;
+  margin: 8px 0;
   min-width: 0;
   min-height: 44px;
   gap: 8px;
@@ -5990,10 +5991,6 @@ kbd {
   outline: 1px solid color-mix(in srgb, var(--accent) 64%, transparent);
   outline-offset: 1px;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 10%, transparent);
-}
-
-.inline-media-attachment {
-  margin: 0;
 }
 
 .inline-media-attachment > button {
