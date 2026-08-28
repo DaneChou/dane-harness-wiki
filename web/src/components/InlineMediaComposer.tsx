@@ -1382,6 +1382,7 @@ function editorNodesWithAtoms(
 
 const composerMarkdownTokenizer = new MarkdownIt("commonmark", { html: false })
   .enable(["table", "strikethrough"]);
+const singleTildeDelimiterMarker = -0x7e;
 
 composerMarkdownTokenizer.inline.ruler.before(
   "strikethrough",
@@ -1395,7 +1396,7 @@ composerMarkdownTokenizer.inline.ruler.before(
     const token = state.push("text", "", 0);
     token.content = "~";
     state.delimiters.push({
-      marker: 0x7e,
+      marker: singleTildeDelimiterMarker,
       length: 0,
       token: state.tokens.length - 1,
       end: -1,
@@ -1403,6 +1404,22 @@ composerMarkdownTokenizer.inline.ruler.before(
       close: scanned.can_close,
     });
     state.pos += 1;
+    return true;
+  },
+);
+
+composerMarkdownTokenizer.inline.ruler2.before(
+  "strikethrough",
+  "restore_single_tilde_marker",
+  (state: StateInline) => {
+    for (const delimiter of state.delimiters) {
+      if (delimiter.marker === singleTildeDelimiterMarker) delimiter.marker = 0x7e;
+    }
+    for (const tokenMeta of state.tokens_meta) {
+      for (const delimiter of tokenMeta?.delimiters ?? []) {
+        if (delimiter.marker === singleTildeDelimiterMarker) delimiter.marker = 0x7e;
+      }
+    }
     return true;
   },
 );
