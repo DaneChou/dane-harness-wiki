@@ -84,6 +84,10 @@
   font-weight: 650;
 }
 
+.inline-media-composer.ProseMirror .inline-media-attachment .composer-attachment-copy strong {
+  font-weight: 520;
+}
+
 .inline-media-composer.ProseMirror a {
   color: var(--accent);
   text-decoration: none;

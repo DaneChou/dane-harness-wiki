@@ -3071,7 +3071,7 @@ kbd {
 
 .issue-reference-id {
   margin-right: 5px;
-  color: var(--column-status-color, var(--text-secondary));
+  color: var(--text-primary);
   font-weight: 550;
   font-variant-numeric: tabular-nums;
 }

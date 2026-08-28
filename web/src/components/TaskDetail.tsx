@@ -428,6 +428,7 @@ export function TaskDetail({
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descriptionComposerRef = useRef<InlineMediaComposerHandle>(null);
   const descriptionScrollPositionRef = useRef<{ element: HTMLElement; top: number } | null>(null);
+  const descriptionCaretRef = useRef<{ text: string; offset: number; occurrence: number } | null>(null);
   const composerRef = useRef<InlineMediaComposerHandle>(null);
   const editingComposerRef = useRef<InlineMediaComposerHandle>(null);
   const editingCommentScrollPositionRef = useRef<{ element: HTMLElement; top: number } | null>(null);
@@ -465,7 +466,13 @@ export function TaskDetail({
     if (!editingDescription) return;
     const position = descriptionScrollPositionRef.current;
     descriptionScrollPositionRef.current = null;
-    descriptionComposerRef.current?.focus();
+    const caret = descriptionCaretRef.current;
+    descriptionCaretRef.current = null;
+    if (caret) {
+      descriptionComposerRef.current?.focusAtText(caret.text, caret.offset, caret.occurrence);
+    } else {
+      descriptionComposerRef.current?.focus();
+    }
     if (position) {
       position.element.scrollTop = position.top;
       requestAnimationFrame(() => {
@@ -1099,6 +1106,28 @@ export function TaskDetail({
                     aria-label={text("编辑议题描述", "Edit issue description")}
                     onClick={(event) => {
                       if (window.getSelection()?.isCollapsed === false) return;
+                      descriptionCaretRef.current = null;
+                      const range = event.currentTarget.ownerDocument.caretRangeFromPoint(
+                        event.clientX,
+                        event.clientY,
+                      );
+                      const node = range?.startContainer;
+                      if (range && node?.nodeType === Node.TEXT_NODE && event.currentTarget.contains(node)) {
+                        const value = node.textContent ?? "";
+                        const walker = event.currentTarget.ownerDocument.createTreeWalker(
+                          event.currentTarget,
+                          NodeFilter.SHOW_TEXT,
+                        );
+                        let occurrence = 0;
+                        while (walker.nextNode() && walker.currentNode !== node) {
+                          if (walker.currentNode.textContent === value) occurrence += 1;
+                        }
+                        descriptionCaretRef.current = {
+                          text: value,
+                          offset: range.startOffset,
+                          occurrence,
+                        };
+                      }
                       const scrollContainer = event.currentTarget.closest<HTMLElement>(".issue-detail-scroll");
                       descriptionScrollPositionRef.current = scrollContainer
                         ? { element: scrollContainer, top: scrollContainer.scrollTop }
@@ -1113,6 +1142,7 @@ export function TaskDetail({
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
+                        descriptionCaretRef.current = null;
                         const scrollContainer = event.currentTarget.closest<HTMLElement>(".issue-detail-scroll");
                         descriptionScrollPositionRef.current = scrollContainer
                           ? { element: scrollContainer, top: scrollContainer.scrollTop }

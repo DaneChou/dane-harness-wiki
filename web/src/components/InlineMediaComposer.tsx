@@ -162,6 +162,7 @@ type InlineMediaError = string | readonly [string, string];
 
 export interface InlineMediaComposerHandle {
   focus: () => void;
+  focusAtText: (text: string, offset: number, occurrence: number) => void;
   addFiles: (files: FileList | File[]) => void;
 }
 
@@ -2252,6 +2253,24 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
         if (!view) return;
         view.dispatch(view.state.tr.setSelection(TextSelection.atEnd(view.state.doc)));
         view.focus();
+      },
+      focusAtText(text, offset, occurrence) {
+        const view = viewRef.current;
+        if (!view) return;
+        const walker = document.createTreeWalker(view.dom, NodeFilter.SHOW_TEXT);
+        let remaining = occurrence;
+        while (walker.nextNode()) {
+          const node = walker.currentNode;
+          if (node.textContent !== text) continue;
+          if (remaining > 0) {
+            remaining -= 1;
+            continue;
+          }
+          const position = view.posAtDOM(node, Math.min(offset, text.length));
+          view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(position))));
+          view.focus();
+          return;
+        }
       },
       addFiles(files) {
         insertFiles(files);
