@@ -73,11 +73,20 @@
 }
 
 .issue-description-composer .inline-media-composer.ProseMirror p {
-  margin-bottom: 10px;
+  margin: 0 0 10px;
 }
 
 .comment-inline-media.ProseMirror p {
-  margin-bottom: 6px;
+  margin: 0 0 6px;
+}
+
+.inline-media-composer.ProseMirror strong {
+  font-weight: 650;
+}
+
+.inline-media-composer.ProseMirror a {
+  color: var(--accent);
+  text-decoration: none;
 }
 
 .inline-media-composer.ProseMirror ul,
@@ -136,8 +145,27 @@
   display: block;
 }
 
+.inline-media-composer.ProseMirror .inline-media-video-atom {
+  width: min(640px, 100%);
+  margin-bottom: 10px;
+  aspect-ratio: 16 / 9;
+}
+
 .inline-media-composer.ProseMirror li {
   position: relative;
+}
+
+.inline-media-composer.ProseMirror li + li {
+  margin-top: 3px;
+}
+
+.issue-description-composer .inline-media-composer.ProseMirror li > p,
+.comment-inline-media.ProseMirror li > p {
+  margin-bottom: 4px;
+}
+
+.inline-media-composer.ProseMirror p:has(+ .inline-media-attachment-atom:not(.inline-media-video-atom)) {
+  margin-bottom: 0;
 }
 
 .inline-media-composer.ProseMirror .inline-media-image {

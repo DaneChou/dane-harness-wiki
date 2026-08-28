@@ -3243,6 +3243,12 @@ kbd {
   object-fit: contain;
 }
 
+.issue-description-document video,
+.inline-media-image video {
+  width: min(640px, 100%);
+  aspect-ratio: auto 16 / 9;
+}
+
 .issue-description-document img.is-previewable {
   cursor: zoom-in;
 }
@@ -3274,6 +3280,10 @@ kbd {
 }
 
 .issue-description-document img[src*="/api/attachments/"] + br {
+  display: none;
+}
+
+.issue-description-document video + br {
   display: none;
 }
 

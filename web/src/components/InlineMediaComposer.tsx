@@ -1221,6 +1221,10 @@ function atomHostClass(segment: InlineMediaSegment | undefined): string {
   if (!segment || segment.type === "text") return "inline-media-atom";
   if (isInlineReference(segment)) return "inline-media-atom";
   if (segment.type === "pending-attachment" || segment.type === "persisted-attachment") {
+    if (
+      (segment.type === "pending-attachment" && segment.file.type.startsWith("video/"))
+      || (segment.type === "persisted-attachment" && segment.contentType?.startsWith("video/"))
+    ) return "inline-media-atom inline-media-attachment-atom inline-media-video-atom";
     return "inline-media-atom inline-media-attachment-atom";
   }
   return "inline-media-atom inline-media-image-atom";
