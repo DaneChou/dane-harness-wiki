@@ -10,6 +10,7 @@ import {
   type KeyboardEventHandler,
 } from "react";
 import { createPortal } from "react-dom";
+import MarkdownIt from "markdown-it";
 import { exampleSetup } from "prosemirror-example-setup";
 import { Fragment, Schema, Slice, type MarkType, type Node as ProseMirrorNode } from "prosemirror-model";
 import {
@@ -180,6 +181,7 @@ export interface InlineMediaComposerProps {
   placeholder: string;
   ariaLabel: string;
   disabled?: boolean;
+  allowAttachments?: boolean;
   className?: string;
   onChange: (segments: InlineMediaSegment[]) => void;
   onError: (message: InlineMediaError | null) => void;
@@ -1137,12 +1139,25 @@ const INLINE_MEDIA_NODE = "taskboard_inline_media";
 const INLINE_REFERENCE_NODE = "taskboard_inline_reference";
 const INLINE_MEDIA_PLACEHOLDER_PREFIX = "https://taskboard.invalid/inline-media/";
 
-const composerMarks = ["strong", "em", "code", "link"].reduce(
+const markdownMarks = defaultMarkdownParser.schema.spec.marks.append({
+  strike: {
+    parseDOM: [
+      { tag: "s" },
+      { tag: "del" },
+      { style: "text-decoration=line-through" },
+    ],
+    toDOM() {
+      return ["s", 0];
+    },
+  },
+});
+
+const composerMarks = ["strong", "em", "code", "link", "strike"].reduce(
   (marks, name) => {
     const spec = marks.get(name);
     return spec ? marks.update(name, { ...spec, inclusive: false }) : marks;
   },
-  defaultMarkdownParser.schema.spec.marks,
+  markdownMarks,
 );
 
 const markdownNodes = defaultMarkdownParser.schema.spec.nodes;
@@ -1150,6 +1165,47 @@ const composerNodes = markdownNodes.update("heading", {
   ...markdownNodes.get("heading")!,
   content: "inline*",
 }).append({
+  table: {
+    group: "block",
+    content: "table_row+",
+    parseDOM: [{ tag: "table" }],
+    toDOM() {
+      return ["table", ["tbody", 0]];
+    },
+  },
+  table_row: {
+    content: "(table_header | table_cell)+",
+    parseDOM: [{ tag: "tr" }],
+    toDOM() {
+      return ["tr", 0];
+    },
+  },
+  table_header: {
+    attrs: { align: { default: null } },
+    content: "inline*",
+    parseDOM: [{
+      tag: "th",
+      getAttrs(dom) {
+        return { align: dom instanceof HTMLElement ? dom.style.textAlign || null : null };
+      },
+    }],
+    toDOM(node) {
+      return ["th", node.attrs.align ? { style: `text-align:${node.attrs.align}` } : {}, 0];
+    },
+  },
+  table_cell: {
+    attrs: { align: { default: null } },
+    content: "inline*",
+    parseDOM: [{
+      tag: "td",
+      getAttrs(dom) {
+        return { align: dom instanceof HTMLElement ? dom.style.textAlign || null : null };
+      },
+    }],
+    toDOM(node) {
+      return ["td", node.attrs.align ? { style: `text-align:${node.attrs.align}` } : {}, 0];
+    },
+  },
   [INLINE_MEDIA_NODE]: {
     group: "block",
     atom: true,
@@ -1324,11 +1380,33 @@ function editorNodesWithAtoms(
   return [node.copy(Fragment.fromArray(children))];
 }
 
+const composerMarkdownTokenizer = new MarkdownIt("commonmark", { html: false })
+  .enable(["table", "strikethrough"]);
+
 const composerMarkdownParser = new MarkdownParser(
   composerSchema,
-  defaultMarkdownParser.tokenizer,
+  composerMarkdownTokenizer,
   {
     ...defaultMarkdownParser.tokens,
+    s: { mark: "strike" },
+    table: { block: "table" },
+    thead: { ignore: true },
+    tbody: { ignore: true },
+    tr: { block: "table_row" },
+    th: {
+      block: "table_header",
+      getAttrs(token) {
+        const align = /^text-align:(left|center|right)$/.exec(token.attrGet("style") ?? "")?.[1];
+        return { align: align ?? null };
+      },
+    },
+    td: {
+      block: "table_cell",
+      getAttrs(token) {
+        const align = /^text-align:(left|center|right)$/.exec(token.attrGet("style") ?? "")?.[1];
+        return { align: align ?? null };
+      },
+    },
     softbreak: { node: "hard_break" },
   },
 );
@@ -1378,6 +1456,7 @@ function composerPlugins(): Plugin[] {
     markInputRule(/`([^`\n]+)`$/, composerSchema.marks.code),
     markInputRule(/(?<!\*)\*([^*\n]+)\*$/, composerSchema.marks.em),
     markInputRule(/(?<!_)_([^_\n]+)_$/, composerSchema.marks.em),
+    markInputRule(/~~([^~\n]+)~~$/, composerSchema.marks.strike),
     markInputRule(/\[([^\]\n]+)\]\(([^)\s]+)\)$/, composerSchema.marks.link, (match) => ({
       href: match[2],
       title: null,
@@ -1413,6 +1492,44 @@ const editorMarkdownSerializer = new MarkdownSerializer({
   hard_break(state) {
     state.write("\n");
   },
+  paragraph(state, node, parent, index) {
+    const taskMarker = parent.type === composerSchema.nodes.list_item && index === 0
+      ? /^\[([ xX])\][\t ]+/.exec(node.textContent)?.[0]
+      : null;
+    if (taskMarker) {
+      state.write(taskMarker);
+      state.renderInline(node.cut(taskMarker.length), false);
+    } else {
+      state.renderInline(node);
+    }
+    state.closeBlock(node);
+  },
+  table(state, node) {
+    node.forEach((row, _offset, rowIndex) => {
+      state.write("|");
+      row.forEach((cell) => {
+        state.write(" ");
+        state.renderInline(cell, false);
+        state.write(" |");
+      });
+      state.ensureNewLine();
+      if (rowIndex === 0) {
+        state.write("|");
+        row.forEach((cell) => {
+          const separator = cell.attrs.align === "left"
+            ? ":---"
+            : cell.attrs.align === "center"
+              ? ":---:"
+              : cell.attrs.align === "right"
+                ? "---:"
+                : "---";
+          state.write(` ${separator} |`);
+        });
+        state.ensureNewLine();
+      }
+    });
+    state.closeBlock(node);
+  },
   [INLINE_MEDIA_NODE](state, node) {
     state.write(inlineMediaPlaceholderMarkdown(String(node.attrs.segmentId)));
     state.closeBlock(node);
@@ -1420,7 +1537,15 @@ const editorMarkdownSerializer = new MarkdownSerializer({
   [INLINE_REFERENCE_NODE](state, node) {
     state.write(inlineMediaPlaceholderMarkdown(String(node.attrs.segmentId)));
   },
-}, defaultMarkdownSerializer.marks);
+}, {
+  ...defaultMarkdownSerializer.marks,
+  strike: {
+    open: "~~",
+    close: "~~",
+    mixable: true,
+    expelEnclosingWhitespace: true,
+  },
+});
 
 function segmentsFromEditorDocument(
   documentNode: ProseMirrorNode,
@@ -1582,6 +1707,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     placeholder,
     ariaLabel,
     disabled = false,
+    allowAttachments = false,
     className = "",
     onChange,
     onError,
@@ -1597,6 +1723,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const armedMediaAtom = useRef<string | null>(null);
     const requestSequence = useRef(0);
     const disabledRef = useRef(disabled);
+    const allowAttachmentsRef = useRef(allowAttachments);
     const mentionTasksRef = useRef(mentionTasks);
     const referenceTasksRef = useRef(referenceTasks);
     const completionContextRef = useRef(completionContext);
@@ -1615,6 +1742,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     const [completionError, setCompletionError] = useState<string | null>(null);
 
     disabledRef.current = disabled;
+    allowAttachmentsRef.current = allowAttachments;
     mentionTasksRef.current = mentionTasks;
     referenceTasksRef.current = referenceTasks;
     completionContextRef.current = completionContext;
@@ -1859,7 +1987,9 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
     function insertFiles(files: FileList | File[], position?: number): void {
       const view = viewRef.current;
       if (!view || disabledRef.current) return;
-      const selected = Array.from(files);
+      const selected = Array.from(files).filter((file) => (
+        file.type.startsWith("image/") || allowAttachmentsRef.current
+      ));
       if (selected.length === 0) return;
 
       const oversized = selected.find((file) => file.size > MAX_ATTACHMENT_SIZE);

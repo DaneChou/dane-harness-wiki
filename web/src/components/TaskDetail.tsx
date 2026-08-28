@@ -891,7 +891,11 @@ export function TaskDetail({
 
   async function saveComment(comment: Comment) {
     const body = editingDraft.trim();
-    if (!body || (body === comment.body && editingInlineImages.length === 0)) {
+    if (!body || (
+      body === comment.body
+      && editingInlineImages.length === 0
+      && editingInlineFiles.length === 0
+    )) {
       if (body === comment.body) endCommentEdit();
       return;
     }
@@ -1060,6 +1064,7 @@ export function TaskDetail({
                       placeholder={text("添加描述…", "Add description…")}
                       ariaLabel={text("议题描述", "Issue description")}
                       disabled={savingProperty === "description"}
+                      allowAttachments
                       onChange={setDescriptionSegments}
                       onError={onError}
                       onKeyDown={(event) => {
@@ -1378,6 +1383,7 @@ export function TaskDetail({
                             placeholder={text("编辑评论", "Edit comment")}
                             ariaLabel={text("编辑评论", "Edit comment")}
                             disabled={savingCommentId === comment.id}
+                            allowAttachments
                             onChange={setEditingSegments}
                             onError={setCommentsError}
                             onKeyDown={(event) => {
@@ -1499,6 +1505,7 @@ export function TaskDetail({
                   }}
                   placeholder={text("留下评论…", "Leave a comment…")}
                   ariaLabel={text("留下评论", "Leave a comment")}
+                  allowAttachments
                   onChange={setCommentSegments}
                   onError={setCommentsError}
                   onKeyDown={handleSubmitShortcut}

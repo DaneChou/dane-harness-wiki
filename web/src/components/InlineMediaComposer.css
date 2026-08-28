@@ -195,6 +195,37 @@
   margin-bottom: 0;
 }
 
+.inline-media-composer.ProseMirror table {
+  width: 100%;
+  margin: 12px 0;
+  overflow: hidden;
+  border: var(--border-hairline) solid var(--border);
+  border-radius: 7px;
+  border-spacing: 0;
+}
+
+.inline-media-composer.ProseMirror th,
+.inline-media-composer.ProseMirror td {
+  padding: 7px 9px;
+  border-right: var(--border-hairline) solid var(--border);
+  border-bottom: var(--border-hairline) solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.inline-media-composer.ProseMirror th {
+  background: var(--surface-muted);
+  font-weight: 600;
+}
+
+.inline-media-composer.ProseMirror tr > :last-child {
+  border-right: 0;
+}
+
+.inline-media-composer.ProseMirror tr:last-child > * {
+  border-bottom: 0;
+}
+
 .inline-media-composer.ProseMirror .inline-media-image {
   margin: 10px 0;
 }

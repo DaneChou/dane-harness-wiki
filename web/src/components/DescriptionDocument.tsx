@@ -113,6 +113,7 @@ export function DescriptionDocument({
                 src={attachmentContentUrl(attachment)}
                 aria-label={attachment.filename}
                 controls
+                onClick={(event) => event.stopPropagation()}
               />
             );
           }
