@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -426,8 +427,10 @@ export function TaskDetail({
   const [deleting, setDeleting] = useState(false);
   const titleRef = useRef<HTMLTextAreaElement>(null);
   const descriptionComposerRef = useRef<InlineMediaComposerHandle>(null);
+  const descriptionScrollPositionRef = useRef<{ element: HTMLElement; top: number } | null>(null);
   const composerRef = useRef<InlineMediaComposerHandle>(null);
   const editingComposerRef = useRef<InlineMediaComposerHandle>(null);
+  const editingCommentScrollPositionRef = useRef<{ element: HTMLElement; top: number } | null>(null);
   const attachmentInputRef = useRef<HTMLInputElement>(null);
   const commentAttachmentInputRef = useRef<HTMLInputElement>(null);
   const editCommentAttachmentInputRef = useRef<HTMLInputElement>(null);
@@ -458,18 +461,30 @@ export function TaskDetail({
     resizeTextarea(titleRef.current);
   }, [title]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editingDescription) return;
-    requestAnimationFrame(() => {
-      descriptionComposerRef.current?.focus();
-    });
+    const position = descriptionScrollPositionRef.current;
+    descriptionScrollPositionRef.current = null;
+    descriptionComposerRef.current?.focus();
+    if (position) {
+      position.element.scrollTop = position.top;
+      requestAnimationFrame(() => {
+        position.element.scrollTop = position.top;
+      });
+    }
   }, [editingDescription]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!editingId) return;
-    requestAnimationFrame(() => {
-      editingComposerRef.current?.focus();
-    });
+    const position = editingCommentScrollPositionRef.current;
+    editingCommentScrollPositionRef.current = null;
+    editingComposerRef.current?.focus();
+    if (position) {
+      position.element.scrollTop = position.top;
+      requestAnimationFrame(() => {
+        position.element.scrollTop = position.top;
+      });
+    }
   }, [editingId]);
 
   useEffect(() => {
@@ -850,8 +865,12 @@ export function TaskDetail({
     }
   }
 
-  function beginEdit(comment: Comment) {
+  function beginEdit(comment: Comment, source: HTMLElement) {
     if (savingCommentId !== null) return;
+    const scrollContainer = source.closest<HTMLElement>(".issue-detail-scroll");
+    editingCommentScrollPositionRef.current = scrollContainer
+      ? { element: scrollContainer, top: scrollContainer.scrollTop }
+      : null;
     editingUploadedAttachmentsRef.current.clear();
     setEditingId(comment.id);
     setEditingSegments(createInlineMediaSegments(comment.body, referenceTasks, comment.attachments));
@@ -1078,8 +1097,12 @@ export function TaskDetail({
                     role="button"
                     tabIndex={0}
                     aria-label={text("编辑议题描述", "Edit issue description")}
-                    onClick={() => {
+                    onClick={(event) => {
                       if (window.getSelection()?.isCollapsed === false) return;
+                      const scrollContainer = event.currentTarget.closest<HTMLElement>(".issue-detail-scroll");
+                      descriptionScrollPositionRef.current = scrollContainer
+                        ? { element: scrollContainer, top: scrollContainer.scrollTop }
+                        : null;
                       setDescriptionSegments(createInlineMediaSegments(
                         description,
                         referenceTasks,
@@ -1090,6 +1113,10 @@ export function TaskDetail({
                     onKeyDown={(event) => {
                       if (event.key === "Enter" || event.key === " ") {
                         event.preventDefault();
+                        const scrollContainer = event.currentTarget.closest<HTMLElement>(".issue-detail-scroll");
+                        descriptionScrollPositionRef.current = scrollContainer
+                          ? { element: scrollContainer, top: scrollContainer.scrollTop }
+                          : null;
                         setDescriptionSegments(createInlineMediaSegments(
                           description,
                           referenceTasks,
@@ -1286,7 +1313,7 @@ export function TaskDetail({
                                   type="button"
                                   role="menuitem"
                                   disabled={savingCommentId !== null}
-                                  onClick={() => beginEdit(comment)}
+                                  onClick={(event) => beginEdit(comment, event.currentTarget)}
                                 >
                                   <EditIcon color="currentColor" />
                                   {text("编辑评论", "Edit comment")}

@@ -31,6 +31,7 @@ import {
   type Plugin,
   type Selection,
 } from "prosemirror-state";
+import { liftListItem, sinkListItem } from "prosemirror-schema-list";
 import { EditorView, type NodeView } from "prosemirror-view";
 import { definitions } from "mdast-util-definitions";
 import remarkGfm from "remark-gfm";
@@ -1380,6 +1381,27 @@ function composerPlugins(): Plugin[] {
   return [inputRules({ rules }), ...setupPlugins];
 }
 
+function handleIndentKey(view: EditorView, event: globalThis.KeyboardEvent): boolean {
+  if (event.key !== "Tab" || event.altKey || event.ctrlKey || event.metaKey) return false;
+  event.preventDefault();
+
+  const listCommand = event.shiftKey
+    ? liftListItem(composerSchema.nodes.list_item)
+    : sinkListItem(composerSchema.nodes.list_item);
+  if (listCommand(view.state, (transaction) => view.dispatch(transaction), view)) return true;
+
+  const { $from } = view.state.selection;
+  if (!$from.parent.isTextblock) return true;
+  const blockStart = $from.start();
+  const indentation = /^[\u00a0 ]{1,2}/.exec($from.parent.textContent)?.[0];
+  if (event.shiftKey) {
+    if (indentation) view.dispatch(view.state.tr.delete(blockStart, blockStart + indentation.length));
+  } else {
+    view.dispatch(view.state.tr.insertText("\u00a0\u00a0", blockStart));
+  }
+  return true;
+}
+
 const editorMarkdownSerializer = new MarkdownSerializer({
   ...defaultMarkdownSerializer.nodes,
   hard_break(state) {
@@ -2019,6 +2041,7 @@ export const InlineMediaComposer = forwardRef<InlineMediaComposerHandle, InlineM
             return event.defaultPrevented;
           }
           if (handleCompletionKey(view, event)) return true;
+          if (!disabledRef.current && handleIndentKey(view, event)) return true;
           if (!disabledRef.current && handleMediaDelete(view, event)) return true;
           onKeyDownRef.current?.(event as unknown as ReactKeyboardEvent<HTMLDivElement>);
           return event.defaultPrevented;
