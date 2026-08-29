@@ -424,6 +424,7 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
         projectKind: "remote",
         workspacePath: "/srv/example/project",
         hostId: "remote-ssh-discovered:example",
+        name: "remote-project",
       }],
     ],
   );
