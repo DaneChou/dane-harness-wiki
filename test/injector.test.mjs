@@ -121,6 +121,107 @@ test("passive automation policy keeps the user opt-in while the queue is idle", 
   assert.match(source, /record\.quota \? \{ quota: record\.quota \} : \{\}/);
 });
 
+test("catalog-backed remote projects use the shared routed automation", async () => {
+  const helperStart = source.indexOf("function usesLegacyRemoteAutomation");
+  const helperEnd = source.indexOf("\n}\n\nfunction remoteAutomationItem", helperStart) + 2;
+  const usesLegacyRemoteAutomation = vm.runInNewContext(
+    `(${source.slice(helperStart, helperEnd)})`,
+  );
+  assert.equal(usesLegacyRemoteAutomation({ codexProjectKind: "remote" }), true);
+  assert.equal(usesLegacyRemoteAutomation({
+    codexProjectKind: "remote",
+    codexProjects: [],
+  }), false);
+
+  const applySource = source.slice(
+    source.indexOf("async function applyTaskboardAutomationPolicy"),
+    source.indexOf("function storedAutomationPolicy"),
+  );
+  const reconciled = [];
+  const applyTaskboardAutomationPolicy = vm.runInNewContext(`(${applySource})`, {
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({ tasks: [] }),
+    }),
+    taskboardBaseUrl: "http://127.0.0.1:47823",
+    taskboardAutomationHasPendingWork: () => false,
+    readCodexQuotaStatus: async () => null,
+    usesLegacyRemoteAutomation,
+    reconcileTaskboardAutomation: async (request) => {
+      reconciled.push(request);
+      return { item: { id: "shared-automation", status: "PAUSED" }, items: [] };
+    },
+    taskboardAutomationPolicyOperation: () => "pause",
+    remoteAutomationItem: () => {
+      throw new Error("catalog-backed remote projects must not use the legacy dispatcher");
+    },
+  });
+  const request = {
+    taskboardProjectId: "taskboard-project",
+    codexProjectId: "remote-controller",
+    codexProjectKind: "remote",
+    codexHostId: "ssh-host",
+    codexProjects: [],
+    enabledByUser: true,
+    quotaAware: false,
+  };
+  const result = await applyTaskboardAutomationPolicy(request, () => {});
+  assert.equal(result.item.id, "shared-automation");
+  assert.deepEqual(
+    reconciled.map((candidate) => candidate.operation),
+    ["list", "pause"],
+  );
+});
+
+test("catalog-backed remote policy timers do not invoke the legacy dispatcher", async () => {
+  const helperStart = source.indexOf("function usesLegacyRemoteAutomation");
+  const helperEnd = source.indexOf("\n}\n\nfunction remoteAutomationItem", helperStart) + 2;
+  const usesLegacyRemoteAutomation = vm.runInNewContext(
+    `(${source.slice(helperStart, helperEnd)})`,
+  );
+  const scheduleSource = source.slice(
+    source.indexOf("function scheduleQuotaPolicyCheck"),
+    source.indexOf("function enqueueQuotaPolicyMutation"),
+  );
+  let scheduled;
+  let syntheticRuns = 0;
+  let policyChecks = 0;
+  const request = {
+    taskboardProjectId: "taskboard-project",
+    codexProjectKind: "remote",
+    codexProjects: [],
+    enabledByUser: true,
+  };
+  const record = { request, version: 1 };
+  const scheduleQuotaPolicyCheck = vm.runInNewContext(`(${scheduleSource})`, {
+    quotaPolicyTimers: new Map(),
+    quotaPolicyRecords: new Map([[request.taskboardProjectId, record]]),
+    usesLegacyRemoteAutomation,
+    setTimeout: (callback) => {
+      scheduled = callback;
+      return { unref() {} };
+    },
+    clearTimeout: () => {},
+    runRemoteTaskboardAutomation: async () => { syntheticRuns += 1; },
+    enqueueCurrentQuotaPolicy: async () => { policyChecks += 1; },
+    console,
+    Date,
+    Math,
+  });
+  scheduleQuotaPolicyCheck(record, {
+    item: { status: "ACTIVE", nextRunAt: Date.now() + 60_000 },
+  });
+  await scheduled();
+  assert.equal(syntheticRuns, 0);
+  assert.equal(policyChecks, 1);
+
+  const listHandler = source.slice(
+    source.indexOf("runAutomation: (request) =>"),
+    source.indexOf("startConversation: (request) =>"),
+  );
+  assert.match(listHandler, /usesLegacyRemoteAutomation\(request\)/);
+});
+
 test("persisted automation policies retain project identity without inventing a legacy catalog", () => {
   const storedPolicySource = source.slice(
     source.indexOf("function storedAutomationPolicy"),

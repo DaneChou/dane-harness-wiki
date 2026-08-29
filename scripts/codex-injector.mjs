@@ -1613,6 +1613,11 @@ async function runRemoteTaskboardAutomation(record) {
   }
 }
 
+function usesLegacyRemoteAutomation(request) {
+  return request.codexProjectKind === "remote"
+    && !Object.hasOwn(request, "codexProjects");
+}
+
 function remoteAutomationItem(request, status, nextRunAt) {
   return {
     id: request.automationId || `taskboard-${request.taskboardProjectId}`,
@@ -1660,7 +1665,7 @@ async function applyTaskboardAutomationPolicy(
     ? await readCodexQuotaStatus(request.model)
     : null;
   if (!stillCurrent()) return { quota, stale: true };
-  if (request.codexProjectKind === "remote") {
+  if (usesLegacyRemoteAutomation(request)) {
     const currentStatus = request.enabledByUser
       && (!request.quotaAware || previousQuotaState === "available")
       ? "ACTIVE"
@@ -1835,7 +1840,7 @@ function scheduleQuotaPolicyCheck(record, result) {
   const nextRunDelay = Number.isFinite(nextRunAt) && nextRunAt > Date.now()
     ? Math.max(
       1_000,
-      nextRunAt - Date.now() - (request.codexProjectKind === "remote" ? 0 : 15_000),
+      nextRunAt - Date.now() - (usesLegacyRemoteAutomation(request) ? 0 : 15_000),
     )
     : 60_000;
   const resetDelay = result.quota?.state === "blocked"
@@ -1845,7 +1850,7 @@ function scheduleQuotaPolicyCheck(record, result) {
   const timer = setTimeout(async () => {
     if (quotaPolicyRecords.get(key)?.version !== version) return;
     try {
-      if (request.codexProjectKind === "remote" && result.item?.status === "ACTIVE") {
+      if (usesLegacyRemoteAutomation(request) && result.item?.status === "ACTIVE") {
         await runRemoteTaskboardAutomation(record);
       }
       await enqueueCurrentQuotaPolicy(key);
@@ -1883,7 +1888,7 @@ function enqueueQuotaPolicyMutation(record, rpc, { explicit = false } = {}) {
       if (result.item?.id) {
         current.request = { ...current.request, automationId: result.item.id };
       }
-      if (current.request.codexProjectKind === "remote") {
+      if (usesLegacyRemoteAutomation(current.request)) {
         const nextRunAt = Number(result.item?.nextRunAt);
         if (result.item?.status === "ACTIVE" && Number.isFinite(nextRunAt)) {
           current.nextRunAt = nextRunAt;
@@ -2287,7 +2292,7 @@ function installTaskboardHostBinding(
               rpc,
             );
             return stored ?? (
-              request.codexProjectKind === "remote"
+              usesLegacyRemoteAutomation(request)
                 ? { items: [] }
                 : reconcileTaskboardAutomation(request, rpc)
             );
