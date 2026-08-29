@@ -1653,7 +1653,7 @@ async function applyTaskboardAutomationPolicy(
   const hasPendingWork = payloads
     ? taskboardAutomationHasPendingWork(
       payloads[0].tasks,
-      request.codexProjects?.length > 0 ? payloads[1].tasks : [],
+      Object.hasOwn(request, "codexProjects") ? payloads[1].tasks : [],
     )
     : null;
   const quota = request.quotaAware && hasPendingWork !== false
@@ -1668,7 +1668,7 @@ async function applyTaskboardAutomationPolicy(
     const currentItem = remoteAutomationItem(request, currentStatus, remoteNextRunAt);
     const operation = taskboardAutomationPolicyOperation(request, {
       explicit,
-      hasTodo,
+      hasPendingWork,
       previousQuotaState,
       quotaState: quota?.state,
       currentStatus,
@@ -1689,7 +1689,7 @@ async function applyTaskboardAutomationPolicy(
       item,
       items: [item],
       operation,
-      hasTodo,
+      hasPendingWork,
       ...(quota ? { quota } : {}),
     };
   }

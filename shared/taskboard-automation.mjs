@@ -120,7 +120,7 @@ export function buildTaskboardAutomationPrompt(request) {
   const remoteProject = request.codexProjectKind === "remote";
   const remoteProjects = request.remoteProjects ?? [];
   const codexProjects = request.codexProjects ?? [];
-  const routedInbox = codexProjects.length > 0;
+  const routedInbox = Object.hasOwn(request, "codexProjects");
   const executionInstructions = routedInbox
     ? [
         `本自动化是全局收件箱控制器；当前工作区只承载调度，不得用于猜测或替代任务目标。当前可用 Codex 项目的精确 identity 目录是 ${JSON.stringify(codexProjects)}。每条 todo 的首次路由必须使用 issue.executionTarget 中保存的 codexProjectId、codexProjectKind、codexHostId、workspacePath 四个字段；已进入 in_progress 的任务只使用其完整 threadBinding 恢复原会话。`,
