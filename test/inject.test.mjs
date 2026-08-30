@@ -264,21 +264,24 @@ test("issues open an unsent native Codex composer in the confirmed project", () 
   assert.match(source, /async function nativeProjectContext\(\)/);
   assert.match(source, /async function activeNativeWorkspaceRoots\(\)/);
   assert.match(source, /requestNativeFetch\("active-workspace-roots", \{\}\)/);
+  assert.match(source, /available: Array\.isArray\(roots\)/);
   assert.match(source, /function normalizeNativeRootPath\(value\)/);
   assert.match(source, /async function resolveNativeProject\(requestedProjectId, workspacePath\)/);
   assert.match(source, /candidate\.id === requestedProjectId\s*\|\|\s*candidate\.rootPaths\.some/);
   assert.match(source, /const targetRoot = normalizedWorkspacePath \? workspacePath : project\?\.rootPaths\[0\]/);
-  assert.match(source, /async function waitForNativeProject\(targetRoot\)/);
+  assert.match(source, /async function waitForNativeProject\(targetRoot, expectedProjectId\)/);
   const waitStart = source.indexOf("async function waitForNativeProject");
   const waitSource = source.slice(waitStart, source.indexOf("async function createThreadForTask", waitStart));
   assert.match(waitSource, /selectedNativeProjectId\(\)/);
   assert.match(waitSource, /activeNativeWorkspaceRoots\(\)/);
-  assert.match(waitSource, /projectId\s*&&\s*normalizeNativeRootPath\(activeRoots\[0\]\) === normalizedTargetRoot/);
+  assert.match(waitSource, /projectId\s*&&\s*projectId === expectedProjectId/);
+  assert.match(waitSource, /activeWorkspace\.roots\.some/);
+  assert.match(waitSource, /!activeWorkspace\.available \|\| targetRootIsActive/);
   assert.match(
     source,
     /bridge\.sendMessageFromView\(\{\s*type: "electron-add-new-workspace-root-option",\s*root: targetRoot,/,
   );
-  assert.match(source, /await waitForNativeProject\(targetRoot\)/);
+  assert.match(source, /await waitForNativeProject\(targetRoot, projectId\)/);
   assert.match(
     createThreadSource,
     /if \(!projectless && codexProjectKind === "remote"\) \{[\s\S]*?codexHostId = typeof payload\?\.codexHostId[\s\S]*?codexProjectWorkspacePath[\s\S]*?await waitForRemoteProject\(requestedProjectId, codexHostId, codexProjectWorkspacePath\);/,
