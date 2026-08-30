@@ -1254,6 +1254,7 @@
       });
       input.remove();
     }, { once: true });
+    input.getBoundingClientRect();
     input.showPicker();
   }
 
