@@ -492,6 +492,22 @@ test("new Codex conversations resolve projects added after startup", async () =>
   );
 });
 
+test("macOS native project paths compare without case drift", () => {
+  const start = source.indexOf("function normalizeNativeRootPath");
+  const functionSource = source.slice(
+    start,
+    source.indexOf("\n\n  function readCodexProjects", start),
+  );
+  const normalizeNativeRootPath = vm.runInNewContext(`(${functionSource})`, {
+    navigator: { platform: "MacIntel", userAgent: "" },
+  });
+
+  assert.equal(
+    normalizeNativeRootPath("/Users/example/Developer/CHEERY-Knowledge/"),
+    normalizeNativeRootPath("/Users/example/Developer/Cheery-Knowledge"),
+  );
+});
+
 test("SSH task project selection uses its stable ID and local project IDs use bootstrap keys", () => {
   assert.match(source, /row = projectRowById\(projectId\)/);
   assert.doesNotMatch(source, /projectRowForTask|projectRowByLabel/);

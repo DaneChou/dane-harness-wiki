@@ -539,6 +539,8 @@
     const normalizedSlashes = windowsPath ? path.replace(/\\/g, "/") : path;
     const withoutTrailingSlash = normalizedSlashes.replace(/\/+$/, "")
       || (normalizedSlashes.startsWith("/") ? "/" : normalizedSlashes);
+    const macPath = /Mac/i.test(String(navigator.platform || navigator.userAgent || ""));
+    if (macPath) return withoutTrailingSlash.toLowerCase();
     if (!windowsPath || !/^[A-Za-z]:/.test(withoutTrailingSlash)) return withoutTrailingSlash;
     return `${withoutTrailingSlash[0].toLowerCase()}${withoutTrailingSlash.slice(1)}`;
   }
