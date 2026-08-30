@@ -360,6 +360,10 @@ test("the standalone web page always opens a project-scoped Codex composer", () 
 test("host context captures all Codex projects even when the sidebar section is collapsed", () => {
   assert.match(source, /async function readCodexProjectMetadata\(\)/);
   assert.match(source, /await window\.electronBridge\?\.getInitialSidebarBootstrap\?\.\(\)/);
+  assert.match(source, /requestNativeFetch\("get-global-state", \{ key: "local-projects" \}\)/);
+  assert.match(source, /requestNativeFetch\("get-global-state", \{ key: "remote-projects" \}\)/);
+  assert.match(source, /currentLocalProjects\?\.value \?\? entries\.get\("local-projects"\)/);
+  assert.match(source, /currentRemoteProjects\?\.value \?\? entries\.get\("remote-projects"\)/);
   assert.match(source, /entries\.get\("local-projects"\)/);
   assert.match(source, /entries\.get\("remote-projects"\)/);
   assert.match(source, /projectKind: "remote"/);
@@ -386,6 +390,7 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
     source.indexOf("\n\n  async function activeNativeWorkspaceRoots"),
   );
   const readCodexProjectMetadata = vm.runInNewContext(`(${functionSource})`, {
+    requestNativeFetch: async () => undefined,
     window: {
       electronBridge: {
         getInitialSidebarBootstrap: async () => ({
@@ -424,6 +429,66 @@ test("Codex bootstrap metadata resolves local roots and SSH remote roots asynchr
         name: "remote-project",
       }],
     ],
+  );
+});
+
+test("Codex project metadata prefers the live global state over the startup bootstrap", async () => {
+  const functionSource = source.slice(
+    source.indexOf("async function readCodexProjectMetadata"),
+    source.indexOf("\n\n  async function activeNativeWorkspaceRoots"),
+  );
+  const readCodexProjectMetadata = vm.runInNewContext(`(${functionSource})`, {
+    requestNativeFetch: async (_path, body) => ({
+      value: body.key === "local-projects"
+        ? { live: { rootPaths: ["/Users/example/live"] } }
+        : [],
+    }),
+    window: {
+      electronBridge: {
+        getInitialSidebarBootstrap: async () => ({
+          globalStateEntries: [{
+            key: "local-projects",
+            value: { stale: { rootPaths: ["/Users/example/stale"] } },
+          }],
+        }),
+      },
+    },
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify([...(await readCodexProjectMetadata()).entries()])),
+    [["live", {
+      projectKind: "local",
+      hostId: "local",
+      workspacePath: "/Users/example/live",
+    }]],
+  );
+});
+
+test("new Codex conversations resolve projects added after startup", async () => {
+  const functionSource = source.slice(
+    source.indexOf("async function nativeProjectContext"),
+    source.indexOf("\n\n  async function resolveNativeProject"),
+  );
+  const nativeProjectContext = vm.runInNewContext(`(${functionSource})`, {
+    requestNativeFetch: async () => ({
+      value: {
+        "live-project": { rootPaths: ["/Users/example/live"] },
+      },
+    }),
+    window: {
+      electronBridge: {
+        getInitialSidebarBootstrap: async () => ({
+          globalStateEntries: [{
+            key: "local-projects",
+            value: { stale: { rootPaths: ["/Users/example/stale"] } },
+          }],
+        }),
+      },
+    },
+  });
+  assert.deepEqual(
+    JSON.parse(JSON.stringify((await nativeProjectContext()).projects)),
+    [{ id: "live-project", rootPaths: ["/Users/example/live"] }],
   );
 });
 

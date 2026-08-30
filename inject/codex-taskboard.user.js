@@ -485,8 +485,12 @@
       (Array.isArray(bootstrap?.globalStateEntries) ? bootstrap.globalStateEntries : [])
         .map((entry) => [entry?.key, entry?.value]),
     );
+    const [currentLocalProjects, currentRemoteProjects] = await Promise.all([
+      requestNativeFetch("get-global-state", { key: "local-projects" }),
+      requestNativeFetch("get-global-state", { key: "remote-projects" }),
+    ]);
     const metadata = new Map();
-    const localProjects = entries.get("local-projects");
+    const localProjects = currentLocalProjects?.value ?? entries.get("local-projects");
     if (localProjects && typeof localProjects === "object" && !Array.isArray(localProjects)) {
       Object.entries(localProjects).forEach(([projectId, project]) => {
         const id = projectId.trim();
@@ -501,7 +505,7 @@
         });
       });
     }
-    const remoteProjects = entries.get("remote-projects");
+    const remoteProjects = currentRemoteProjects?.value ?? entries.get("remote-projects");
     if (Array.isArray(remoteProjects)) {
       remoteProjects.forEach((project) => {
         const id = typeof project?.id === "string" ? project.id.trim() : "";
@@ -989,7 +993,13 @@
   async function nativeProjectContext() {
     const bootstrap = await window.electronBridge?.getInitialSidebarBootstrap?.();
     const entries = bootstrap?.globalStateEntries ?? [];
-    const localProjects = entries.find((entry) => entry.key === "local-projects")?.value ?? {};
+    const currentLocalProjects = await requestNativeFetch(
+      "get-global-state",
+      { key: "local-projects" },
+    );
+    const localProjects = currentLocalProjects?.value
+      ?? entries.find((entry) => entry.key === "local-projects")?.value
+      ?? {};
     return {
       projects: Object.entries(localProjects).flatMap(([id, project]) => (
         project && Array.isArray(project.rootPaths)
