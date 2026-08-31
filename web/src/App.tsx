@@ -752,7 +752,9 @@ export function App() {
   const [connection, setConnection] = useState<ConnectionState>("connecting");
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(readTaskFilters);
-  const [boardView, setBoardView] = useState<BoardView>(() => readProjectBoardView(initialProjectId));
+  const [boardView, setBoardView] = useState<BoardView>(() => (
+    query.get("view") === "wiki" ? "wiki" : readProjectBoardView(initialProjectId)
+  ));
   const [projectBoardDisplaySettings, setProjectBoardDisplaySettings] = useState(
     readProjectBoardDisplaySettings,
   );

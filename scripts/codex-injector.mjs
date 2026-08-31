@@ -2446,6 +2446,7 @@ async function readInjectionStatus(cdp) {
       sourceHash: window.__codexTaskboardInjection__?.sourceHash || null,
       scriptIdentifier: window[${JSON.stringify(injectionScriptIdentifierName)}] || null,
       entryMounted: Boolean(document.getElementById("codex-taskboard-entry")),
+      knowledgeEntryMounted: Boolean(document.getElementById("codex-knowledge-entry")),
       pageMounted: Boolean(document.getElementById("codex-taskboard-page")),
       pageVisible: document.getElementById("codex-taskboard-page")?.hidden === false,
       frameReady: window.__codexTaskboardInjection__?.ready === true,

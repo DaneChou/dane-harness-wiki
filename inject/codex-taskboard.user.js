@@ -6,6 +6,7 @@
   const SENTINEL_KEY = "__codexTaskboardInjection__";
   const DEFAULT_TASKBOARD_URL = "http://127.0.0.1:47823/?host=codex";
   const ENTRY_ID = "codex-taskboard-entry";
+  const KNOWLEDGE_ENTRY_ID = "codex-knowledge-entry";
   const PAGE_ID = "codex-taskboard-page";
   const FRAME_ID = "codex-taskboard-frame";
   const DRAG_REGION_ID = "codex-taskboard-drag-region";
@@ -57,6 +58,7 @@
   } catch (_) {}
 
   let entry = null;
+  let knowledgeEntry = null;
   let page = null;
   let frame = null;
   let dragRegion = null;
@@ -78,6 +80,7 @@
   let hostContextTimer = null;
   let hostUiLanguage = null;
   let entryLabel = null;
+  let knowledgeEntryLabel = null;
   let statusView = "idle";
   let loadError = null;
   let lastFocusedElement = null;
@@ -91,6 +94,7 @@
   let currentCodexUserId = "";
   let suspendedNativeBrowserPanel = null;
   let active = false;
+  let activeView = "taskboard";
   let destroyed = false;
 
   function normalizedLabel(value) {
@@ -137,6 +141,8 @@
         throw new Error("Unsupported taskboard URL protocol");
       }
       if (!url.searchParams.has("host")) url.searchParams.set("host", "codex");
+      if (activeView === "wiki") url.searchParams.set("view", "wiki");
+      else url.searchParams.delete("view");
       return url;
     } catch (_) {
       return new URL(DEFAULT_TASKBOARD_URL);
@@ -159,11 +165,11 @@
     style.id = STYLE_ID;
     style.setAttribute(OWNED_ATTRIBUTE, "true");
     style.textContent = `
-      #${ENTRY_ID}[aria-current="page"] {
+      #${ENTRY_ID}[aria-current="page"], #${KNOWLEDGE_ENTRY_ID}[aria-current="page"] {
         background: var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent));
         color: var(--color-token-foreground, inherit);
       }
-      #${ENTRY_ID}:focus-visible {
+      #${ENTRY_ID}:focus-visible, #${KNOWLEDGE_ENTRY_ID}:focus-visible {
         outline: 2px solid var(--color-token-border, Highlight);
         outline-offset: 2px;
       }
@@ -293,9 +299,9 @@
     `;
   }
 
-  function createEntry(reference) {
+  function createEntry(reference, { id, kind }) {
     const button = reference.cloneNode(true);
-    button.id = ENTRY_ID;
+    button.id = id;
     button.type = "button";
     button.removeAttribute("disabled");
     button.removeAttribute("aria-expanded");
@@ -304,32 +310,43 @@
     button.removeAttribute("data-state");
     button.setAttribute(OWNED_ATTRIBUTE, "true");
     button.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
-    entryLabel = button.querySelector(".text-fade-truncate")
+    const label = button.querySelector(".text-fade-truncate")
       || Array.from(button.querySelectorAll("span")).find((node) => buttonMatches(node, PLUGIN_LABELS));
-    syncEntryText(button);
+    if (kind === "taskboard") entryLabel = label;
+    else knowledgeEntryLabel = label;
+    syncEntryText(button, kind);
     replaceEntryIcon(button);
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      openTaskboard();
+      openTaskboard(kind);
     });
     return button;
   }
 
-  function syncEntryText(button = entry) {
+  function syncEntryText(button, kind) {
     if (!button) return;
-    button.setAttribute("aria-label", hostText("打开 Dane 知识库", "Open Dane Harness Wiki"));
-    button.setAttribute("title", hostText("Dane 知识库", "Dane Harness Wiki"));
-    if (entryLabel) entryLabel.textContent = hostText("Dane 知识库", "Dane Harness Wiki");
-    else button.textContent = hostText("Dane 知识库", "Dane Harness Wiki");
+    const knowledge = kind === "wiki";
+    const chinese = knowledge ? "Dane 知识库" : "Taskboard";
+    const english = knowledge ? "Dane Knowledge" : "Taskboard";
+    const label = knowledge ? knowledgeEntryLabel : entryLabel;
+    button.setAttribute("aria-label", hostText(`打开 ${chinese}`, `Open ${english}`));
+    button.setAttribute("title", hostText(chinese, english));
+    if (label) label.textContent = hostText(chinese, english);
+    else button.textContent = hostText(chinese, english);
+  }
+
+  function activePanelText() {
+    return activeView === "wiki"
+      ? hostText("Dane 知识库", "Dane Knowledge")
+      : hostText("Taskboard", "Taskboard");
   }
 
   function syncEntryState() {
-    if (!entry) return;
-    if (active && entry.getAttribute("aria-current") !== "page") {
-      entry.setAttribute("aria-current", "page");
-    } else if (!active && entry.hasAttribute("aria-current")) {
-      entry.removeAttribute("aria-current");
+    for (const [button, kind] of [[entry, "taskboard"], [knowledgeEntry, "wiki"]]) {
+      if (!button) continue;
+      if (active && activeView === kind) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
     }
   }
 
@@ -338,9 +355,13 @@
     installStyles();
     const reference = findReferenceButton();
     if (!reference?.parentElement) return;
-    if (!entry) entry = createEntry(reference);
+    if (!entry) entry = createEntry(reference, { id: ENTRY_ID, kind: "taskboard" });
+    if (!knowledgeEntry) knowledgeEntry = createEntry(reference, { id: KNOWLEDGE_ENTRY_ID, kind: "wiki" });
     if (entry.parentElement !== reference.parentElement || entry.previousElementSibling !== reference) {
       reference.after(entry);
+    }
+    if (knowledgeEntry.parentElement !== reference.parentElement || knowledgeEntry.previousElementSibling !== entry) {
+      entry.after(knowledgeEntry);
     }
     syncEntryState();
   }
@@ -1404,7 +1425,7 @@
     section.hidden = true;
     section.setAttribute(OWNED_ATTRIBUTE, "true");
     section.setAttribute("role", "region");
-    section.setAttribute("aria-label", hostText("Dane 知识库", "Dane Harness Wiki"));
+    section.setAttribute("aria-label", activePanelText());
 
     status = document.createElement("div");
     status.id = STATUS_ID;
@@ -1443,7 +1464,7 @@
 
   function renderLoading() {
     if (!status) return;
-    status.replaceChildren(document.createTextNode(hostText("正在启动 Dane 知识库…", "Starting Dane Harness Wiki…")));
+    status.replaceChildren(document.createTextNode(hostText(`正在启动 ${activePanelText()}…`, `Starting ${activePanelText()}…`)));
     status.hidden = false;
     if (frame) frame.hidden = true;
   }
@@ -1483,9 +1504,10 @@
     const language = resolvedHostLanguage();
     if (hostUiLanguage === language) return;
     hostUiLanguage = language;
-    syncEntryText();
-    if (page) page.setAttribute("aria-label", hostText("Dane 知识库", "Dane Harness Wiki"));
-    if (frame) frame.title = hostText("Dane 知识库", "Dane Harness Wiki");
+    syncEntryText(entry, "taskboard");
+    syncEntryText(knowledgeEntry, "wiki");
+    if (page) page.setAttribute("aria-label", activePanelText());
+    if (frame) frame.title = activePanelText();
     if (statusView === "loading") renderLoading();
     else if (statusView === "error") renderLoadError();
   }
@@ -1540,7 +1562,9 @@
     nextFrame.hidden = true;
     nextFrame.setAttribute("sandbox", "allow-scripts allow-forms allow-modals allow-downloads");
     nextFrame.src = "about:blank";
-    nextFrame.title = hostText("任务面板", "Taskboard");
+    nextFrame.title = activeView === "wiki"
+      ? hostText("Dane 知识库", "Dane Knowledge")
+      : hostText("Taskboard", "Taskboard");
     nextFrame.referrerPolicy = "no-referrer";
     nextFrame.setAttribute("allow", "clipboard-read; clipboard-write");
     nextFrame.addEventListener("load", challengeFrameDocument);
@@ -1805,8 +1829,10 @@
     hostContextSnapshot = null;
   }
 
-  function openTaskboard() {
+  function openTaskboard(view = "taskboard") {
     if (destroyed) return;
+    activeView = view;
+    if (page) page.setAttribute("aria-label", activePanelText());
     if (!active) {
       lastFocusedElement = document.activeElement;
       hostContextSnapshot = readHostContext();
@@ -1822,7 +1848,7 @@
 
   function isNativePageNavigation(target) {
     const clickable = target?.closest?.("button,a,[role='button'],[data-app-action-sidebar-thread-id]");
-    if (!clickable || clickable === entry || clickable.closest(`#${ENTRY_ID}`)) return false;
+    if (!clickable || clickable === entry || clickable === knowledgeEntry || clickable.closest(`#${ENTRY_ID}, #${KNOWLEDGE_ENTRY_ID}`)) return false;
     if (!clickable.closest("aside nav[role='navigation']")) return false;
     if (clickable.hasAttribute("data-app-action-sidebar-section-toggle")) return false;
     if (buttonMatches(clickable, NATIVE_PAGE_LABELS)) return true;
@@ -1910,6 +1936,8 @@
     document.querySelectorAll(`[${OWNED_ATTRIBUTE}="true"]`).forEach((node) => node.remove());
     entry = null;
     entryLabel = null;
+    knowledgeEntry = null;
+    knowledgeEntryLabel = null;
     page = null;
     frame = null;
     dragRegion = null;
