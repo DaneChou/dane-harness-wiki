@@ -987,7 +987,15 @@ async function verifiedTaskboardDocument(frameCapability, frameUrl = taskboardPa
   const initialView = requestedUrl.searchParams.get("view") === "wiki" ? "wiki" : "taskboard";
   if (initialView === "wiki") {
     const knowledgeUrl = new URL("api/local/knowledge/", requestedUrl).href;
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href=${JSON.stringify(requestedUrl.href)}><style>html,body,iframe{width:100%;height:100%;margin:0;border:0;background:#fff}iframe{display:block}</style></head><body><iframe title="Dane 知识库" src=${JSON.stringify(knowledgeUrl)} referrerpolicy="no-referrer"></iframe></body></html>`;
+    const knowledgeResponse = await fetch(knowledgeUrl, { cache: "no-store" });
+    if (!knowledgeResponse.ok) throw new Error(`Knowledge Library HTTP ${knowledgeResponse.status}`);
+    const knowledgeHtml = await knowledgeResponse.text();
+    const knowledgeHead = "<head>";
+    if (!knowledgeHtml.includes(knowledgeHead)) throw new Error("Knowledge Library document has no head element");
+    return knowledgeHtml.replace(
+      knowledgeHead,
+      `${knowledgeHead}<base href=${JSON.stringify(knowledgeUrl)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};</script>`,
+    );
   }
   const html = await response.text();
   const head = "<head>";
