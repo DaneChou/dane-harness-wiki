@@ -704,7 +704,11 @@ function LocalRealtimeSync({
 }
 
 export function App() {
-  const query = useMemo(() => new URL(document.baseURI).searchParams, []);
+  const query = useMemo(() => new URLSearchParams(window.location.search), []);
+  const injectedInitialView = (globalThis as typeof globalThis & {
+    __DANE_HARNESS_INITIAL_VIEW__?: string;
+  }).__DANE_HARNESS_INITIAL_VIEW__;
+  const isWikiLaunch = injectedInitialView === "wiki" || query.get("view") === "wiki";
   const host = query.get("host");
   const embedded = host === "codex" || host === "workbuddy" || host === "deepseek-harness";
   const undoShortcut = navigator.userAgent.includes("Macintosh") ? "⌘Z" : "Ctrl+Z";
@@ -753,7 +757,9 @@ export function App() {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(readTaskFilters);
   const [boardView, setBoardView] = useState<BoardView>(() => (
-    query.get("view") === "wiki" ? "wiki" : readProjectBoardView(initialProjectId)
+    isWikiLaunch
+      ? "wiki"
+      : readProjectBoardView(initialProjectId)
   ));
   const [projectBoardDisplaySettings, setProjectBoardDisplaySettings] = useState(
     readProjectBoardDisplaySettings,
@@ -1657,10 +1663,11 @@ export function App() {
   }, [embedded]);
 
   useEffect(() => {
+    if (isWikiLaunch) return;
     if (selectedProjectId) {
       setBoardView(selectedProjectId === ALL_PROJECTS_ID ? "issues" : readProjectBoardView(selectedProjectId));
     }
-  }, [selectedProjectId]);
+  }, [isWikiLaunch, selectedProjectId]);
 
   useEffect(() => {
     if (!selectedProjectId) {

@@ -950,9 +950,10 @@ async function verifiedTaskboardDocument(frameCapability, frameUrl = taskboardPa
   const html = await response.text();
   const head = "<head>";
   if (!html.includes(head)) throw new Error("Taskboard document has no head element");
+  const initialView = requestedUrl.searchParams.get("view") === "wiki" ? "wiki" : "taskboard";
   return html.replace(
     head,
-    `${head}<base href=${JSON.stringify(requestedUrl.href)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};</script>`,
+    `${head}<base href=${JSON.stringify(requestedUrl.href)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};globalThis.__DANE_HARNESS_INITIAL_VIEW__=${JSON.stringify(initialView)};</script>`,
   );
 }
 

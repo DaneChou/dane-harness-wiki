@@ -111,7 +111,11 @@ async function proxyKnowledgeLibrary(response, request, url, pathname) {
   }
   const suffix = pathname.slice("/api/local/knowledge".length) || "/";
   const target = new URL(`${suffix}${url.search}`, origin);
-  return sendFetchResponse(response, await fetch(target, { method: request.method }));
+  try {
+    return sendFetchResponse(response, await fetch(target, { method: request.method }));
+  } catch {
+    throw new ApiError(503, "KNOWLEDGE_LIBRARY_UNAVAILABLE", "Dane Knowledge Library is not running");
+  }
 }
 
 function toFetchRequest(request) {
