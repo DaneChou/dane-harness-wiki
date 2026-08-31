@@ -1378,6 +1378,10 @@
       || !frameCapability
       || message.capability !== frameCapability
     ) return;
+    if (message.type === "dane-knowledge:reload" && activeView === "wiki") {
+      reloadFrame();
+      return;
+    }
     if (message.type === "taskboard:frame-awaiting-challenge") {
       postFrameChallenge();
       return;
