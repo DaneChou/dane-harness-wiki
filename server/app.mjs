@@ -119,8 +119,11 @@ async function proxyKnowledgeLibrary(response, request, url, pathname) {
     const init = { method: request.method };
     if (allowsConfigurationWrite) {
       init.headers = { "content-type": request.headers["content-type"] || "application/json" };
-      init.body = Readable.toWeb(request);
-      init.duplex = "half";
+      init.body = await readBody(
+        request,
+        16_384,
+        "Knowledge Library configuration request is too large",
+      );
     }
     return sendFetchResponse(response, await fetch(target, init));
   } catch {
