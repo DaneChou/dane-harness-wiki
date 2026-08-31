@@ -248,7 +248,6 @@ interface AutomationRequestContext {
   projectName: string;
   workspacePath: string;
   remoteProjects: CodexProjectIdentity[];
-  codexProjects: CodexProjectIdentity[];
   skillPath: string;
 }
 
@@ -304,6 +303,13 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 
 const GLOBAL_PROJECT_ID = "local";
 const ALL_PROJECTS_ID = "__all_projects__";
+const ALL_PROJECTS_DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
+  ...DEFAULT_BOARD_DISPLAY_SETTINGS,
+  mainStatuses: ["backlog", ...DEFAULT_BOARD_DISPLAY_SETTINGS.mainStatuses],
+  sidebarStatuses: DEFAULT_BOARD_DISPLAY_SETTINGS.sidebarStatuses.filter(
+    (status) => status !== "backlog",
+  ),
+};
 const RECENT_PROJECT_IDS_KEY = "taskboard.recentProjectIds.v1";
 const PROJECT_VIEW_KEY_PREFIX = "taskboard.project-view.v1.";
 const DEVICE_WORKSPACE_PATHS_KEY = "taskboard.deviceWorkspacePaths.v1";
@@ -550,7 +556,6 @@ function taskToDraft(task: Task): TaskDraft {
     status: task.status,
     priority: task.priority,
     labels: task.labels,
-    executionTarget: task.executionTarget,
     developmentContext: task.developmentContext,
     startDate: task.startDate,
     dueDate: task.dueDate,
@@ -899,8 +904,21 @@ export function App() {
   );
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
-  const boardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
-    ?? DEFAULT_BOARD_DISPLAY_SETTINGS;
+  const storedBoardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
+    ?? (isAllProjects
+      ? ALL_PROJECTS_DEFAULT_BOARD_DISPLAY_SETTINGS
+      : DEFAULT_BOARD_DISPLAY_SETTINGS);
+  const boardDisplaySettings: BoardDisplaySettings = isAllProjects
+    && storedBoardDisplaySettings.sidebarStatuses.includes("backlog")
+    && !storedBoardDisplaySettings.mainStatuses.includes("backlog")
+    ? {
+        ...storedBoardDisplaySettings,
+        mainStatuses: ["backlog", ...storedBoardDisplaySettings.mainStatuses],
+        sidebarStatuses: storedBoardDisplaySettings.sidebarStatuses.filter(
+          (status) => status !== "backlog",
+        ),
+      }
+    : storedBoardDisplaySettings;
   const automationModels = automationCatalog && automationCatalog.projectId === selectedProject?.id
     ? automationCatalog.models
     : [];
@@ -1040,22 +1058,6 @@ export function App() {
       )?.id;
 
     if (!workspacePath || !codexProjectId) {
-      const controllerProject = selectedProject.workspacePath === null
-        ? (hostContext?.projects ?? []).find((project) => (
-            (project.projectKind ?? "local") === "local"
-            && typeof project.workspacePath === "string"
-            && project.workspacePath.length > 0
-          ))
-        : undefined;
-      if (controllerProject?.workspacePath && manageTaskboardSkillPath) {
-        return {
-          workspacePath: controllerProject.workspacePath,
-          codexProjectId: controllerProject.id,
-          codexProjectKind: "local",
-          codexHostId: "local",
-          unavailableReason: null,
-        };
-      }
       return { unavailableReason: text(
         "请先在 Codex 中添加并映射该项目目录",
         "Add and map this project directory in Codex first",
@@ -1118,24 +1120,6 @@ export function App() {
               || left.codexProjectId.localeCompare(right.codexProjectId)
             ))
         : [],
-      codexProjects: (hostContext?.projects ?? [])
-        .flatMap((project) => {
-          if (!project.id || !project.workspacePath) return [];
-          const codexProjectKind = project.projectKind ?? "local";
-          const codexHostId = project.hostId ?? (codexProjectKind === "local" ? "local" : "");
-          if (!codexHostId) return [];
-          return [{
-            codexProjectId: project.id,
-            codexProjectKind,
-            codexHostId,
-            workspacePath: project.workspacePath,
-          }];
-        })
-        .sort((left, right) => (
-          left.codexHostId.localeCompare(right.codexHostId)
-          || left.workspacePath.localeCompare(right.workspacePath)
-          || left.codexProjectId.localeCompare(right.codexProjectId)
-        )),
       skillPath: manageTaskboardSkillPath,
     };
   }, [automationProjectContext, hostContext, manageTaskboardSkillPath, selectedProject]);
@@ -1225,24 +1209,6 @@ export function App() {
       ? [{ id: choice.id, name: choice.name }]
       : [];
   });
-  const executionTargetEnabled = taskboardMetadata?.mode !== "cloud";
-  const executionTargetOptions = useMemo(() => (
-    executionTargetEnabled ? (hostContext?.projects ?? []).flatMap((project) => {
-      if (!project.id || !project.name || !project.workspacePath) return [];
-      const codexProjectKind = project.projectKind ?? "local";
-      const codexHostId = project.hostId ?? (codexProjectKind === "local" ? "local" : "");
-      if (!codexHostId) return [];
-      return [{
-        label: project.name,
-        identity: {
-          codexProjectId: project.id,
-          codexProjectKind,
-          codexHostId,
-          workspacePath: project.workspacePath,
-        },
-      }];
-    }) : []
-  ), [executionTargetEnabled, hostContext?.projects]);
   const closeContextMenu = useCallback(() => setContextMenu(null), []);
   function openTaskContextMenu(task: Task, position: { x: number; y: number }) {
     if (
@@ -1357,7 +1323,6 @@ export function App() {
         projectName: context.projectName,
         workspacePath: context.workspacePath,
         remoteProjects: context.remoteProjects,
-        codexProjects: context.codexProjects,
         skillPath: context.skillPath,
         ...(automationId ? { automationId } : {}),
         enabledByUser: options.enabledByUser,
@@ -3720,8 +3685,6 @@ export function App() {
             availableLabels={availableLabels}
             developmentScan={developmentScan}
             developmentScanLoading={developmentScanLoading}
-            executionTargetEnabled={executionTargetEnabled}
-            executionTargetOptions={executionTargetOptions}
             commentsRevision={commentsRevision}
             attachmentsRevision={attachmentsRevision}
             onCreateLabel={persistProjectLabel}
@@ -4173,8 +4136,6 @@ export function App() {
           currentUser={currentUser}
           developmentScan={developmentScan}
           developmentScanLoading={developmentScanLoading}
-          executionTargetEnabled={executionTargetEnabled}
-          executionTargetOptions={executionTargetOptions}
           onCreateLabel={(label) => persistProjectLabel(label, editorProjectId ?? selectedProjectId)}
           onCancel={(draft) => {
             if (!editor.task) {

@@ -75,10 +75,6 @@ taskctl issue create \
   [--priority PRIORITY] \
   [--labels a,b] \
   [--thread-id ID] \
-  [--execution-codex-project-id ID \
-   --execution-codex-project-kind local|remote \
-   --execution-codex-host-id ID \
-   --execution-workspace-path PATH] \
   [--git-branch BRANCH] \
   [--worktree-path PATH] \
   [--worktree-branch BRANCH] \
@@ -105,10 +101,6 @@ taskctl issue update ID \
   [--priority PRIORITY] \
   [--labels a,b] \
   [--thread-id ID] \
-  [--execution-codex-project-id ID \
-   --execution-codex-project-kind local|remote \
-   --execution-codex-host-id ID \
-   --execution-workspace-path PATH] \
   [--git-branch BRANCH] \
   [--worktree-path PATH] \
   [--worktree-branch BRANCH] \
@@ -138,8 +130,6 @@ Use `issue move` to set `in_progress` before implementation and `in_review` afte
 Use either `--git-branch` or `--worktree-path`/`--worktree-branch`; an issue has only one development context. Issue JSON stores it as `developmentContext`, either `{ "type": "branch", "branch": "..." }` or `{ "type": "worktree", "path": "...", "branch": "..." }`. Its singular `threadId` is the Codex conversation that most recently created or changed the issue itself. Recurrence requires a due date.
 
 Changing only `--project` preserves the issue's existing linked conversation.
-
-Todo issues require an exact Codex execution target. Pass all four `--execution-*` options together when creating a Todo or when routing an existing issue. The project id, kind, host id, and workspace path must come from the Codex project catalog; do not infer them from an issue title or a similar path.
 
 ## Issue relations
 

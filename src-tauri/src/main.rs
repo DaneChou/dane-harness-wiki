@@ -2111,6 +2111,10 @@ fn main() {
                 instance_lock,
             ));
             app.manage(state.clone());
+            #[cfg(target_os = "macos")]
+            if let Err(error) = install_taskctl_symlink(app.handle()) {
+                append_log(&state, &format!("taskctl sync failed: {error}"));
+            }
 
             let app_info = MenuItem::with_id(
                 app,
@@ -2140,14 +2144,6 @@ fn main() {
                 MenuItem::with_id(app, "check-update", "检查更新", false, None::<&str>)?;
             let restart_codex =
                 MenuItem::with_id(app, "restart-codex", "重新打开 Codex", true, None::<&str>)?;
-            #[cfg(target_os = "macos")]
-            let install_taskctl = MenuItem::with_id(
-                app,
-                "install-taskctl",
-                "安装命令行工具",
-                true,
-                None::<&str>,
-            )?;
             let autostart_enabled = app.autolaunch().is_enabled()?;
             let autostart = CheckMenuItem::with_id(
                 app,
@@ -2168,7 +2164,6 @@ fn main() {
                     &open_taskboard_web,
                     &restart_codex,
                     &check_update,
-                    &install_taskctl,
                     &autostart,
                     &quit,
                 ],
@@ -2259,35 +2254,6 @@ fn main() {
                                     "Codex Taskboard 启动失败",
                                     &format!("{error}\n\n请确认官方 Codex/ChatGPT App 已安装。"),
                                 );
-                            }
-                        });
-                    }
-                    #[cfg(target_os = "macos")]
-                    "install-taskctl" => {
-                        let app = app.clone();
-                        tauri::async_runtime::spawn_blocking(move || {
-                            match install_taskctl_symlink(&app) {
-                                Ok((system_path, wrapper_path)) => {
-                                    app.dialog()
-                                        .message(format!(
-                                            "命令行工具安装成功。\n\n{}\n→ {}\n\n现在可在终端运行：\ncommand -v taskctl\ntaskctl --help\ntaskctl context current",
-                                            system_path.display(),
-                                            wrapper_path.display()
-                                        ))
-                                        .title("Codex Taskboard 命令行工具")
-                                        .kind(MessageDialogKind::Info)
-                                        .buttons(MessageDialogButtons::OkCustom("完成".into()))
-                                        .blocking_show();
-                                }
-                                Err(error) => {
-                                    show_error_dialog(
-                                        &app,
-                                        "Codex Taskboard 命令行工具安装失败",
-                                        &format!(
-                                            "无法更新 /opt/homebrew/bin/taskctl。\n\n{error}"
-                                        ),
-                                    );
-                                }
                             }
                         });
                     }

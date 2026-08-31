@@ -96,7 +96,6 @@ async function prepareRequest(request, {
           : { branch: payload.developmentContext.branch }),
       };
     }
-    if (isTaskMutation) delete payload.executionTarget;
     if (
       isConversationMutation
       && typeof payload.threadId === "string"

@@ -16,7 +16,6 @@ import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment
 import {
   parseTaskboardAutomationHostRequest,
   reconcileTaskboardAutomation,
-  taskboardAutomationHasPendingWork,
   taskboardAutomationPolicyOperation,
 } from "../shared/taskboard-automation.mjs";
 import {
@@ -1666,11 +1665,6 @@ async function runRemoteTaskboardAutomation(record) {
   }
 }
 
-function usesLegacyRemoteAutomation(request) {
-  return request.codexProjectKind === "remote"
-    && !Object.hasOwn(request, "codexProjects");
-}
-
 function remoteAutomationItem(request, status, nextRunAt) {
   return {
     id: request.automationId || `taskboard-${request.taskboardProjectId}`,
@@ -1688,37 +1682,25 @@ async function applyTaskboardAutomationPolicy(
   stillCurrent = () => true,
   { explicit = false, previousQuotaState, remoteNextRunAt } = {},
 ) {
-  const responses = request.enabledByUser
-    ? await Promise.all([
-      fetch(
-        `${taskboardBaseUrl}/api/tasks?projectId=${encodeURIComponent(request.taskboardProjectId)}&status=todo&archived=false`,
-        { cache: "no-store" },
-      ),
-      fetch(
-        `${taskboardBaseUrl}/api/tasks?projectId=${encodeURIComponent(request.taskboardProjectId)}&status=in_progress&archived=false`,
-        { cache: "no-store" },
-      ),
-    ])
-    : null;
-  if (responses) {
-    const failed = responses.find((response) => !response.ok);
-    if (failed) throw new Error(`Taskboard pending-work check returned HTTP ${failed.status}`);
-  }
-  const payloads = responses ? await Promise.all(responses.map((response) => response.json())) : null;
-  if (payloads?.some((payload) => !Array.isArray(payload.tasks))) {
-    throw new Error("Taskboard pending-work check returned invalid JSON");
-  }
-  const hasPendingWork = payloads
-    ? taskboardAutomationHasPendingWork(
-      payloads[0].tasks,
-      Object.hasOwn(request, "codexProjects") ? payloads[1].tasks : [],
+  const todoResponse = request.enabledByUser
+    ? await fetch(
+      `${taskboardBaseUrl}/api/tasks?projectId=${encodeURIComponent(request.taskboardProjectId)}&status=todo`,
+      { cache: "no-store" },
     )
     : null;
-  const quota = request.quotaAware && hasPendingWork !== false
+  if (todoResponse && !todoResponse.ok) {
+    throw new Error(`Taskboard todo check returned HTTP ${todoResponse.status}`);
+  }
+  const todoPayload = todoResponse ? await todoResponse.json() : null;
+  if (todoPayload && !Array.isArray(todoPayload.tasks)) {
+    throw new Error("Taskboard todo check returned invalid JSON");
+  }
+  const hasTodo = todoPayload ? todoPayload.tasks.length > 0 : null;
+  const quota = request.quotaAware && hasTodo !== false
     ? await readCodexQuotaStatus(request.model)
     : null;
   if (!stillCurrent()) return { quota, stale: true };
-  if (usesLegacyRemoteAutomation(request)) {
+  if (request.codexProjectKind === "remote") {
     const currentStatus = request.enabledByUser
       && (!request.quotaAware || previousQuotaState === "available")
       ? "ACTIVE"
@@ -1726,7 +1708,7 @@ async function applyTaskboardAutomationPolicy(
     const currentItem = remoteAutomationItem(request, currentStatus, remoteNextRunAt);
     const operation = taskboardAutomationPolicyOperation(request, {
       explicit,
-      hasPendingWork,
+      hasTodo,
       previousQuotaState,
       quotaState: quota?.state,
       currentStatus,
@@ -1747,7 +1729,7 @@ async function applyTaskboardAutomationPolicy(
       item,
       items: [item],
       operation,
-      hasPendingWork,
+      hasTodo,
       ...(quota ? { quota } : {}),
     };
   }
@@ -1764,7 +1746,7 @@ async function applyTaskboardAutomationPolicy(
   }
   const operation = taskboardAutomationPolicyOperation(request, {
     explicit,
-    hasPendingWork,
+    hasTodo,
     previousQuotaState,
     quotaState: quota?.state,
     currentStatus: currentItem?.status,
@@ -1773,9 +1755,9 @@ async function applyTaskboardAutomationPolicy(
     ? { item: currentItem, items: listed.items }
     : await reconcileTaskboardAutomation({ ...request, operation }, rpc);
   if (result?.error === "not-found") {
-    return { operation, hasPendingWork, ...(quota ? { quota } : {}) };
+    return { operation, hasTodo, ...(quota ? { quota } : {}) };
   }
-  return { ...result, operation, hasPendingWork, ...(quota ? { quota } : {}) };
+  return { ...result, operation, hasTodo, ...(quota ? { quota } : {}) };
 }
 
 function storedAutomationPolicy(request) {
@@ -1787,9 +1769,6 @@ function storedAutomationPolicy(request) {
     projectName: request.projectName,
     workspacePath: request.workspacePath,
     remoteProjects: request.remoteProjects ?? [],
-    ...(request.codexProjects === undefined
-      ? {}
-      : { codexProjects: request.codexProjects }),
     skillPath: request.skillPath,
     ...(request.automationId ? { automationId: request.automationId } : {}),
     enabledByUser: request.enabledByUser,
@@ -1893,7 +1872,7 @@ function scheduleQuotaPolicyCheck(record, result) {
   const nextRunDelay = Number.isFinite(nextRunAt) && nextRunAt > Date.now()
     ? Math.max(
       1_000,
-      nextRunAt - Date.now() - (usesLegacyRemoteAutomation(request) ? 0 : 15_000),
+      nextRunAt - Date.now() - (request.codexProjectKind === "remote" ? 0 : 15_000),
     )
     : 60_000;
   const resetDelay = result.quota?.state === "blocked"
@@ -1903,7 +1882,7 @@ function scheduleQuotaPolicyCheck(record, result) {
   const timer = setTimeout(async () => {
     if (quotaPolicyRecords.get(key)?.version !== version) return;
     try {
-      if (usesLegacyRemoteAutomation(request) && result.item?.status === "ACTIVE") {
+      if (request.codexProjectKind === "remote" && result.item?.status === "ACTIVE") {
         await runRemoteTaskboardAutomation(record);
       }
       await enqueueCurrentQuotaPolicy(key);
@@ -1938,10 +1917,17 @@ function enqueueQuotaPolicyMutation(record, rpc, { explicit = false } = {}) {
         },
       );
       if (result.stale) return result;
+      if (result.hasTodo === false && result.operation === "pause") {
+        current.version += 1;
+        current.request = { ...current.request, enabledByUser: false };
+      } else if (!explicit && result.operation === "list" && result.item?.status === "PAUSED") {
+        current.version += 1;
+        current.request = { ...current.request, enabledByUser: false };
+      }
       if (result.item?.id) {
         current.request = { ...current.request, automationId: result.item.id };
       }
-      if (usesLegacyRemoteAutomation(current.request)) {
+      if (current.request.codexProjectKind === "remote") {
         const nextRunAt = Number(result.item?.nextRunAt);
         if (result.item?.status === "ACTIVE" && Number.isFinite(nextRunAt)) {
           current.nextRunAt = nextRunAt;
@@ -2001,8 +1987,6 @@ async function reconcileStoredAutomationPolicy(request, rpc) {
     || record.request.codexHostId !== request.codexHostId
     || record.request.workspacePath !== request.workspacePath
     || JSON.stringify(record.request.remoteProjects ?? []) !== JSON.stringify(request.remoteProjects ?? [])
-    || Object.hasOwn(record.request, "codexProjects") !== Object.hasOwn(request, "codexProjects")
-    || JSON.stringify(record.request.codexProjects ?? []) !== JSON.stringify(request.codexProjects ?? [])
   ) {
     return updateAndApplyQuotaPolicy({
       ...request,
@@ -2045,21 +2029,8 @@ async function restoreQuotaPolicies(cdp) {
   if (pending) return pending;
   const restoring = (async () => {
     await ensureQuotaPoliciesLoaded();
-    const rpc = (method, body) => requestCodexAutomationViaCdp(
-      cdp,
-      undefined,
-      method,
-      body,
-    );
     for (const [projectId, record] of quotaPolicyRecords) {
       if (record.request.enabledByUser) {
-        if (!Object.hasOwn(record.request, "codexProjects")) {
-          await reconcileTaskboardAutomation(
-            { ...record.request, operation: "pause" },
-            rpc,
-          );
-          continue;
-        }
         await enqueueCurrentQuotaPolicy(projectId);
       }
     }
@@ -2354,7 +2325,7 @@ function installTaskboardHostBinding(
               rpc,
             );
             return stored ?? (
-              usesLegacyRemoteAutomation(request)
+              request.codexProjectKind === "remote"
                 ? { items: [] }
                 : reconcileTaskboardAutomation(request, rpc)
             );

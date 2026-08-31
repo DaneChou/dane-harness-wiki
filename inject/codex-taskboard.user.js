@@ -1188,7 +1188,6 @@
       projectName: payload.projectName,
       workspacePath: payload.workspacePath,
       ...(payload.remoteProjects === undefined ? {} : { remoteProjects: payload.remoteProjects }),
-      ...(payload.codexProjects === undefined ? {} : { codexProjects: payload.codexProjects }),
       skillPath: payload.skillPath,
       ...(payload.automationId === undefined ? {} : { automationId: payload.automationId }),
       enabledByUser: payload.enabledByUser,
