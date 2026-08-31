@@ -984,10 +984,14 @@ async function verifiedTaskboardDocument(frameCapability, frameUrl = taskboardPa
     .update(challenge)
     .digest("hex");
   if (proof !== expectedProof) throw new Error("Taskboard service identity check failed");
+  const initialView = requestedUrl.searchParams.get("view") === "wiki" ? "wiki" : "taskboard";
+  if (initialView === "wiki") {
+    const knowledgeUrl = new URL("api/local/knowledge/", requestedUrl).href;
+    return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><base href=${JSON.stringify(requestedUrl.href)}><style>html,body,iframe{width:100%;height:100%;margin:0;border:0;background:#fff}iframe{display:block}</style></head><body><iframe title="Dane 知识库" src=${JSON.stringify(knowledgeUrl)} referrerpolicy="no-referrer"></iframe></body></html>`;
+  }
   const html = await response.text();
   const head = "<head>";
   if (!html.includes(head)) throw new Error("Taskboard document has no head element");
-  const initialView = requestedUrl.searchParams.get("view") === "wiki" ? "wiki" : "taskboard";
   return html.replace(
     head,
     `${head}<base href=${JSON.stringify(requestedUrl.href)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};globalThis.__DANE_HARNESS_INITIAL_VIEW__=${JSON.stringify(initialView)};</script>`,

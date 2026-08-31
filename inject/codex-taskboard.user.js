@@ -284,7 +284,7 @@
     return Array.from(group?.children || []).filter((child) => child.tagName === "BUTTON").at(-1) || null;
   }
 
-  function replaceEntryIcon(button) {
+  function replaceEntryIcon(button, kind) {
     const icon = button.querySelector("svg");
     if (!icon) return;
     icon.setAttribute("viewBox", "0 0 24 24");
@@ -293,10 +293,16 @@
     icon.setAttribute("stroke-width", "1.8");
     icon.setAttribute("stroke-linecap", "round");
     icon.setAttribute("stroke-linejoin", "round");
-    icon.innerHTML = `
-      <rect x="3.5" y="4" width="17" height="16" rx="2.5"></rect>
-      <path d="M9 4v16M14.5 8h2.5M14.5 12h2.5M14.5 16h2.5"></path>
-    `;
+    icon.innerHTML = kind === "wiki"
+      ? `
+        <path d="M4 5.5c2.8-1.2 5.7-1.2 8.5.2v13c-2.8-1.4-5.7-1.4-8.5-.2z"></path>
+        <path d="M20 5.5c-2.8-1.2-5.7-1.2-8.5.2v13c2.8-1.4 5.7-1.4 8.5-.2z"></path>
+        <path d="M8 9h2.5M8 12h2.5M14 9h2.5M14 12h2.5"></path>
+      `
+      : `
+        <rect x="3.5" y="4" width="17" height="16" rx="2.5"></rect>
+        <path d="M9 4v16M14.5 8h2.5M14.5 12h2.5M14.5 16h2.5"></path>
+      `;
   }
 
   function createEntry(reference, { id, kind }) {
@@ -315,7 +321,7 @@
     if (kind === "taskboard") entryLabel = label;
     else knowledgeEntryLabel = label;
     syncEntryText(button, kind);
-    replaceEntryIcon(button);
+    replaceEntryIcon(button, kind);
     button.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
@@ -1346,6 +1352,21 @@
       return;
     }
     postFrameChallenge();
+    // A few Codex versions keep an opaque iframe from delivering postMessage
+    // back to the renderer.  Loading the document is still sufficient for the
+    // local Taskboard UI, so do not leave the whole page behind a permanent
+    // spinner when that optional bridge is unavailable.
+    const loadedFrame = frame;
+    window.setTimeout(() => {
+      if (!active || frame !== loadedFrame || frameReady) return;
+      frameReady = true;
+      frameReadyWaiters.forEach(({ resolve, timer }) => {
+        window.clearTimeout(timer);
+        resolve();
+      });
+      frameReadyWaiters.clear();
+      showFrame();
+    }, 800);
   }
 
   function onFrameMessage(event) {
