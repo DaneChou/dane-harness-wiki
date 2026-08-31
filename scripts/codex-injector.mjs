@@ -3371,6 +3371,7 @@ async function main() {
           source,
           sourceHash,
           false,
+          options.openView,
           null,
           injectedTargets,
           true,
