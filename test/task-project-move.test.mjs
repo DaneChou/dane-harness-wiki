@@ -42,6 +42,12 @@ function createTask(database, projectId, title, overrides = {}) {
     priority: "none",
     labels: [],
     threadId: null,
+    executionTarget: {
+      codexProjectId: projectId,
+      codexProjectKind: "local",
+      codexHostId: "local",
+      workspacePath: `/tmp/${projectId}`,
+    },
     actor,
     assignee: actor,
     developmentContext: null,
@@ -51,6 +57,21 @@ function createTask(database, projectId, title, overrides = {}) {
     ...overrides,
   });
 }
+
+test("direct database creation rejects an unrouted todo", async () => {
+  const fixture = await createFixture();
+  try {
+    createProject(fixture.database, "unrouted-todo");
+    assert.throws(
+      () => createTask(fixture.database, "unrouted-todo", "Missing target", {
+        executionTarget: null,
+      }),
+      { code: "EXECUTION_TARGET_REQUIRED" },
+    );
+  } finally {
+    await fixture.close();
+  }
+});
 
 test("local project moves reject related issues without mutating the task", async () => {
   const fixture = await createFixture();

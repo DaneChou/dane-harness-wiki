@@ -332,6 +332,11 @@ export interface CodexProjectIdentity {
   workspacePath: string;
 }
 
+export interface CodexProjectOption {
+  identity: CodexProjectIdentity;
+  label: string;
+}
+
 export interface CodexThreadBinding extends CodexProjectIdentity {
   threadId: string;
 }
@@ -417,6 +422,7 @@ export interface Task {
   sortOrder: number;
   threadId: string | null;
   threadBinding: CodexThreadBinding | null;
+  executionTarget: CodexProjectIdentity | null;
   legacyLocalThreadId: string | null;
   conversationRefs: TaskConversationRef[];
   participants: ActorIdentity[];
@@ -529,6 +535,7 @@ export interface TaskDraft {
   priority: TaskPriority;
   labels: string[];
   assigneeTarget?: AssigneeTarget;
+  executionTarget?: CodexProjectIdentity | null;
   developmentContext: DevelopmentContext | null;
   startDate: string | null;
   dueDate: string | null;
