@@ -96,8 +96,12 @@ function sendEmpty(response, status, headers = {}) {
 }
 
 async function proxyKnowledgeLibrary(response, request, url, pathname) {
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return methodNotAllowed(response, ["GET", "HEAD"]);
+  const allowsConfigurationWrite = (
+    request.method === "POST"
+    && pathname === "/api/local/knowledge/api/config"
+  );
+  if (request.method !== "GET" && request.method !== "HEAD" && !allowsConfigurationWrite) {
+    return methodNotAllowed(response, ["GET", "HEAD", "POST"]);
   }
   const configured = process.env[DANE_KNOWLEDGE_URL_ENV] ?? "http://127.0.0.1:7823";
   let origin;
@@ -112,7 +116,13 @@ async function proxyKnowledgeLibrary(response, request, url, pathname) {
   const suffix = pathname.slice("/api/local/knowledge".length) || "/";
   const target = new URL(`${suffix}${url.search}`, origin);
   try {
-    return sendFetchResponse(response, await fetch(target, { method: request.method }));
+    const init = { method: request.method };
+    if (allowsConfigurationWrite) {
+      init.headers = { "content-type": request.headers["content-type"] || "application/json" };
+      init.body = Readable.toWeb(request);
+      init.duplex = "half";
+    }
+    return sendFetchResponse(response, await fetch(target, init));
   } catch {
     throw new ApiError(503, "KNOWLEDGE_LIBRARY_UNAVAILABLE", "Dane Knowledge Library is not running");
   }
