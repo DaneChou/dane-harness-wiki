@@ -11,6 +11,12 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createTaskboardServer, resolveServerOptions } from "../server/index.mjs";
 
 const runningApps = [];
+const LOCAL_EXECUTION_TARGET = {
+  codexProjectId: "local-project",
+  codexProjectKind: "local",
+  codexHostId: "local",
+  workspacePath: "/work/local-project",
+};
 
 afterEach(async () => {
   while (runningApps.length > 0) {
@@ -231,6 +237,9 @@ test("existing task and comment thread attribution remains content-specific", as
 
   const result = await request(baseUrl, "/api/tasks/legacy-task");
   assert.equal(result.response.status, 200);
+  assert.equal(result.body.task.status, "backlog");
+  assert.equal(result.body.task.executionTarget, null);
+  assert.equal(result.body.task.version, 2);
   assert.equal(result.body.task.threadId, "legacy-thread");
   assert.equal(result.body.task.threadBinding, null);
   assert.equal(result.body.task.legacyLocalThreadId, "legacy-thread");
@@ -697,6 +706,12 @@ test("project and task CRUD flow", async () => {
       status: "todo",
       priority: "high",
       labels: ["frontend", "mvp"],
+      executionTarget: {
+        codexProjectId: "website-project",
+        codexProjectKind: "local",
+        codexHostId: "local",
+        workspacePath: "/work/website",
+      },
       threadId: "thread-123",
       developmentContext: {
         type: "worktree",
@@ -714,6 +729,12 @@ test("project and task CRUD flow", async () => {
   assert.equal(created.sortOrder, 1000);
   assert.equal(created.archivedAt, null);
   assert.deepEqual(created.labels, ["frontend", "mvp"]);
+  assert.deepEqual(created.executionTarget, {
+    codexProjectId: "website-project",
+    codexProjectKind: "local",
+    codexHostId: "local",
+    workspacePath: "/work/website",
+  });
   assert.equal(created.threadId, "thread-123");
   assert.equal(created.creatorType, "user");
   assert.equal(created.creatorId, "local-user");
@@ -815,6 +836,10 @@ test("moving a task updates its status and sort order", async () => {
 
 test("remote task bindings keep their own identity and can be cleared independently", async () => {
   const baseUrl = await startServer();
+  const targetBoard = (await request(baseUrl, "/api/projects", {
+    method: "POST",
+    body: { id: "retargeted", name: "Retargeted", workspacePath: "/different/remote/path" },
+  })).body.project;
   const legacy = (await request(baseUrl, "/api/tasks", {
     method: "POST",
     body: { title: "Legacy binding", threadId: "legacy-thread" },
@@ -835,7 +860,17 @@ test("remote task bindings keep their own identity and can be cleared independen
   };
   const created = (await request(baseUrl, "/api/tasks", {
     method: "POST",
-    body: { title: "Remote binding", threadId: binding.threadId, threadBinding: binding },
+    body: {
+      title: "Remote binding",
+      threadId: binding.threadId,
+      threadBinding: binding,
+      executionTarget: {
+        codexProjectId: binding.codexProjectId,
+        codexProjectKind: binding.codexProjectKind,
+        codexHostId: binding.codexHostId,
+        workspacePath: binding.workspacePath,
+      },
+    },
   })).body.task;
   assert.deepEqual(created.threadBinding, binding);
   assert.deepEqual(created.conversationRefs.map((ref) => ref.codexHostId), ["ssh-a"]);
@@ -849,6 +884,28 @@ test("remote task bindings keep their own identity and can be cleared independen
     },
   })).body.task;
   assert.deepEqual(continued.threadBinding, binding);
+
+  const changedExecutionTarget = {
+    codexProjectId: "remote-project-b",
+    codexProjectKind: "remote",
+    codexHostId: "ssh-b",
+    workspacePath: "/different/remote/path",
+  };
+  const rejectedRetarget = await request(baseUrl, `/api/tasks/${created.id}`, {
+    method: "PATCH",
+    body: {
+      version: continued.version,
+      executionTarget: changedExecutionTarget,
+    },
+  });
+  assert.equal(rejectedRetarget.response.status, 409);
+  assert.equal(rejectedRetarget.body.error.code, "EXECUTION_TARGET_LOCKED");
+  assert.deepEqual((await request(baseUrl, `/api/tasks/${created.id}`)).body.task.executionTarget, {
+    codexProjectId: binding.codexProjectId,
+    codexProjectKind: binding.codexProjectKind,
+    codexHostId: binding.codexHostId,
+    workspacePath: binding.workspacePath,
+  });
 
   const controllerComment = (await request(baseUrl, `/api/tasks/${created.id}/comments`, {
     method: "POST",
@@ -876,13 +933,24 @@ test("remote task bindings keep their own identity and can be cleared independen
     { threadId: "controller-thread", legacyLocal: true },
   ]);
 
+  const retargeted = (await request(baseUrl, `/api/tasks/${created.id}`, {
+    method: "PATCH",
+    body: {
+      version: blocked.version,
+      projectId: targetBoard.id,
+      executionTarget: changedExecutionTarget,
+    },
+  })).body.task;
+  assert.equal(retargeted.projectId, targetBoard.id);
+  assert.deepEqual(retargeted.executionTarget, changedExecutionTarget);
+  assert.equal(retargeted.threadId, null);
+  assert.equal(retargeted.threadBinding, null);
+
   const restored = (await request(baseUrl, `/api/tasks/${created.id}/move`, {
     method: "POST",
     body: {
-      version: blocked.version,
+      version: retargeted.version,
       status: "todo",
-      threadId: "controller-thread",
-      threadBinding: null,
     },
   })).body.task;
   assert.equal(restored.threadId, null);
@@ -923,7 +991,7 @@ test("issues support parent, sub-issue, blocking, and related issue relationship
   const createIssue = async (title, status = "todo", projectId = "local") => {
     const result = await request(baseUrl, "/api/tasks", {
       method: "POST",
-      body: { projectId, title, status },
+      body: { projectId, title, status, ...(status === "todo" ? { executionTarget: LOCAL_EXECUTION_TARGET } : {}) },
     });
     assert.equal(result.response.status, 201);
     return result.body.task;
@@ -1210,7 +1278,7 @@ test("all task statuses are accepted, filtered, and listed in workflow order", a
   for (const status of statuses) {
     const createResult = await request(baseUrl, "/api/tasks", {
       method: "POST",
-      body: { title: status, status },
+      body: { title: status, status, ...(status === "todo" ? { executionTarget: LOCAL_EXECUTION_TARGET } : {}) },
     });
     assert.equal(createResult.response.status, 201);
     assert.equal(createResult.body.task.status, status);
@@ -1736,6 +1804,120 @@ test("request boundaries reject unknown fields and invalid values", async () => 
   });
   assert.equal(invalidWorktree.response.status, 400);
   assert.equal(invalidWorktree.body.error.code, "INVALID_FIELD");
+
+  const relativeExecutionTarget = await request(baseUrl, "/api/tasks", {
+    method: "POST",
+    body: {
+      title: "Invalid execution target",
+      status: "todo",
+      executionTarget: {
+        ...LOCAL_EXECUTION_TARGET,
+        workspacePath: "relative/path",
+      },
+    },
+  });
+  assert.equal(relativeExecutionTarget.response.status, 400);
+  assert.equal(relativeExecutionTarget.body.error.code, "INVALID_FIELD");
+});
+
+test("todo issues require and persist an exact Codex execution target", async () => {
+  const baseUrl = await startServer();
+  const unrouted = await request(baseUrl, "/api/tasks", {
+    method: "POST",
+    body: { title: "Unrouted todo", status: "todo" },
+  });
+  assert.equal(unrouted.response.status, 400);
+  assert.equal(unrouted.body.error.code, "EXECUTION_TARGET_REQUIRED");
+
+  const created = (await request(baseUrl, "/api/tasks", {
+    method: "POST",
+    body: { title: "Route before todo" },
+  })).body.task;
+  const rejectedMove = await request(baseUrl, `/api/tasks/${created.id}/move`, {
+    method: "POST",
+    body: { version: created.version, status: "todo" },
+  });
+  assert.equal(rejectedMove.response.status, 400);
+  assert.equal(rejectedMove.body.error.code, "EXECUTION_TARGET_REQUIRED");
+
+  const routed = (await request(baseUrl, `/api/tasks/${created.id}`, {
+    method: "PATCH",
+    body: { version: created.version, executionTarget: LOCAL_EXECUTION_TARGET },
+  })).body.task;
+  assert.deepEqual(routed.executionTarget, LOCAL_EXECUTION_TARGET);
+  const moved = await request(baseUrl, `/api/tasks/${routed.id}/move`, {
+    method: "POST",
+    body: { version: routed.version, status: "todo" },
+  });
+  assert.equal(moved.response.status, 200);
+  assert.equal(moved.body.task.status, "todo");
+  assert.deepEqual(moved.body.task.executionTarget, LOCAL_EXECUTION_TARGET);
+
+  const rawBacklog = (await request(baseUrl, "/api/tasks", {
+    method: "POST",
+    body: { title: "Raw persistence guard" },
+  })).body.task;
+  assert.throws(
+    () => runningApps.at(-1).app.database.database.prepare(`
+      UPDATE tasks SET status = 'todo' WHERE id = ?
+    `).run(rawBacklog.id),
+    /todo requires an execution target/,
+  );
+});
+
+test("Jira sync keeps unrouted new work outside todo until an execution target exists", async () => {
+  await startServer();
+  const database = runningApps.at(-1).app.database;
+  const issue = {
+    id: "JIRA:ORIGIN-1:10001",
+    identifier: "JIRA:ORIGIN-1:10001",
+    title: "Route Jira work",
+    description: "",
+    status: "todo",
+    priority: "none",
+    labels: [],
+    sortOrder: 1024,
+    creator: {
+      type: "user",
+      id: "jira:reporter",
+      name: "Reporter",
+      avatarUrl: null,
+    },
+    assignee: {
+      type: "user",
+      id: "jira:assignee",
+      name: "Assignee",
+      avatarUrl: null,
+    },
+    dueDate: null,
+    externalOrigin: "origin-1",
+    externalId: "10001",
+    externalKey: "OPS-1",
+    externalUrl: "https://jira.example.test/browse/OPS-1",
+    createdAt: "2026-08-27T10:00:00.000Z",
+    updatedAt: "2026-08-27T10:00:00.000Z",
+  };
+
+  database.syncJiraTasks([issue], { projectName: "Jira · Test" });
+  const imported = database.getTask(issue.id);
+  assert.equal(imported.status, "backlog");
+  assert.equal(imported.executionTarget, null);
+
+  const routed = database.updateTask(
+    imported.id,
+    imported.version,
+    { executionTarget: LOCAL_EXECUTION_TARGET },
+    undefined,
+    undefined,
+    { type: "user", id: "local-user", name: "本地用户", avatarUrl: null },
+  );
+  database.syncJiraTasks([{ ...issue, updatedAt: "2026-08-27T10:05:00.000Z" }], {
+    projectName: "Jira · Test",
+  });
+  const resumed = database.getTask(issue.id);
+  assert.equal(routed.status, "backlog");
+  assert.equal(resumed.status, "todo");
+  assert.deepEqual(resumed.executionTarget, LOCAL_EXECUTION_TARGET);
 });
 
 test("task changes from one LAN client are broadcast to another client", async () => {

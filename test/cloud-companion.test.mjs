@@ -36,11 +36,18 @@ function jsonResponse(payload, status = 200) {
 async function runCli(argv, overrides = {}) {
   const stdout = capture();
   const stderr = capture();
+  const env = { ...(overrides.env ?? {}) };
+  if (
+    env.CODEX_TASKBOARD_URL === undefined
+    && env.CODEX_TASKBOARD_RUNTIME_FILE === undefined
+  ) {
+    env.CODEX_TASKBOARD_URL = "http://127.0.0.1:47823";
+  }
   const exitCode = await main(argv, {
     stdout: stdout.stream,
     stderr: stderr.stream,
-    env: {},
     ...overrides,
+    env,
   });
   return { exitCode, stdout, stderr };
 }
@@ -582,6 +589,12 @@ test("task mutations do not send absolute worktree paths to cloud", async () => 
           type: "worktree",
           path: "/Users/alice/.codex/worktrees/portfolio-1",
           branch: "feature/portfolio-1",
+        },
+        executionTarget: {
+          codexProjectId: "portfolio-local",
+          codexProjectKind: "local",
+          codexHostId: "local",
+          workspacePath: "/Users/alice/Documents/portfolio",
         },
       }),
     },

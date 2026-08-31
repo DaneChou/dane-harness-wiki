@@ -17,6 +17,7 @@ const oldTodoDraft: NewTaskEditorDraft = {
   priority: "high",
   assignee: currentUser,
   selectedLabels: ["回归证据"],
+  executionTarget: null,
   developmentContext: null,
   startDate: "",
   dueDate: "",
@@ -41,6 +42,8 @@ createRoot(document.getElementById("root")!).render(
     initialDraft={oldTodoDraft}
     labels={["回归证据"]}
     currentUser={currentUser}
+    executionTargetEnabled={true}
+    executionTargetOptions={[]}
     developmentScan={{ workspacePath: null, contexts: [] }}
     developmentScanLoading={false}
     onCreateLabel={async () => {}}
