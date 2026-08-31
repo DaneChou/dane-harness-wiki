@@ -135,6 +135,7 @@ function parseArgs(argv) {
     launch: false,
     watch: false,
     open: false,
+    openView: "taskboard",
     refresh: false,
     refreshIfRunning: false,
     attachExisting: false,
@@ -150,6 +151,10 @@ function parseArgs(argv) {
     else if (arg === "--cdp-pipe") options.cdpPipe = true;
     else if (arg === "--watch") options.watch = true;
     else if (arg === "--open") options.open = true;
+    else if (arg === "--open-wiki") {
+      options.open = true;
+      options.openView = "wiki";
+    }
     else if (arg === "--refresh") options.refresh = true;
     else if (arg === "--refresh-if-running") options.refreshIfRunning = true;
     else if (arg === "--attach-existing") options.attachExisting = true;
@@ -2874,7 +2879,7 @@ async function main() {
         expression: `(() => {
           const taskboard = window.__codexTaskboardInjection__;
           if (typeof taskboard?.open !== "function") return false;
-          taskboard.open();
+          taskboard.open(${JSON.stringify(options.openView)});
           return true;
         })()`,
         returnByValue: true,
