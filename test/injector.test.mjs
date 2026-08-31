@@ -123,7 +123,7 @@ test("passive automation policy keeps the user opt-in while the queue is idle", 
 
 test("catalog-backed remote projects use the shared routed automation", async () => {
   const helperStart = source.indexOf("function usesLegacyRemoteAutomation");
-  const helperEnd = source.indexOf("\n}\n\nfunction remoteAutomationItem", helperStart) + 2;
+  const helperEnd = source.indexOf("function remoteAutomationItem", helperStart);
   const usesLegacyRemoteAutomation = vm.runInNewContext(
     `(${source.slice(helperStart, helperEnd)})`,
   );
@@ -175,7 +175,7 @@ test("catalog-backed remote projects use the shared routed automation", async ()
 
 test("catalog-backed remote policy timers do not invoke the legacy dispatcher", async () => {
   const helperStart = source.indexOf("function usesLegacyRemoteAutomation");
-  const helperEnd = source.indexOf("\n}\n\nfunction remoteAutomationItem", helperStart) + 2;
+  const helperEnd = source.indexOf("function remoteAutomationItem", helperStart);
   const usesLegacyRemoteAutomation = vm.runInNewContext(
     `(${source.slice(helperStart, helperEnd)})`,
   );
