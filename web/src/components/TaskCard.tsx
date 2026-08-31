@@ -337,7 +337,7 @@ function DueDateControl({
 
 function AssigneeControl({
   task,
-  participants,
+  participants: persistedParticipants,
   currentUser,
   disabled,
   open,
@@ -356,7 +356,7 @@ function AssigneeControl({
   const displayIdentifier = task.externalKey ?? task.identifier;
   const currentUserKey = actorKey(currentUser);
   const assignee = actorKey(task.assignee) === currentUserKey ? currentUser : task.assignee;
-  const displayParticipants = participants.map((participant) => (
+  const participants = persistedParticipants.map((participant) => (
     actorKey(participant) === currentUserKey ? currentUser : participant
   ));
   const options = [assignee, currentUser, CODEX_AGENT_ACTOR]
@@ -365,7 +365,7 @@ function AssigneeControl({
     ));
   return (
     <TaskPropertyPicker
-      value={actorKey(assignee)}
+      value={actorKey(task.assignee)}
       options={options.map((actor) => ({
         value: actorKey(actor),
         label: actorKey(actor) === currentUserKey ? text(`${actor.name}（我）`, `${actor.name} (me)`) : actor.name,
@@ -375,7 +375,7 @@ function AssigneeControl({
       disabled={disabled}
       className="task-participants-control card-property-control"
       triggerClassName="task-assignee-trigger"
-      triggerContent={<ParticipantAvatars participants={displayParticipants} />}
+      triggerContent={<ParticipantAvatars participants={participants} />}
       ariaLabel={text(`${displayIdentifier} 负责人`, `${displayIdentifier} assignee`)}
       title={text(`负责人：${assignee.name}`, `Assignee: ${assignee.name}`)}
       onOpenChange={onOpenChange}

@@ -1007,7 +1007,8 @@ export function TaskDetail({
   ) {
     developmentOptions.unshift(currentTask.developmentContext);
   }
-  const displayAssignee = actorKey(currentTask.assignee) === actorKey(currentUser)
+  const displayAssignee = currentTask.assignee.type === currentUser.type
+    && currentTask.assignee.id === currentUser.id
     ? currentUser
     : currentTask.assignee;
   const assigneeOptions = [displayAssignee, currentUser, CODEX_AGENT_ACTOR]
