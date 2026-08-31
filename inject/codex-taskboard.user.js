@@ -318,10 +318,10 @@
 
   function syncEntryText(button = entry) {
     if (!button) return;
-    button.setAttribute("aria-label", hostText("打开任务面板", "Open Taskboard"));
-    button.setAttribute("title", hostText("任务面板", "Taskboard"));
-    if (entryLabel) entryLabel.textContent = hostText("任务面板", "Taskboard");
-    else button.textContent = hostText("任务面板", "Taskboard");
+    button.setAttribute("aria-label", hostText("打开 Dane 知识库", "Open Dane Harness Wiki"));
+    button.setAttribute("title", hostText("Dane 知识库", "Dane Harness Wiki"));
+    if (entryLabel) entryLabel.textContent = hostText("Dane 知识库", "Dane Harness Wiki");
+    else button.textContent = hostText("Dane 知识库", "Dane Harness Wiki");
   }
 
   function syncEntryState() {
@@ -1404,7 +1404,7 @@
     section.hidden = true;
     section.setAttribute(OWNED_ATTRIBUTE, "true");
     section.setAttribute("role", "region");
-    section.setAttribute("aria-label", hostText("任务面板", "Taskboard"));
+    section.setAttribute("aria-label", hostText("Dane 知识库", "Dane Harness Wiki"));
 
     status = document.createElement("div");
     status.id = STATUS_ID;
@@ -1443,7 +1443,7 @@
 
   function renderLoading() {
     if (!status) return;
-    status.replaceChildren(document.createTextNode(hostText("正在启动任务面板…", "Starting Taskboard…")));
+    status.replaceChildren(document.createTextNode(hostText("正在启动 Dane 知识库…", "Starting Dane Harness Wiki…")));
     status.hidden = false;
     if (frame) frame.hidden = true;
   }
@@ -1484,8 +1484,8 @@
     if (hostUiLanguage === language) return;
     hostUiLanguage = language;
     syncEntryText();
-    if (page) page.setAttribute("aria-label", hostText("任务面板", "Taskboard"));
-    if (frame) frame.title = hostText("任务面板", "Taskboard");
+    if (page) page.setAttribute("aria-label", hostText("Dane 知识库", "Dane Harness Wiki"));
+    if (frame) frame.title = hostText("Dane 知识库", "Dane Harness Wiki");
     if (statusView === "loading") renderLoading();
     else if (statusView === "error") renderLoadError();
   }

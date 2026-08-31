@@ -2844,7 +2844,7 @@ async function main() {
         throw new Error("Taskboard injection is not ready");
       }
       await connection.send("Page.bringToFront");
-      activateCodexApp(codexAppPid);
+      if (Number.isInteger(codexAppPid) && codexAppPid > 0) activateCodexApp(codexAppPid);
       openedRequestGeneration = Math.max(openedRequestGeneration, generation);
       return true;
     } catch (error) {
