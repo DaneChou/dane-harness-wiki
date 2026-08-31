@@ -45,14 +45,8 @@ npm run taskctl -- issue create \
   --title "Implement the next slice" \
   --status todo \
   --priority high \
-  --labels product,mvp \
-  --execution-codex-project-id SAVED_CODEX_PROJECT_ID \
-  --execution-codex-project-kind local \
-  --execution-codex-host-id local \
-  --execution-workspace-path /absolute/path/to/repository
+  --labels product,mvp
 ```
-
-Todo issues require all four execution target fields from one exact saved Codex project identity.
 
 Use `npm link` if you want `taskctl` on your shell path. Set `CODEX_TASKBOARD_URL` to point the CLI at another local or LAN service. Cloud deployments are configured through the **loopback companion** (device-local loopback service for auth and path mapping—not a chat persona) with `taskctl cloud login`.
 
