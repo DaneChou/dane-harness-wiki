@@ -303,7 +303,7 @@ const DEFAULT_USER_ACTOR: ActorIdentity = {
 
 const GLOBAL_PROJECT_ID = "local";
 const ALL_PROJECTS_ID = "__all_projects__";
-const ALL_PROJECTS_DEFAULT_BOARD_DISPLAY_SETTINGS = {
+const ALL_PROJECTS_DEFAULT_BOARD_DISPLAY_SETTINGS: BoardDisplaySettings = {
   ...DEFAULT_BOARD_DISPLAY_SETTINGS,
   mainStatuses: ["backlog", ...DEFAULT_BOARD_DISPLAY_SETTINGS.mainStatuses],
   sidebarStatuses: DEFAULT_BOARD_DISPLAY_SETTINGS.sidebarStatuses.filter(
@@ -904,10 +904,21 @@ export function App() {
   );
   const isAllProjects = selectedProjectId === ALL_PROJECTS_ID;
   const isJiraProject = selectedProject?.source === "jira";
-  const boardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
+  const storedBoardDisplaySettings = projectBoardDisplaySettings[selectedProjectId]
     ?? (isAllProjects
       ? ALL_PROJECTS_DEFAULT_BOARD_DISPLAY_SETTINGS
       : DEFAULT_BOARD_DISPLAY_SETTINGS);
+  const boardDisplaySettings: BoardDisplaySettings = isAllProjects
+    && storedBoardDisplaySettings.sidebarStatuses.includes("backlog")
+    && !storedBoardDisplaySettings.mainStatuses.includes("backlog")
+    ? {
+        ...storedBoardDisplaySettings,
+        mainStatuses: ["backlog", ...storedBoardDisplaySettings.mainStatuses],
+        sidebarStatuses: storedBoardDisplaySettings.sidebarStatuses.filter(
+          (status) => status !== "backlog",
+        ),
+      }
+    : storedBoardDisplaySettings;
   const automationModels = automationCatalog && automationCatalog.projectId === selectedProject?.id
     ? automationCatalog.models
     : [];
