@@ -2550,6 +2550,7 @@ async function injectTarget(
   source,
   sourceHash,
   shouldOpen,
+  openView,
   screenshotPath,
   keepAlive,
   supervisor,
@@ -2590,7 +2591,7 @@ async function injectTarget(
         evaluateCurrentSource: (currentSource) => evaluateInjectionSource(cdp, currentSource),
         publishRegistration: (identifier) => publishInjectionScriptIdentifier(cdp, identifier),
         reopen: () => cdp.send("Runtime.evaluate", {
-          expression: "window.__codexTaskboardInjection__?.open()",
+          expression: `window.__codexTaskboardInjection__?.open(${JSON.stringify(openView)})`,
           returnByValue: true,
         }),
       });
@@ -2602,7 +2603,7 @@ async function injectTarget(
       await hostBridge.publishHeartbeat();
       if (shouldOpen && !reconciled.shouldRemainOpen) {
         await cdp.send("Runtime.evaluate", {
-          expression: "window.__codexTaskboardInjection__?.open()",
+          expression: `window.__codexTaskboardInjection__?.open(${JSON.stringify(openView)})`,
           returnByValue: true,
         });
       }
@@ -2640,7 +2641,7 @@ async function injectTarget(
         expression: `(() => {
           const taskboard = window.__codexTaskboardInjection__;
           taskboard?.close();
-          taskboard?.open();
+          taskboard?.open(${JSON.stringify(openView)});
         })()`,
       });
       await new Promise((resolve) => setTimeout(resolve, 500));
@@ -2678,6 +2679,7 @@ async function injectAll(
   source,
   sourceHash,
   shouldOpen,
+  openView,
   screenshotPath,
   injectedTargets,
   keepAlive,
@@ -2714,6 +2716,7 @@ async function injectAll(
       source,
       sourceHash,
       shouldOpen && firstTarget,
+      openView,
       firstTarget ? screenshotPath : null,
       keepAlive,
       supervisor,
@@ -3275,6 +3278,7 @@ async function main() {
           source,
           sourceHash,
           shouldOpenFirstTarget,
+          options.openView,
           options.screenshot,
           injectedTargets,
           options.watch,
