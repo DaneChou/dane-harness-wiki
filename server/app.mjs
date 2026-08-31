@@ -96,11 +96,14 @@ function sendEmpty(response, status, headers = {}) {
 }
 
 async function proxyKnowledgeLibrary(response, request, url, pathname) {
-  const allowsConfigurationWrite = (
-    request.method === "POST"
-    && pathname === "/api/local/knowledge/api/config"
+  const isKnowledgeConfigurationWrite = (
+    request.method === "POST" && pathname === "/api/local/knowledge/api/config"
   );
-  if (request.method !== "GET" && request.method !== "HEAD" && !allowsConfigurationWrite) {
+  const isKnowledgeFolderPickerRequest = (
+    request.method === "POST" && pathname === "/api/local/knowledge/api/choose-root"
+  );
+  const allowsKnowledgeMutation = isKnowledgeConfigurationWrite || isKnowledgeFolderPickerRequest;
+  if (request.method !== "GET" && request.method !== "HEAD" && !allowsKnowledgeMutation) {
     return methodNotAllowed(response, ["GET", "HEAD", "POST"]);
   }
   const configured = process.env[DANE_KNOWLEDGE_URL_ENV] ?? "http://127.0.0.1:7823";
@@ -117,7 +120,7 @@ async function proxyKnowledgeLibrary(response, request, url, pathname) {
   const target = new URL(`${suffix}${url.search}`, origin);
   try {
     const init = { method: request.method };
-    if (allowsConfigurationWrite) {
+    if (isKnowledgeConfigurationWrite) {
       init.headers = { "content-type": request.headers["content-type"] || "application/json" };
       init.body = await readBody(
         request,
