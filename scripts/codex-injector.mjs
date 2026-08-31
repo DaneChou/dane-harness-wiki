@@ -3297,7 +3297,6 @@ async function main() {
     if (stopping) return;
     if (firstResults.length > 0) {
       if (shouldOpenFirstTarget) {
-        openedRequestGeneration = Math.max(openedRequestGeneration, firstOpenGeneration);
         activateCodexApp(codexAppPid);
       }
       console.log(JSON.stringify({ injected: firstResults }, null, 2));
