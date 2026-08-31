@@ -1,8 +1,23 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-# Codex Taskboard
+# Dane Harness Wiki
 
-A local-first issue board that runs in a browser and can be embedded in Codex through the standalone CDP launcher or its injection script. The same HTTP API powers the React UI and the `taskctl` CLI used by the bundled Codex Skill.
+A local-first personal knowledge and project workflow workspace. It builds on Codex Taskboard's mature Codex/DSH host integration, while Dane's `ctxbus` provides the cross-Harness evidence and Markdown Wiki core.
+
+## Dane migration status
+
+The first live slice keeps the upstream issue-board experience and adds a **知识库 / Knowledge** view. The view proxies the local `ctxbus knowledge-webui` service through this app, so the same Wiki works in a normal browser, the native Codex panel, and CDP-injected Codex without a second origin or iframe CSP issue.
+
+Start the knowledge library first:
+
+```bash
+cd ../ctxbus
+ctxbus library
+```
+
+Then start this workspace with `npm run codex` (or `npm start`) and choose **知识库**. Set `DANE_KNOWLEDGE_URL` only if the Wiki uses a different local port; the default is `http://127.0.0.1:7823`.
+
+The next migrations are intentionally separate domain layers: `source → idea → spark → claim → project → evidence → knowledge`. Existing upstream `project / issue / comment` remains the project-delivery view during that transition, rather than being relabeled into unrelated knowledge concepts.
 
 ![Codex Taskboard product screenshot](docs/assets/codex-taskboard.png)
 

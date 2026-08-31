@@ -56,6 +56,7 @@ const PROJECT_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const PROJECT_BOARD_DISPLAY_SETTINGS_KEY_PREFIX = "taskboard.project-board-display-settings.v3.";
 const TRUSTED_EMBED_ORIGINS = new Set(["app://-"]);
 const TRUSTED_ORIGINS_ENV = "CODEX_TASKBOARD_TRUSTED_ORIGINS";
+const DANE_KNOWLEDGE_URL_ENV = "DANE_KNOWLEDGE_URL";
 const CODEX_AGENT_ACTOR = {
   type: "agent",
   id: "codex-agent",
@@ -92,6 +93,25 @@ function sendJson(response, status, value, headers = {}) {
 function sendEmpty(response, status, headers = {}) {
   response.writeHead(status, { "cache-control": "no-store", ...headers });
   response.end();
+}
+
+async function proxyKnowledgeLibrary(response, request, url, pathname) {
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return methodNotAllowed(response, ["GET", "HEAD"]);
+  }
+  const configured = process.env[DANE_KNOWLEDGE_URL_ENV] ?? "http://127.0.0.1:7823";
+  let origin;
+  try {
+    origin = new URL(configured);
+  } catch {
+    throw new ApiError(500, "INVALID_KNOWLEDGE_URL", `${DANE_KNOWLEDGE_URL_ENV} must be an absolute URL`);
+  }
+  if (origin.protocol !== "http:" || !isTrustedNetworkHost(origin.hostname)) {
+    throw new ApiError(500, "INVALID_KNOWLEDGE_URL", `${DANE_KNOWLEDGE_URL_ENV} must point to a local HTTP service`);
+  }
+  const suffix = pathname.slice("/api/local/knowledge".length) || "/";
+  const target = new URL(`${suffix}${url.search}`, origin);
+  return sendFetchResponse(response, await fetch(target, { method: request.method }));
 }
 
 function toFetchRequest(request) {
@@ -2494,6 +2514,10 @@ export function createTaskboardServer(options = {}) {
             nodes: input.document.nodes,
           }),
         );
+      }
+
+      if (pathname === "/api/local/knowledge" || pathname.startsWith("/api/local/knowledge/")) {
+        return proxyKnowledgeLibrary(response, request, url, pathname);
       }
 
       const projectSummaryRoute = pathname.match(/^\/api\/local\/projects\/([^/]+)\/summary$/);

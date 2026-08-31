@@ -145,7 +145,7 @@ import { createRevisionPoller, createRevisionWebSocketClient, getRevisionPolling
 
 type ConnectionState = "connecting" | "live" | "reconnecting";
 type Theme = "light" | "dark";
-type BoardView = "readme" | "dashboard" | "issues" | "list" | "gantt";
+type BoardView = "readme" | "dashboard" | "issues" | "list" | "gantt" | "wiki";
 type DetailSourceScroll =
   | { projectId: string; view: "issues"; status: TaskStatus; scrollTop: number; scrollLeft: number }
   | { projectId: string; view: "list"; scrollTop: number };
@@ -323,7 +323,7 @@ function issueReadStorageKey(mode: string, task: Pick<Task, "id" | "projectId">)
 
 function readProjectBoardView(projectId: string): BoardView {
   const view = taskboardStorage.getItem(`${PROJECT_VIEW_KEY_PREFIX}${projectId}`);
-  return view === "readme" || view === "dashboard" || view === "list" || view === "gantt" || view === "issues"
+  return view === "readme" || view === "dashboard" || view === "list" || view === "gantt" || view === "issues" || view === "wiki"
     ? view
     : "issues";
 }
@@ -3569,6 +3569,14 @@ export function App() {
                 {text("项目文档", "Project Docs")}
               </button>
             )}
+            <button
+              className={`view-tab${boardView === "wiki" ? " active" : ""}`}
+              type="button"
+              aria-pressed={boardView === "wiki"}
+              onClick={() => selectBoardView("wiki")}
+            >
+              {text("知识库", "Knowledge")}
+            </button>
           </div>
           {(boardView === "issues" || boardView === "list" || boardView === "gantt") && <div className="toolbar-tools">
             <div className={`search-field${search ? " has-value" : ""}`} title={text("搜索议题 (/)", "Search issues (/)")}>
@@ -3750,6 +3758,14 @@ export function App() {
             onOpenTask={openTaskDetail}
             onError={setActionError}
           />
+        ) : boardView === "wiki" ? (
+          <section className="dane-wiki-view" aria-label={text("Dane 知识库", "Dane knowledge library")}>
+            <iframe
+              className="dane-wiki-frame"
+              title={text("Dane 知识库", "Dane knowledge library")}
+              src={resolveTaskboardUrl("/api/local/knowledge/")}
+            />
+          </section>
         ) : boardView === "dashboard" && (selectedProject || isAllProjects) ? (
           <DashboardView
             key={selectedProjectId}
