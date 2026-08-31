@@ -77,6 +77,13 @@ const taskboardOrigin = `http://127.0.0.1:${resolvePort()}`;
 const taskboardHealthUrl = `${taskboardOrigin}/health`;
 const taskboardBaseUrl = `${taskboardOrigin}/${encodeURIComponent(taskboardInstanceToken)}`;
 const taskboardPageUrl = `${taskboardBaseUrl}/?host=codex`;
+// The Wiki is a local ctxbus service.  Start it with the Codex launcher when
+// the default endpoint is used, but never take ownership of an endpoint the
+// user configured explicitly.
+const defaultKnowledgeLibraryUrl = "http://127.0.0.1:7823";
+const configuredKnowledgeLibraryUrl = process.env.DANE_KNOWLEDGE_URL?.trim() || null;
+const knowledgeLibraryUrl = configuredKnowledgeLibraryUrl || defaultKnowledgeLibraryUrl;
+const manageKnowledgeLibrary = !configuredKnowledgeLibraryUrl;
 const hostBindingName = "__codexTaskboardHostV1";
 const hostRequestMessage = "__codexTaskboardHostRequestV1";
 const hostResponseMessage = "__codexTaskboardHostResponseV1";
@@ -209,6 +216,21 @@ async function isTaskboardReachable() {
   }
 }
 
+async function isKnowledgeLibraryReachable() {
+  try {
+    const response = await fetch(knowledgeLibraryUrl, {
+      signal: AbortSignal.timeout(1_500),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function waitUntilKnowledgeLibraryReachable(timeoutMs) {
+  await waitUntilReachable(knowledgeLibraryUrl, timeoutMs);
+}
+
 async function waitUntilReachable(url, timeoutMs, shouldStop = () => false) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -263,6 +285,16 @@ function startTaskboard({ detached, onCodexAppServerRequest }) {
         });
       },
     );
+  });
+  return child;
+}
+
+function startKnowledgeLibrary({ detached }) {
+  const command = process.env.DANE_KNOWLEDGE_COMMAND?.trim() || "ctxbus";
+  const child = spawn(command, ["library", "--no-open"], {
+    cwd: projectRoot,
+    detached,
+    stdio: detached ? "ignore" : "inherit",
   });
   return child;
 }
@@ -2952,6 +2984,20 @@ async function main() {
       console.error(`Taskboard exited (${signal || code}); it will be restarted automatically.`);
     },
   });
+  const knowledgeSupervisor = manageKnowledgeLibrary
+    ? createTaskboardSupervisor({
+      detached,
+      isReachable: isKnowledgeLibraryReachable,
+      waitUntilReachable: waitUntilKnowledgeLibraryReachable,
+      start: () => startKnowledgeLibrary({ detached }),
+      onProcessError: (error) => {
+        console.error(`Knowledge Library process error: ${error.message}`);
+      },
+      onUnexpectedExit: (code, signal) => {
+        console.error(`Knowledge Library exited (${signal || code}); it will be restarted automatically.`);
+      },
+    })
+    : null;
 
   const publishRuntime = async () => {
     const pending = publishTaskboardRuntime();
@@ -3094,6 +3140,7 @@ async function main() {
       cdpRuntime?.close();
       cdpRuntime = null;
       const supervisorCleanupPromise = supervisor.stop();
+      const knowledgeSupervisorCleanupPromise = knowledgeSupervisor?.stop() ?? Promise.resolve();
       const runtimeCleanupPromise = (async () => {
         const pendingRuntimePublish = runtimePublishPromise;
         if (pendingRuntimePublish) {
@@ -3145,7 +3192,11 @@ async function main() {
           ]);
         }
       }
-      await Promise.all([supervisorCleanupPromise, runtimeCleanupPromise]);
+      await Promise.all([
+        supervisorCleanupPromise,
+        knowledgeSupervisorCleanupPromise,
+        runtimeCleanupPromise,
+      ]);
     })();
     return cleanupPromise;
   };
@@ -3169,6 +3220,13 @@ async function main() {
     if (stopping) return;
 
     await supervisor.ensure({ force: true });
+    if (knowledgeSupervisor) {
+      try {
+        await knowledgeSupervisor.ensure({ force: true });
+      } catch (error) {
+        console.error(`Knowledge Library unavailable: ${error.message}`);
+      }
+    }
     if (stopping) return;
     await publishRuntime();
     if (stopping) return;
@@ -3254,6 +3312,13 @@ async function main() {
         if (service.restarted && !stopping) await publishRuntime();
       } catch (error) {
         console.error(`Waiting for Taskboard service: ${error.message}`);
+      }
+      if (knowledgeSupervisor) {
+        try {
+          await knowledgeSupervisor.ensure();
+        } catch (error) {
+          console.error(`Waiting for Knowledge Library service: ${error.message}`);
+        }
       }
       if (stopping) break;
       for (const connection of injectedTargets.values()) {
