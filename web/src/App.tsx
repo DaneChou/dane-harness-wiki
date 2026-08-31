@@ -311,16 +311,8 @@ const PROJECT_CODEX_IDENTITIES_KEY = "taskboard.projectCodexIdentities.v1";
 const PROJECT_AUTOMATIONS_KEY = "taskboard.projectAutomations.v1";
 const ISSUE_READ_KEY_PREFIX = "taskboard.issue-read.v1";
 const FIRST_USE_COMPLETE_KEY = "taskboard.first-use-complete.v1";
-function readIssueActivityKeys(storageKey: string): Record<string, string> {
-  try {
-    const value = JSON.parse(taskboardStorage.getItem(storageKey) ?? "{}");
-    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => (
-      typeof entry[0] === "string" && typeof entry[1] === "string"
-    )));
-  } catch {
-    return {};
-  }
+function issueReadStorageKey(mode: string, task: Pick<Task, "id" | "projectId">) {
+  return `${ISSUE_READ_KEY_PREFIX}:${mode}:${task.projectId}:${task.id}`;
 }
 
 function readProjectBoardView(projectId: string): BoardView {
@@ -1262,9 +1254,7 @@ export function App() {
     }
     setContextMenu({ taskId: task.id, ...position });
   }
-  const issueReadStorageKey = selectedProjectId
-    ? `${ISSUE_READ_KEY_PREFIX}:${taskboardMetadata?.mode ?? "local"}:${selectedProjectId}`
-    : null;
+  const issueReadMode = taskboardMetadata?.mode ?? "local";
 
   useEffect(() => {
     let mountFrame = 0;
@@ -1288,23 +1278,20 @@ export function App() {
     };
   }, [otherTasksOpen]);
 
-  useEffect(() => {
-    setReadActivityKeys(issueReadStorageKey ? readIssueActivityKeys(issueReadStorageKey) : {});
-  }, [issueReadStorageKey]);
-
   const markTaskRead = useCallback((task: Task) => {
-    if (!issueReadStorageKey || !task.activityKey) return;
+    if (!task.activityKey) return;
+    const storageKey = issueReadStorageKey(issueReadMode, task);
     setReadActivityKeys((current) => {
-      if (current[task.id] === task.activityKey) return current;
-      const next = { ...current, [task.id]: task.activityKey };
+      if (current[storageKey] === task.activityKey) return current;
+      const next = { ...current, [storageKey]: task.activityKey };
       try {
-        taskboardStorage.setItem(issueReadStorageKey, JSON.stringify(next));
+        taskboardStorage.setItem(storageKey, task.activityKey);
       } catch {
         // Read state remains valid for this page even when browser persistence is unavailable.
       }
       return next;
     });
-  }, [issueReadStorageKey]);
+  }, [issueReadMode]);
 
   useEffect(() => {
     if (detailTask) markTaskRead(detailTask);
@@ -2349,8 +2336,10 @@ export function App() {
   }, [otherTaskTabsKey, otherTasksAvailable, otherTasksTab]);
 
   const taskPresentations = useMemo(() => Object.fromEntries(tasks.map((task) => {
+    const storageKey = issueReadStorageKey(issueReadMode, task);
+    const readActivityKey = readActivityKeys[storageKey] ?? taskboardStorage.getItem(storageKey);
     const unread = (task.status === "in_review" || task.status === "blocked")
-      && readActivityKeys[task.id] !== task.activityKey;
+      && readActivityKey !== task.activityKey;
     const runningNativeThreadId = hostContext?.threadRunning
       ? hostContext.threadId ?? null
       : null;
@@ -2369,6 +2358,7 @@ export function App() {
     hostContext?.threadId,
     hostContext?.threadRunning,
     hostContext?.threadTodoProgress,
+    issueReadMode,
     readActivityKeys,
     tasks,
   ]);
