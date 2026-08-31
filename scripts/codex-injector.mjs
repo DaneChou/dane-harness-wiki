@@ -928,9 +928,13 @@ function findFrameByName(frameTree, frameName) {
   return null;
 }
 
-async function verifiedTaskboardDocument(frameCapability) {
+async function verifiedTaskboardDocument(frameCapability, frameUrl = taskboardPageUrl) {
+  const requestedUrl = new URL(frameUrl);
+  if (requestedUrl.origin !== taskboardOrigin || requestedUrl.pathname !== new URL(taskboardPageUrl).pathname) {
+    throw new Error("Taskboard frame URL is outside the current local instance");
+  }
   const challenge = randomBytes(32).toString("hex");
-  const response = await fetch(taskboardPageUrl, {
+  const response = await fetch(requestedUrl, {
     cache: "no-store",
     headers: {
       origin: "app://-",
@@ -948,12 +952,12 @@ async function verifiedTaskboardDocument(frameCapability) {
   if (!html.includes(head)) throw new Error("Taskboard document has no head element");
   return html.replace(
     head,
-    `${head}<base href=${JSON.stringify(taskboardPageUrl)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};</script>`,
+    `${head}<base href=${JSON.stringify(requestedUrl.href)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};</script>`,
   );
 }
 
-async function loadTaskboardFrameViaCdp(cdp, frameName, frameCapability) {
-  const html = await verifiedTaskboardDocument(frameCapability);
+async function loadTaskboardFrameViaCdp(cdp, frameName, frameCapability, frameUrl) {
+  const html = await verifiedTaskboardDocument(frameCapability, frameUrl);
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const { frameTree } = await cdp.send("Page.getFrameTree");
@@ -2308,6 +2312,7 @@ function installTaskboardHostBinding(
         cdp,
         request.frameName,
         request.frameCapability,
+        request.frameUrl,
       ),
       openExternal: openExternalUrl,
       openAttachment,

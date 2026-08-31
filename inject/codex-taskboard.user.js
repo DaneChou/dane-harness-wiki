@@ -1570,7 +1570,7 @@
     nextFrame.addEventListener("load", challengeFrameDocument);
     frame = nextFrame;
     page.appendChild(nextFrame);
-    return { frameName, frameCapability };
+    return { frameName, frameCapability, frameUrl: taskboardUrl.href };
   }
 
   function reloadFrame() {
@@ -1650,8 +1650,8 @@
     return requestHost("ensure");
   }
 
-  function requestHostLoadFrame({ frameName, frameCapability: capability }) {
-    return requestHost("load-frame", { frameName, frameCapability: capability });
+  function requestHostLoadFrame({ frameName, frameCapability: capability, frameUrl }) {
+    return requestHost("load-frame", { frameName, frameCapability: capability, frameUrl });
   }
 
   function frameMatchesTaskboardUrl(taskboardUrl) {
