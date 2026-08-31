@@ -28,7 +28,10 @@ async function run(argv, fetchImplementation, overrides = {}) {
     fetch: fetchImplementation,
     stdout: stdout.stream,
     stderr: stderr.stream,
-    env: { CODEX_THREAD_ID: "thread-current" },
+    env: {
+      CODEX_THREAD_ID: "thread-current",
+      CODEX_TASKBOARD_URL: "http://127.0.0.1:47823",
+    },
     ...overrides,
   });
   return {
@@ -334,6 +337,54 @@ test("issue update sends an explicit optimistic concurrency version", async () =
     threadId: "thread-current",
     version: 7,
   });
+});
+
+test("issue update sends an exact Codex execution target", async () => {
+  let requestBody;
+  const workspacePath = path.resolve("/work/codex-taskboard");
+  const result = await run(
+    [
+      "issue", "update", "TASK-1", "--if-version", "7",
+      "--execution-codex-project-id", "codex-project-1",
+      "--execution-codex-project-kind", "local",
+      "--execution-codex-host-id", "local",
+      "--execution-workspace-path", workspacePath,
+    ],
+    async (_url, init) => {
+      requestBody = JSON.parse(init.body);
+      return response({ task: { id: "TASK-1", ...requestBody, version: 8 } });
+    },
+  );
+
+  assert.equal(result.exitCode, 0);
+  assert.deepEqual(requestBody, {
+    executionTarget: {
+      codexProjectId: "codex-project-1",
+      codexProjectKind: "local",
+      codexHostId: "local",
+      workspacePath,
+    },
+    threadId: "thread-current",
+    version: 7,
+  });
+});
+
+test("issue update rejects a partial Codex execution target", async () => {
+  let called = false;
+  const result = await run(
+    [
+      "issue", "update", "TASK-1",
+      "--execution-codex-project-id", "codex-project-1",
+    ],
+    async () => {
+      called = true;
+      return response({});
+    },
+  );
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(called, false);
+  assert.match(result.stderr.error.message, /requires project id, kind, host id, and workspace path/);
 });
 
 test("issue update binds one worktree context", async () => {
