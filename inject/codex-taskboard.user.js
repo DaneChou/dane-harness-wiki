@@ -1331,6 +1331,20 @@
     frameReady = false;
     frameChallenge = crypto.randomUUID();
     if (active) showLoading();
+    // The Wiki is a self-contained local document.  Unlike Taskboard it does
+    // not require the host-context bridge, and some Codex builds do not relay
+    // postMessage from an opaque sandboxed frame.  Treat its document load as
+    // ready so an otherwise healthy Wiki is never hidden behind that handshake.
+    if (activeView === "wiki") {
+      frameReady = true;
+      frameReadyWaiters.forEach(({ resolve, timer }) => {
+        window.clearTimeout(timer);
+        resolve();
+      });
+      frameReadyWaiters.clear();
+      if (active) showFrame();
+      return;
+    }
     postFrameChallenge();
   }
 
